@@ -9,123 +9,137 @@ import (
 	"github.com/nm1996/beacon/internal/registry"
 )
 
+// ServiceDiscoveryHandler serves the registry API endpoints. Every method is
+// an http.HandlerFunc; NewRouter decides which path and method reach each one.
 type ServiceDiscoveryHandler struct {
 	registry *registry.Registry
 }
 
+// NewServiceDiscoveryHandler returns a handler backed by the given registry.
 func NewServiceDiscoveryHandler(registry *registry.Registry) *ServiceDiscoveryHandler {
 	return &ServiceDiscoveryHandler{
 		registry: registry,
 	}
 }
 
-func (h *ServiceDiscoveryHandler) Register(w http.ResponseWriter, r *http.Request) {
+// Register adds a new service instance and responds 201 with its ID.
+// Malformed JSON or invalid service fields get 400.
+func (handler *ServiceDiscoveryHandler) Register(writer http.ResponseWriter, request *http.Request) {
 	var input RegisterRequest
 
-	err := mapRequest(&input, r)
+	err := mapRequest(&input, request)
 	if err != nil {
-		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		http.Error(writer, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
 
 	service := MapRegisterRequestToService(input)
 
-	serviceID, err := h.registry.Register(service)
+	serviceID, err := handler.registry.Register(service)
 	if err != nil {
-		writeRegistryError(w, err)
+		writeRegistryError(writer, err)
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, RegisterResponse{
+	writeJSON(writer, http.StatusCreated, RegisterResponse{
 		ID: serviceID,
 	})
 }
 
-func (h *ServiceDiscoveryHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
+// Heartbeat marks an instance as still alive and responds 204.
+// A missing ID gets 400 and an unknown ID gets 404.
+func (handler *ServiceDiscoveryHandler) Heartbeat(writer http.ResponseWriter, request *http.Request) {
 	var input HeartbeatRequest
 
-	err := mapRequest(&input, r)
+	err := mapRequest(&input, request)
 	if err != nil {
-		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		http.Error(writer, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
 
 	if input.ID == "" {
-		http.Error(w, "id is required", http.StatusBadRequest)
+		http.Error(writer, "id is required", http.StatusBadRequest)
 		return
 	}
 
-	if err := h.registry.Heartbeat(input.ID); err != nil {
-		writeRegistryError(w, err)
+	if err := handler.registry.Heartbeat(input.ID); err != nil {
+		writeRegistryError(writer, err)
 		return
 	}
 
-	writeStatus(w, http.StatusNoContent)
+	writeStatus(writer, http.StatusNoContent)
 }
 
-func (h *ServiceDiscoveryHandler) GetServices(w http.ResponseWriter, r *http.Request) {
-	name := r.URL.Query().Get("name")
+// GetServices lists registered instances as a JSON array, filtered by the
+// optional "name" query parameter. An empty registry gives an empty array.
+func (handler *ServiceDiscoveryHandler) GetServices(writer http.ResponseWriter, request *http.Request) {
+	name := request.URL.Query().Get("name")
 
-	services := h.registry.GetServices(name)
+	services := handler.registry.GetServices(name)
 	result := make([]Service, 0, len(services))
 
 	for _, service := range services {
 		result = append(result, MapServiceToResponse(service))
 	}
 
-	writeJSON(w, http.StatusOK, result)
+	writeJSON(writer, http.StatusOK, result)
 }
 
-func (h *ServiceDiscoveryHandler) Unregister(w http.ResponseWriter, r *http.Request) {
+// Unregister removes an instance and responds 204.
+// A missing ID gets 400 and an unknown ID gets 404.
+func (handler *ServiceDiscoveryHandler) Unregister(writer http.ResponseWriter, request *http.Request) {
 	var input UnregisterRequest
 
-	err := mapRequest(&input, r)
+	err := mapRequest(&input, request)
 	if err != nil {
-		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		http.Error(writer, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
 
 	if input.ID == "" {
-		http.Error(w, "id is required", http.StatusBadRequest)
+		http.Error(writer, "id is required", http.StatusBadRequest)
 		return
 	}
 
-	if err := h.registry.Unregister(input.ID); err != nil {
-		writeRegistryError(w, err)
+	if err := handler.registry.Unregister(input.ID); err != nil {
+		writeRegistryError(writer, err)
 		return
 	}
 
-	writeStatus(w, http.StatusNoContent)
+	writeStatus(writer, http.StatusNoContent)
 }
 
 // writeRegistryError maps a registry error to an HTTP error response.
 // Unexpected errors are logged and reported without internal details.
-func writeRegistryError(w http.ResponseWriter, err error) {
+func writeRegistryError(writer http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, registry.ErrInvalidService):
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(writer, err.Error(), http.StatusBadRequest)
 	case errors.Is(err, registry.ErrServiceNotFound):
-		http.Error(w, "Service not found", http.StatusNotFound)
+		http.Error(writer, "Service not found", http.StatusNotFound)
 	default:
 		log.Printf("registry operation failed: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		http.Error(writer, "Internal server error", http.StatusInternalServerError)
 	}
 }
 
-func writeJSON(w http.ResponseWriter, status int, data any) {
-	w.Header().Set("Content-Type", "application/json")
-	writeStatus(w, status)
+// writeJSON sends data as a JSON body with the given status code.
+func writeJSON(writer http.ResponseWriter, status int, data any) {
+	writer.Header().Set("Content-Type", "application/json")
+	writeStatus(writer, status)
 
 	// The status line is already sent, so an encoding failure can only be logged.
-	if err := json.NewEncoder(w).Encode(data); err != nil {
+	if err := json.NewEncoder(writer).Encode(data); err != nil {
 		log.Printf("write JSON response: %v", err)
 	}
 }
 
-func writeStatus(w http.ResponseWriter, status int) {
-	w.WriteHeader(status)
+// writeStatus sends a response with no body.
+func writeStatus(writer http.ResponseWriter, status int) {
+	writer.WriteHeader(status)
 }
 
-func mapRequest[T any](dto *T, r *http.Request) error {
-	return json.NewDecoder(r.Body).Decode(dto)
+// mapRequest decodes the JSON request body into dto.
+func mapRequest[T any](dto *T, request *http.Request) error {
+	return json.NewDecoder(request.Body).Decode(dto)
 }

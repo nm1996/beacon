@@ -19,8 +19,11 @@ type Settings struct {
 
 // Components are the connected parts of a Beacon server.
 type Components struct {
+	// Registry holds the registered services. It is exposed so callers can
+	// run maintenance such as cleanup against the same state the server uses.
 	Registry *registry.Registry
-	Server   *http.Server
+	// Server serves the HTTP API. It is built but not started.
+	Server *http.Server
 }
 
 // New builds the registry and the HTTP server that serves it.

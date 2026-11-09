@@ -1,3 +1,8 @@
+// Package registry keeps track of running service instances in memory.
+//
+// It knows nothing about HTTP; transports call into it and translate its
+// errors. All state is lost when the process stops, so services are expected
+// to register again after a restart.
 package registry
 
 import (
@@ -7,6 +12,8 @@ import (
 	"github.com/google/uuid"
 )
 
+// ServiceDiscoveryRegistrator lists the operations a service registry offers.
+// Registry is the only implementation today.
 type ServiceDiscoveryRegistrator interface {
 	Register(service *Service) (string, error)
 	Heartbeat(serviceID string) error
@@ -15,6 +22,9 @@ type ServiceDiscoveryRegistrator interface {
 	Cleanup(timeout time.Duration) int
 }
 
+// Registry is a concurrency-safe, in-memory store of service instances keyed
+// by their generated ID. Use NewRegistry to create one; the zero value is not
+// ready to use.
 type Registry struct {
 	mu       sync.RWMutex
 	services map[string]*Service
@@ -22,6 +32,7 @@ type Registry struct {
 
 var _ ServiceDiscoveryRegistrator = (*Registry)(nil)
 
+// NewRegistry returns an empty registry.
 func NewRegistry() *Registry {
 	return &Registry{
 		services: make(map[string]*Service),
@@ -30,13 +41,13 @@ func NewRegistry() *Registry {
 
 // Register validates service and stores a copy under a newly generated ID.
 // It returns an error wrapping ErrInvalidService when validation fails.
-func (r *Registry) Register(service *Service) (string, error) {
+func (registry *Registry) Register(service *Service) (string, error) {
 	if err := service.validate(); err != nil {
 		return "", err
 	}
 
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
 
 	now := time.Now()
 
@@ -45,18 +56,18 @@ func (r *Registry) Register(service *Service) (string, error) {
 	serviceCopy.RegisteredAt = now
 	serviceCopy.LastHeartbeat = now
 
-	r.services[serviceCopy.ID] = &serviceCopy
+	registry.services[serviceCopy.ID] = &serviceCopy
 
 	return serviceCopy.ID, nil
 }
 
 // Heartbeat refreshes the last heartbeat time of the service with the given ID.
 // It returns ErrServiceNotFound when no such service is registered.
-func (r *Registry) Heartbeat(serviceID string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+func (registry *Registry) Heartbeat(serviceID string) error {
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
 
-	service, exists := r.services[serviceID]
+	service, exists := registry.services[serviceID]
 	if !exists {
 		return ErrServiceNotFound
 	}
@@ -66,13 +77,16 @@ func (r *Registry) Heartbeat(serviceID string) error {
 	return nil
 }
 
-func (r *Registry) GetServices(name string) []*Service {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+// GetServices returns the instances registered under name, or every instance
+// when name is empty. The result holds copies, so callers may change them
+// freely, and its order is not defined.
+func (registry *Registry) GetServices(name string) []*Service {
+	registry.mu.RLock()
+	defer registry.mu.RUnlock()
 
-	result := make([]*Service, 0, len(r.services))
+	result := make([]*Service, 0, len(registry.services))
 
-	for _, service := range r.services {
+	for _, service := range registry.services {
 		if name != "" && service.Name != name {
 			continue
 		}
@@ -86,29 +100,31 @@ func (r *Registry) GetServices(name string) []*Service {
 
 // Unregister removes the service with the given ID.
 // It returns ErrServiceNotFound when no such service is registered.
-func (r *Registry) Unregister(serviceID string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+func (registry *Registry) Unregister(serviceID string) error {
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
 
-	if _, exists := r.services[serviceID]; !exists {
+	if _, exists := registry.services[serviceID]; !exists {
 		return ErrServiceNotFound
 	}
 
-	delete(r.services, serviceID)
+	delete(registry.services, serviceID)
 
 	return nil
 }
 
-func (r *Registry) Cleanup(timeout time.Duration) int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+// Cleanup removes every instance whose last heartbeat is older than timeout
+// and reports how many were removed.
+func (registry *Registry) Cleanup(timeout time.Duration) int {
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
 
 	now := time.Now()
 	count := 0
 
-	for id, service := range r.services {
+	for id, service := range registry.services {
 		if now.Sub(service.LastHeartbeat) > timeout {
-			delete(r.services, id)
+			delete(registry.services, id)
 			count++
 		}
 	}
