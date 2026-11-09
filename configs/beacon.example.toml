@@ -1,0 +1,37 @@
+# Beacon example configuration
+#
+# Copy this file to a location of your choice and pass it to Beacon with:
+#   beacon --config /path/to/beacon.toml
+#
+# Keep this file synchronized with the typed configuration in internal/config.
+# Do not put passwords, tokens, or other secrets in this file.
+
+[server]
+# Address on which the HTTP server listens.
+host = "0.0.0.0"
+
+# TCP port for the HTTP API.
+port = 8080
+
+# Maximum time allowed to read an incoming request.
+read_timeout = "5s"
+
+# Maximum time allowed to write a response.
+write_timeout = "10s"
+
+# Maximum time to keep an idle HTTP connection open.
+idle_timeout = "60s"
+
+[registry]
+# A service instance is considered stale after this period without a heartbeat.
+service_ttl = "30s"
+
+# How often Beacon checks for stale service instances.
+cleanup_interval = "5s"
+
+[logging]
+# Supported levels should be defined and validated by the application.
+level = "info"
+
+# Initial supported formats: "text" or "json".
+format = "json"
