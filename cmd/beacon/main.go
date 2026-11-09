@@ -20,6 +20,9 @@ import (
 // For now these are fixed; they will move to configuration once it exists.
 const (
 	listenAddr      = ":8080"
+	readTimeout     = 5 * time.Second
+	writeTimeout    = 10 * time.Second
+	idleTimeout     = 60 * time.Second
 	shutdownTimeout = 10 * time.Second
 
 	// serviceTTL is how long an instance may go without a heartbeat before
@@ -47,7 +50,12 @@ func run(logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	components := bootstrap.New(bootstrap.Settings{Addr: listenAddr}, logger)
+	components := bootstrap.New(bootstrap.Settings{
+		Addr:         listenAddr,
+		ReadTimeout:  readTimeout,
+		WriteTimeout: writeTimeout,
+		IdleTimeout:  idleTimeout,
+	}, logger)
 	server := components.Server
 
 	workerCtx, stopWorkers := context.WithCancel(ctx)

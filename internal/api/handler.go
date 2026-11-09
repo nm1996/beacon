@@ -9,6 +9,10 @@ import (
 	"github.com/nm1996/beacon/internal/registry"
 )
 
+// maxRequestBodyBytes caps request bodies. Real requests are well under 1 KiB;
+// the limit stops a client from making the server buffer arbitrary input.
+const maxRequestBodyBytes = 64 << 10
+
 // ServiceStore is the part of the registry the API needs. It is declared
 // here, where it is used, so the handlers depend only on these four methods
 // and tests can swap in a fake. *registry.Registry satisfies it.
@@ -40,9 +44,7 @@ func NewHandler(store ServiceStore, logger *slog.Logger) *Handler {
 func (handler *Handler) Register(writer http.ResponseWriter, request *http.Request) {
 	var input RegisterRequest
 
-	err := mapRequest(&input, request)
-	if err != nil {
-		http.Error(writer, "Invalid JSON", http.StatusBadRequest)
+	if !decodeRequest(writer, request, &input) {
 		return
 	}
 
@@ -71,9 +73,7 @@ func (handler *Handler) Register(writer http.ResponseWriter, request *http.Reque
 func (handler *Handler) Heartbeat(writer http.ResponseWriter, request *http.Request) {
 	var input HeartbeatRequest
 
-	err := mapRequest(&input, request)
-	if err != nil {
-		http.Error(writer, "Invalid JSON", http.StatusBadRequest)
+	if !decodeRequest(writer, request, &input) {
 		return
 	}
 
@@ -110,9 +110,7 @@ func (handler *Handler) GetServices(writer http.ResponseWriter, request *http.Re
 func (handler *Handler) Unregister(writer http.ResponseWriter, request *http.Request) {
 	var input UnregisterRequest
 
-	err := mapRequest(&input, request)
-	if err != nil {
-		http.Error(writer, "Invalid JSON", http.StatusBadRequest)
+	if !decodeRequest(writer, request, &input) {
 		return
 	}
 
@@ -129,6 +127,12 @@ func (handler *Handler) Unregister(writer http.ResponseWriter, request *http.Req
 	handler.logger.Info("service unregistered", slog.String("id", input.ID))
 
 	writeStatus(writer, http.StatusNoContent)
+}
+
+// Health reports that the process is up and serving requests. It always
+// responds 200 with {"status":"ok"} and does not touch the registry.
+func (handler *Handler) Health(writer http.ResponseWriter, _ *http.Request) {
+	handler.writeJSON(writer, http.StatusOK, HealthResponse{Status: "ok"})
 }
 
 // writeRegistryError maps a registry error to an HTTP error response.
@@ -161,7 +165,24 @@ func writeStatus(writer http.ResponseWriter, status int) {
 	writer.WriteHeader(status)
 }
 
-// mapRequest decodes the JSON request body into dto.
-func mapRequest[T any](dto *T, request *http.Request) error {
-	return json.NewDecoder(request.Body).Decode(dto)
+// decodeRequest decodes the JSON request body into dto. If that fails it
+// writes the error response itself and returns false: 413 when the body is
+// larger than maxRequestBodyBytes, 400 for anything else.
+func decodeRequest[T any](writer http.ResponseWriter, request *http.Request, dto *T) bool {
+	body := http.MaxBytesReader(writer, request.Body, maxRequestBodyBytes)
+
+	err := json.NewDecoder(body).Decode(dto)
+	if err == nil {
+		return true
+	}
+
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		http.Error(writer, "Request body too large", http.StatusRequestEntityTooLarge)
+		return false
+	}
+
+	http.Error(writer, "Invalid JSON", http.StatusBadRequest)
+
+	return false
 }
