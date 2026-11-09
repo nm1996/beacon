@@ -3,7 +3,7 @@ package registry
 import (
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"time"
 )
 
@@ -30,12 +30,12 @@ func (config CleanupConfig) validate() error {
 }
 
 // RunCleanup removes stale instances every config.Interval until ctx is
-// cancelled.
+// cancelled, and logs how many it removed each time it removes any.
 //
 // It blocks, so callers run it in their own goroutine and stop it by
 // cancelling ctx. It returns nil after cancellation, or an error straight
 // away if config is invalid.
-func (registry *Registry) RunCleanup(ctx context.Context, config CleanupConfig) error {
+func (registry *Registry) RunCleanup(ctx context.Context, config CleanupConfig, logger *slog.Logger) error {
 	if err := config.validate(); err != nil {
 		return err
 	}
@@ -49,7 +49,7 @@ func (registry *Registry) RunCleanup(ctx context.Context, config CleanupConfig) 
 			return nil
 		case <-ticker.C:
 			if removed := registry.Cleanup(config.TTL); removed > 0 {
-				log.Printf("removed %d stale service instance(s)", removed)
+				logger.Info("removed stale service instances", slog.Int("count", removed))
 			}
 		}
 	}

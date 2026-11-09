@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,7 +11,7 @@ import (
 )
 
 func TestNewUsesConfiguredAddress(t *testing.T) {
-	components := New(Settings{Addr: ":9090"})
+	components := New(Settings{Addr: ":9090"}, slog.New(slog.DiscardHandler))
 
 	if components.Server.Addr != ":9090" {
 		t.Fatalf("expected server address %q, got %q", ":9090", components.Server.Addr)
@@ -18,7 +19,7 @@ func TestNewUsesConfiguredAddress(t *testing.T) {
 }
 
 func TestNewConnectsServerToRegistry(t *testing.T) {
-	components := New(Settings{Addr: ":0"})
+	components := New(Settings{Addr: ":0"}, slog.New(slog.DiscardHandler))
 
 	_, err := components.Registry.Register(&registry.Service{
 		Name:    "orders",

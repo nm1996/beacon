@@ -5,6 +5,7 @@
 package bootstrap
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/nm1996/beacon/internal/api"
@@ -26,15 +27,17 @@ type Components struct {
 	Server *http.Server
 }
 
-// New builds the registry and the HTTP server that serves it.
-func New(settings Settings) *Components {
+// New builds the registry and the HTTP server that serves it. Both the API
+// and the server's own internal errors are reported to logger.
+func New(settings Settings, logger *slog.Logger) *Components {
 	serviceRegistry := registry.New()
 
 	return &Components{
 		Registry: serviceRegistry,
 		Server: &http.Server{
-			Addr:    settings.Addr,
-			Handler: api.NewRouter(serviceRegistry),
+			Addr:     settings.Addr,
+			Handler:  api.NewRouter(serviceRegistry, logger),
+			ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelError),
 		},
 	}
 }

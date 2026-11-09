@@ -3,7 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/nm1996/beacon/internal/registry"
@@ -22,13 +22,16 @@ type ServiceStore interface {
 // Handler serves the registry API endpoints. Every method is an
 // http.HandlerFunc; NewRouter decides which path and method reach each one.
 type Handler struct {
-	store ServiceStore
+	store  ServiceStore
+	logger *slog.Logger
 }
 
-// NewHandler returns a handler that keeps services in store.
-func NewHandler(store ServiceStore) *Handler {
+// NewHandler returns a handler that keeps services in store and reports
+// registrations and unexpected failures to logger.
+func NewHandler(store ServiceStore, logger *slog.Logger) *Handler {
 	return &Handler{
-		store: store,
+		store:  store,
+		logger: logger,
 	}
 }
 
@@ -47,11 +50,18 @@ func (handler *Handler) Register(writer http.ResponseWriter, request *http.Reque
 
 	serviceID, err := handler.store.Register(service)
 	if err != nil {
-		writeRegistryError(writer, err)
+		handler.writeRegistryError(writer, err)
 		return
 	}
 
-	writeJSON(writer, http.StatusCreated, RegisterResponse{
+	handler.logger.Info("service registered",
+		slog.String("id", serviceID),
+		slog.String("name", service.Name),
+		slog.String("address", service.Address),
+		slog.Int("port", service.Port),
+	)
+
+	handler.writeJSON(writer, http.StatusCreated, RegisterResponse{
 		ID: serviceID,
 	})
 }
@@ -73,7 +83,7 @@ func (handler *Handler) Heartbeat(writer http.ResponseWriter, request *http.Requ
 	}
 
 	if err := handler.store.Heartbeat(input.ID); err != nil {
-		writeRegistryError(writer, err)
+		handler.writeRegistryError(writer, err)
 		return
 	}
 
@@ -92,7 +102,7 @@ func (handler *Handler) GetServices(writer http.ResponseWriter, request *http.Re
 		result = append(result, mapServiceResponse(service))
 	}
 
-	writeJSON(writer, http.StatusOK, result)
+	handler.writeJSON(writer, http.StatusOK, result)
 }
 
 // Unregister removes an instance and responds 204.
@@ -112,35 +122,37 @@ func (handler *Handler) Unregister(writer http.ResponseWriter, request *http.Req
 	}
 
 	if err := handler.store.Unregister(input.ID); err != nil {
-		writeRegistryError(writer, err)
+		handler.writeRegistryError(writer, err)
 		return
 	}
+
+	handler.logger.Info("service unregistered", slog.String("id", input.ID))
 
 	writeStatus(writer, http.StatusNoContent)
 }
 
 // writeRegistryError maps a registry error to an HTTP error response.
 // Unexpected errors are logged and reported without internal details.
-func writeRegistryError(writer http.ResponseWriter, err error) {
+func (handler *Handler) writeRegistryError(writer http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, registry.ErrInvalidService):
 		http.Error(writer, err.Error(), http.StatusBadRequest)
 	case errors.Is(err, registry.ErrServiceNotFound):
 		http.Error(writer, "Service not found", http.StatusNotFound)
 	default:
-		log.Printf("registry operation failed: %v", err)
+		handler.logger.Error("registry operation failed", slog.Any("error", err))
 		http.Error(writer, "Internal server error", http.StatusInternalServerError)
 	}
 }
 
 // writeJSON sends data as a JSON body with the given status code.
-func writeJSON(writer http.ResponseWriter, status int, data any) {
+func (handler *Handler) writeJSON(writer http.ResponseWriter, status int, data any) {
 	writer.Header().Set("Content-Type", "application/json")
 	writeStatus(writer, status)
 
 	// The status line is already sent, so an encoding failure can only be logged.
 	if err := json.NewEncoder(writer).Encode(data); err != nil {
-		log.Printf("write JSON response: %v", err)
+		handler.logger.Error("write JSON response", slog.Any("error", err))
 	}
 }
 
