@@ -4,11 +4,13 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"sync"
 	"syscall"
 	"time"
@@ -32,8 +34,17 @@ const (
 )
 
 // main logs as JSON to standard output and exits with a non-zero status if
-// the server fails to start or stop.
+// the server fails to start or stop. With --version it prints the build
+// version and exits instead.
 func main() {
+	showVersion := flag.Bool("version", false, "print the version and exit")
+	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(buildVersion())
+		return
+	}
+
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
 	if err := run(logger); err != nil {
@@ -76,7 +87,10 @@ func run(logger *slog.Logger) error {
 
 	serveErr := make(chan error, 1)
 	go func() {
-		logger.Info("beacon listening", slog.String("addr", server.Addr))
+		logger.Info("beacon listening",
+			slog.String("addr", server.Addr),
+			slog.String("version", buildVersion()),
+		)
 		serveErr <- server.ListenAndServe()
 	}()
 
@@ -99,4 +113,17 @@ func run(logger *slog.Logger) error {
 	}
 
 	return nil
+}
+
+// buildVersion returns the version the Go toolchain stamped into the binary:
+// a release tag such as v0.1.0, or a pseudo-version built from the git
+// commit. Binaries built without version control information report
+// "(devel)".
+func buildVersion() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok || info.Main.Version == "" {
+		return "unknown"
+	}
+
+	return info.Main.Version
 }
