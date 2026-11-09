@@ -8,10 +8,10 @@ import (
 )
 
 type ServiceDiscoveryRegistrator interface {
-	Register(service *Service) string
-	Heartbeat(serviceID string) bool
+	Register(service *Service) (string, error)
+	Heartbeat(serviceID string) error
 	GetServices(name string) []*Service
-	Unregister(serviceID string) bool
+	Unregister(serviceID string) error
 	Cleanup(timeout time.Duration) int
 }
 
@@ -28,9 +28,11 @@ func NewRegistry() *Registry {
 	}
 }
 
-func (r *Registry) Register(service *Service) string {
-	if service == nil {
-		return ""
+// Register validates service and stores a copy under a newly generated ID.
+// It returns an error wrapping ErrInvalidService when validation fails.
+func (r *Registry) Register(service *Service) (string, error) {
+	if err := service.validate(); err != nil {
+		return "", err
 	}
 
 	r.mu.Lock()
@@ -45,21 +47,23 @@ func (r *Registry) Register(service *Service) string {
 
 	r.services[serviceCopy.ID] = &serviceCopy
 
-	return serviceCopy.ID
+	return serviceCopy.ID, nil
 }
 
-func (r *Registry) Heartbeat(serviceID string) bool {
+// Heartbeat refreshes the last heartbeat time of the service with the given ID.
+// It returns ErrServiceNotFound when no such service is registered.
+func (r *Registry) Heartbeat(serviceID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	service, exists := r.services[serviceID]
 	if !exists {
-		return false
+		return ErrServiceNotFound
 	}
 
 	service.LastHeartbeat = time.Now()
 
-	return true
+	return nil
 }
 
 func (r *Registry) GetServices(name string) []*Service {
@@ -80,17 +84,19 @@ func (r *Registry) GetServices(name string) []*Service {
 	return result
 }
 
-func (r *Registry) Unregister(serviceID string) bool {
+// Unregister removes the service with the given ID.
+// It returns ErrServiceNotFound when no such service is registered.
+func (r *Registry) Unregister(serviceID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if _, exists := r.services[serviceID]; !exists {
-		return false
+		return ErrServiceNotFound
 	}
 
 	delete(r.services, serviceID)
 
-	return true
+	return nil
 }
 
 func (r *Registry) Cleanup(timeout time.Duration) int {

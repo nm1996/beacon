@@ -2,6 +2,7 @@ package http
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 
@@ -29,7 +30,11 @@ func (h *ServiceDiscoveryHandler) Register(w http.ResponseWriter, r *http.Reques
 
 	service := MapRegisterRequestToService(input)
 
-	serviceID := h.registry.Register(service)
+	serviceID, err := h.registry.Register(service)
+	if err != nil {
+		writeRegistryError(w, err)
+		return
+	}
 
 	writeJSON(w, http.StatusCreated, RegisterResponse{
 		ID: serviceID,
@@ -45,8 +50,13 @@ func (h *ServiceDiscoveryHandler) Heartbeat(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if !h.registry.Heartbeat(input.ID) {
-		http.Error(w, "Service not found", http.StatusNotFound)
+	if input.ID == "" {
+		http.Error(w, "id is required", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.registry.Heartbeat(input.ID); err != nil {
+		writeRegistryError(w, err)
 		return
 	}
 
@@ -75,13 +85,31 @@ func (h *ServiceDiscoveryHandler) Unregister(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if !h.registry.Unregister(input.ID) {
-		http.Error(w, "Service not found", http.StatusNotFound)
+	if input.ID == "" {
+		http.Error(w, "id is required", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.registry.Unregister(input.ID); err != nil {
+		writeRegistryError(w, err)
 		return
 	}
 
 	writeStatus(w, http.StatusNoContent)
+}
 
+// writeRegistryError maps a registry error to an HTTP error response.
+// Unexpected errors are logged and reported without internal details.
+func writeRegistryError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, registry.ErrInvalidService):
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	case errors.Is(err, registry.ErrServiceNotFound):
+		http.Error(w, "Service not found", http.StatusNotFound)
+	default:
+		log.Printf("registry operation failed: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {
