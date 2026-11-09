@@ -5,7 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -28,10 +28,14 @@ const (
 	cleanupInterval = 5 * time.Second
 )
 
-// main exits with a non-zero status if the server fails to start or stop.
+// main logs as JSON to standard output and exits with a non-zero status if
+// the server fails to start or stop.
 func main() {
-	if err := run(); err != nil {
-		log.Fatal(err)
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+
+	if err := run(logger); err != nil {
+		logger.Error("beacon stopped with an error", slog.Any("error", err))
+		os.Exit(1)
 	}
 }
 
@@ -39,11 +43,11 @@ func main() {
 // server fails or the process gets SIGINT or SIGTERM. On a signal it gives
 // in-flight requests up to shutdownTimeout to finish. The cleanup worker is
 // always stopped and waited for before run returns.
-func run() error {
+func run(logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	components := bootstrap.New(bootstrap.Settings{Addr: listenAddr})
+	components := bootstrap.New(bootstrap.Settings{Addr: listenAddr}, logger)
 	server := components.Server
 
 	workerCtx, stopWorkers := context.WithCancel(ctx)
@@ -57,14 +61,14 @@ func run() error {
 		if err := components.Registry.RunCleanup(workerCtx, registry.CleanupConfig{
 			Interval: cleanupInterval,
 			TTL:      serviceTTL,
-		}); err != nil {
-			log.Printf("cleanup worker: %v", err)
+		}, logger); err != nil {
+			logger.Error("cleanup worker stopped", slog.Any("error", err))
 		}
 	})
 
 	serveErr := make(chan error, 1)
 	go func() {
-		log.Printf("Beacon listening on %s", server.Addr)
+		logger.Info("beacon listening", slog.String("addr", server.Addr))
 		serveErr <- server.ListenAndServe()
 	}()
 
@@ -77,7 +81,7 @@ func run() error {
 	case <-ctx.Done():
 	}
 
-	log.Println("Beacon shutting down")
+	logger.Info("beacon shutting down")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()

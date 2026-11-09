@@ -4,12 +4,15 @@
 // the rules about what is valid live in the registry package.
 package api
 
-import "net/http"
+import (
+	"log/slog"
+	"net/http"
+)
 
 // NewRouter returns a handler that serves the registry API routes backed by
 // store. Requests with an unsupported method get 405 and unknown paths get 404.
-func NewRouter(store ServiceStore) http.Handler {
-	handler := NewHandler(store)
+func NewRouter(store ServiceStore, logger *slog.Logger) http.Handler {
+	handler := NewHandler(store, logger)
 
 	mux := http.NewServeMux()
 

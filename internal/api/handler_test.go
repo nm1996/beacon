@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,7 +16,7 @@ import (
 // can seed or inspect state directly.
 func setupHandler() (*Handler, *registry.Registry) {
 	r := registry.New()
-	handler := NewHandler(r)
+	handler := NewHandler(r, slog.New(slog.DiscardHandler))
 
 	return handler, r
 }
@@ -342,7 +343,7 @@ func (store failingStore) GetServices(string) []*registry.Service { return nil }
 func (store failingStore) Unregister(string) error { return store.err }
 
 func TestUnexpectedStoreErrorReturnsInternalServerError(t *testing.T) {
-	handler := NewHandler(failingStore{err: errors.New("disk on fire")})
+	handler := NewHandler(failingStore{err: errors.New("disk on fire")}, slog.New(slog.DiscardHandler))
 
 	tests := []struct {
 		name   string

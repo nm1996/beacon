@@ -2,6 +2,7 @@ package registry
 
 import (
 	"context"
+	"log/slog"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -15,7 +16,7 @@ func startCleanup(ctx context.Context, r *Registry, interval, ttl time.Duration)
 	done := make(chan error, 1)
 
 	go func() {
-		done <- r.RunCleanup(ctx, config)
+		done <- r.RunCleanup(ctx, config, slog.New(slog.DiscardHandler))
 	}()
 
 	return done
@@ -107,7 +108,7 @@ func TestRunCleanupRejectsInvalidSettings(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := New().RunCleanup(t.Context(), CleanupConfig{Interval: tt.interval, TTL: tt.ttl})
+			err := New().RunCleanup(t.Context(), CleanupConfig{Interval: tt.interval, TTL: tt.ttl}, slog.New(slog.DiscardHandler))
 
 			if err == nil {
 				t.Error("expected an error for invalid settings")
