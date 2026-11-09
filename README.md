@@ -128,7 +128,7 @@ All request and response bodies are JSON. Error responses are plain text for now
 | `DELETE` | [`/unregister`](#delete-unregister) | Remove an instance |
 | `GET` | [`/health`](#get-health) | Check that Beacon is running |
 
-Unknown paths return `404`, and a known path called with the wrong method returns `405`. Request bodies larger than 64 KiB are rejected with `413`.
+Unknown paths return `404`, and a known path called with the wrong method returns `405`. Request bodies must be a single JSON object of at most 64 KiB containing only the fields documented below. Anything else (unknown fields, a second JSON value, trailing text, an oversized body) is rejected with `400 Invalid request body`.
 
 ### `POST /register`
 
@@ -210,7 +210,7 @@ Beacon does not read a configuration file yet. It currently runs with these fixe
 | Read timeout (headers and body) | `5s` |
 | Write timeout | `10s` |
 | Idle connection timeout | `60s` |
-| Maximum request body | `64 KiB` |
+| Maximum request body | `64 KiB` (larger bodies get `400`) |
 | Shutdown grace period | `10s` |
 
 Logs are written to standard output as JSON. Run `beacon --version` to print the build version.

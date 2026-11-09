@@ -384,8 +384,8 @@ func TestRegisterBodyTooLarge(t *testing.T) {
 
 	handler.Register(rec, req)
 
-	if rec.Code != http.StatusRequestEntityTooLarge {
-		t.Errorf("expected status %d, got %d", http.StatusRequestEntityTooLarge, rec.Code)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
 	}
 
 	if len(r.GetServices("")) != 0 {
