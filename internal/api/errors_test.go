@@ -53,7 +53,7 @@ func TestErrorResponses(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			handler, r := setupHandler()
-			router := NewRouter(r, handler.logger)
+			router := NewRouter(r, handler.logger, testMaxBodyBytes)
 
 			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
 			rec := httptest.NewRecorder()
@@ -90,7 +90,7 @@ func TestMethodNotAllowedKeepsAllowHeader(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/unregister", nil)
 	rec := httptest.NewRecorder()
 
-	NewRouter(r, handler.logger).ServeHTTP(rec, req)
+	NewRouter(r, handler.logger, testMaxBodyBytes).ServeHTTP(rec, req)
 
 	if got := rec.Header().Get("Allow"); got != http.MethodDelete {
 		t.Errorf("expected Allow %q, got %q", http.MethodDelete, got)
@@ -98,7 +98,7 @@ func TestMethodNotAllowedKeepsAllowHeader(t *testing.T) {
 }
 
 func TestInternalErrorUsesJSONFormat(t *testing.T) {
-	handler := NewHandler(failingStore{err: errors.New("disk on fire")}, slog.New(slog.DiscardHandler))
+	handler := NewHandler(failingStore{err: errors.New("disk on fire")}, slog.New(slog.DiscardHandler), testMaxBodyBytes)
 
 	req := httptest.NewRequest(http.MethodPost, "/heartbeat", strings.NewReader(`{"id":"x"}`))
 	rec := httptest.NewRecorder()

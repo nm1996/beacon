@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -13,30 +14,17 @@ import (
 	"runtime/debug"
 	"sync"
 	"syscall"
-	"time"
 
 	"github.com/nm1996/beacon/internal/bootstrap"
+	"github.com/nm1996/beacon/internal/config"
 	"github.com/nm1996/beacon/internal/registry"
 )
 
-// For now these are fixed; they will move to configuration once it exists.
-const (
-	listenAddr      = ":8080"
-	readTimeout     = 5 * time.Second
-	writeTimeout    = 10 * time.Second
-	idleTimeout     = 60 * time.Second
-	shutdownTimeout = 10 * time.Second
-
-	// serviceTTL is how long an instance may go without a heartbeat before
-	// cleanup removes it; cleanupInterval is how often cleanup runs.
-	serviceTTL      = 30 * time.Second
-	cleanupInterval = 5 * time.Second
-)
-
-// main logs as JSON to standard output and exits with a non-zero status if
-// the server fails to start or stop. With --version it prints the build
-// version and exits instead.
+// main loads the configuration, then runs the server until it fails or is
+// told to stop, exiting with a non-zero status on failure. With --version it
+// prints the build version and exits instead.
 func main() {
+	configPath := flag.String("config", "", "path to a TOML configuration file; built-in defaults are used when empty")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
 
@@ -45,28 +33,43 @@ func main() {
 		return
 	}
 
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	settings, err := config.Load(*configPath)
+	if err != nil {
+		// No configured logger exists yet, so report in the default format.
+		slog.New(slog.NewJSONHandler(os.Stderr, nil)).Error("beacon failed to start", slog.Any("error", err))
+		os.Exit(1)
+	}
 
-	if err := run(logger); err != nil {
+	logger := newLogger(os.Stdout, settings.Logging)
+
+	if err := run(settings, logger); err != nil {
 		logger.Error("beacon stopped with an error", slog.Any("error", err))
 		os.Exit(1)
 	}
 }
 
+// newLogger builds the logger described by settings. Load has already
+// validated the level and format, so neither can be unknown here.
+func newLogger(output io.Writer, settings config.LoggingConfig) *slog.Logger {
+	level, _ := settings.SlogLevel()
+	options := &slog.HandlerOptions{Level: level}
+
+	if settings.Format == "text" {
+		return slog.New(slog.NewTextHandler(output, options))
+	}
+
+	return slog.New(slog.NewJSONHandler(output, options))
+}
+
 // run starts the HTTP server and the cleanup worker, then blocks until the
 // server fails or the process gets SIGINT or SIGTERM. On a signal it gives
-// in-flight requests up to shutdownTimeout to finish. The cleanup worker is
-// always stopped and waited for before run returns.
-func run(logger *slog.Logger) error {
+// in-flight requests up to server.shutdown_timeout to finish. The cleanup
+// worker is always stopped and waited for before run returns.
+func run(settings config.Config, logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	components := bootstrap.New(bootstrap.Settings{
-		Addr:         listenAddr,
-		ReadTimeout:  readTimeout,
-		WriteTimeout: writeTimeout,
-		IdleTimeout:  idleTimeout,
-	}, logger)
+	components := bootstrap.New(settings, logger)
 	server := components.Server
 
 	workerCtx, stopWorkers := context.WithCancel(ctx)
@@ -78,8 +81,8 @@ func run(logger *slog.Logger) error {
 
 	workers.Go(func() {
 		if err := components.Registry.RunCleanup(workerCtx, registry.CleanupConfig{
-			Interval: cleanupInterval,
-			TTL:      serviceTTL,
+			Interval: settings.Registry.CleanupInterval,
+			TTL:      settings.Registry.ServiceTTL,
 		}, logger); err != nil {
 			logger.Error("cleanup worker stopped", slog.Any("error", err))
 		}
@@ -105,7 +108,7 @@ func run(logger *slog.Logger) error {
 
 	logger.Info("beacon shutting down")
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), settings.Server.ShutdownTimeout)
 	defer cancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {

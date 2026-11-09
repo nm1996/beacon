@@ -5,29 +5,36 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/nm1996/beacon/internal/config"
 	"github.com/nm1996/beacon/internal/registry"
 )
 
-func TestNewUsesConfiguredAddress(t *testing.T) {
-	components := New(Settings{Addr: ":9090"}, slog.New(slog.DiscardHandler))
+// discard is a logger that drops everything.
+var discard = slog.New(slog.DiscardHandler)
 
-	if components.Server.Addr != ":9090" {
-		t.Fatalf("expected server address %q, got %q", ":9090", components.Server.Addr)
+func TestNewUsesConfiguredAddress(t *testing.T) {
+	settings := config.Default()
+	settings.Server.Host = "127.0.0.1"
+	settings.Server.Port = 9090
+
+	components := New(settings, discard)
+
+	if components.Server.Addr != "127.0.0.1:9090" {
+		t.Fatalf("expected server address %q, got %q", "127.0.0.1:9090", components.Server.Addr)
 	}
 }
 
 func TestNewAppliesServerTimeouts(t *testing.T) {
-	components := New(Settings{
-		Addr:         ":0",
-		ReadTimeout:  time.Second,
-		WriteTimeout: 2 * time.Second,
-		IdleTimeout:  3 * time.Second,
-	}, slog.New(slog.DiscardHandler))
+	settings := config.Default()
+	settings.Server.ReadTimeout = time.Second
+	settings.Server.WriteTimeout = 2 * time.Second
+	settings.Server.IdleTimeout = 3 * time.Second
 
-	server := components.Server
+	server := New(settings, discard).Server
 
 	if server.ReadHeaderTimeout != time.Second || server.ReadTimeout != time.Second {
 		t.Errorf("expected read timeouts of 1s, got header %v, read %v", server.ReadHeaderTimeout, server.ReadTimeout)
@@ -42,8 +49,37 @@ func TestNewAppliesServerTimeouts(t *testing.T) {
 	}
 }
 
+func TestNewAppliesRequestBodyLimit(t *testing.T) {
+	settings := config.Default()
+	settings.Server.MaxRequestBodyBytes = 40
+
+	handler := New(settings, discard).Server.Handler
+
+	tests := []struct {
+		name       string
+		body       string
+		wantStatus int
+	}{
+		{name: "within limit", body: `{"name":"a","address":"b","port":1}`, wantStatus: http.StatusCreated},
+		{name: "over limit", body: `{"name":"orders","address":"10.0.0.1","port":8081}`, wantStatus: http.StatusBadRequest},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(tt.body))
+			rec := httptest.NewRecorder()
+
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Errorf("expected status %d, got %d", tt.wantStatus, rec.Code)
+			}
+		})
+	}
+}
+
 func TestNewConnectsServerToRegistry(t *testing.T) {
-	components := New(Settings{Addr: ":0"}, slog.New(slog.DiscardHandler))
+	components := New(config.Default(), discard)
 
 	_, err := components.Registry.Register(&registry.Service{
 		Name:    "orders",

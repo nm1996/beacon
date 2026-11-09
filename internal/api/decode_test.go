@@ -21,7 +21,7 @@ func TestMapRequestAcceptsSingleObject(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(tt.body))
 
 			var dto RegisterRequest
-			if err := mapRequest(httptest.NewRecorder(), req, &dto); err != nil {
+			if err := mapRequest(httptest.NewRecorder(), req, &dto, testMaxBodyBytes); err != nil {
 				t.Fatalf("expected body to be accepted, got %v", err)
 			}
 
@@ -41,8 +41,8 @@ func TestMapRequestRejectsInvalidBodies(t *testing.T) {
 		body string
 	}{
 		// Size limit.
-		{name: "body over the limit", body: `{"name":"` + strings.Repeat("a", maxRequestBodyBytes) + `"}`},
-		{name: "valid object padded past the limit", body: valid + strings.Repeat(" ", maxRequestBodyBytes)},
+		{name: "body over the limit", body: `{"name":"` + strings.Repeat("a", testMaxBodyBytes) + `"}`},
+		{name: "valid object padded past the limit", body: valid + strings.Repeat(" ", testMaxBodyBytes)},
 
 		// Not a single valid JSON object.
 		{name: "empty body", body: ""},
@@ -72,7 +72,7 @@ func TestMapRequestRejectsInvalidBodies(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(tt.body))
 
 			var dto RegisterRequest
-			if err := mapRequest(httptest.NewRecorder(), req, &dto); err == nil {
+			if err := mapRequest(httptest.NewRecorder(), req, &dto, testMaxBodyBytes); err == nil {
 				t.Errorf("expected body %.60q to be rejected, decoded %+v", tt.body, dto)
 			}
 		})
@@ -81,7 +81,7 @@ func TestMapRequestRejectsInvalidBodies(t *testing.T) {
 
 func TestEndpointsRejectInvalidBodiesWithBadRequest(t *testing.T) {
 	bodies := map[string]string{
-		"too large":     `{"id":"` + strings.Repeat("a", maxRequestBodyBytes) + `"}`,
+		"too large":     `{"id":"` + strings.Repeat("a", testMaxBodyBytes) + `"}`,
 		"unknown field": `{"id":"some-id","force":true}`,
 		"two objects":   `{"id":"a"}{"id":"b"}`,
 		"trailing text": `{"id":"a"} extra`,
@@ -104,7 +104,7 @@ func TestEndpointsRejectInvalidBodiesWithBadRequest(t *testing.T) {
 				req := httptest.NewRequest(endpoint.method, endpoint.path, strings.NewReader(body))
 				rec := httptest.NewRecorder()
 
-				NewRouter(r, handler.logger).ServeHTTP(rec, req)
+				NewRouter(r, handler.logger, testMaxBodyBytes).ServeHTTP(rec, req)
 
 				if rec.Code != http.StatusBadRequest {
 					t.Errorf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
@@ -126,7 +126,7 @@ func TestEndpointsRejectInvalidBodiesWithBadRequest(t *testing.T) {
 func TestRegisterBodyTooLarge(t *testing.T) {
 	handler, r := setupHandler()
 
-	body := `{"name":"` + strings.Repeat("a", maxRequestBodyBytes) + `","address":"localhost","port":8080}`
+	body := `{"name":"` + strings.Repeat("a", testMaxBodyBytes) + `","address":"localhost","port":8080}`
 
 	req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(body))
 	rec := httptest.NewRecorder()

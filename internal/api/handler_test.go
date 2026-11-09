@@ -12,11 +12,14 @@ import (
 	"github.com/nm1996/beacon/internal/registry"
 )
 
+// testMaxBodyBytes is the request body limit handlers get in tests.
+const testMaxBodyBytes = 64 << 10
+
 // setupHandler returns a handler and the empty registry behind it, so tests
 // can seed or inspect state directly.
 func setupHandler() (*Handler, *registry.Registry) {
 	r := registry.New()
-	handler := NewHandler(r, slog.New(slog.DiscardHandler))
+	handler := NewHandler(r, slog.New(slog.DiscardHandler), testMaxBodyBytes)
 
 	return handler, r
 }
@@ -343,7 +346,7 @@ func (store failingStore) GetServices(string) []*registry.Service { return nil }
 func (store failingStore) Unregister(string) error { return store.err }
 
 func TestUnexpectedStoreErrorReturnsInternalServerError(t *testing.T) {
-	handler := NewHandler(failingStore{err: errors.New("disk on fire")}, slog.New(slog.DiscardHandler))
+	handler := NewHandler(failingStore{err: errors.New("disk on fire")}, slog.New(slog.DiscardHandler), testMaxBodyBytes)
 
 	tests := []struct {
 		name   string

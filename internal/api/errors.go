@@ -28,6 +28,16 @@ func (handler *Handler) writeError(writer http.ResponseWriter, status int, code,
 	})
 }
 
+// writeInvalidBody answers a request whose body mapRequest rejected. The
+// message states the rules rather than the specific failure, which would
+// expose Go type names.
+func (handler *Handler) writeInvalidBody(writer http.ResponseWriter) {
+	handler.writeError(writer, http.StatusBadRequest, codeInvalidRequestBody, fmt.Sprintf(
+		"Request body must be a single JSON object of at most %d bytes with only the documented fields",
+		handler.maxBodyBytes,
+	))
+}
+
 // writeRegistryError maps a registry error to an HTTP error response.
 // Unexpected errors are logged and reported without internal details.
 func (handler *Handler) writeRegistryError(writer http.ResponseWriter, err error) {

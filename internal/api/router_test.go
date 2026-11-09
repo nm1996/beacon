@@ -81,7 +81,7 @@ func TestRouter(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			serviceRegistry := registry.New()
-			router := NewRouter(serviceRegistry, slog.New(slog.DiscardHandler))
+			router := NewRouter(serviceRegistry, slog.New(slog.DiscardHandler), testMaxBodyBytes)
 
 			req := httptest.NewRequest(tt.method, tt.path, nil)
 			rec := httptest.NewRecorder()

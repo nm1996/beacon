@@ -21,16 +21,19 @@ type ServiceStore interface {
 // Handler serves the registry API endpoints. Every method is an
 // http.HandlerFunc; NewRouter decides which path and method reach each one.
 type Handler struct {
-	store  ServiceStore
-	logger *slog.Logger
+	store        ServiceStore
+	logger       *slog.Logger
+	maxBodyBytes int64
 }
 
-// NewHandler returns a handler that keeps services in store and reports
-// registrations and unexpected failures to logger.
-func NewHandler(store ServiceStore, logger *slog.Logger) *Handler {
+// NewHandler returns a handler that keeps services in store, reports
+// registrations and unexpected failures to logger, and rejects request
+// bodies larger than maxBodyBytes.
+func NewHandler(store ServiceStore, logger *slog.Logger, maxBodyBytes int64) *Handler {
 	return &Handler{
-		store:  store,
-		logger: logger,
+		store:        store,
+		logger:       logger,
+		maxBodyBytes: maxBodyBytes,
 	}
 }
 
@@ -39,8 +42,8 @@ func NewHandler(store ServiceStore, logger *slog.Logger) *Handler {
 func (handler *Handler) Register(writer http.ResponseWriter, request *http.Request) {
 	var input RegisterRequest
 
-	if err := mapRequest(writer, request, &input); err != nil {
-		handler.writeError(writer, http.StatusBadRequest, codeInvalidRequestBody, invalidBodyMessage)
+	if err := mapRequest(writer, request, &input, handler.maxBodyBytes); err != nil {
+		handler.writeInvalidBody(writer)
 		return
 	}
 
@@ -69,8 +72,8 @@ func (handler *Handler) Register(writer http.ResponseWriter, request *http.Reque
 func (handler *Handler) Heartbeat(writer http.ResponseWriter, request *http.Request) {
 	var input HeartbeatRequest
 
-	if err := mapRequest(writer, request, &input); err != nil {
-		handler.writeError(writer, http.StatusBadRequest, codeInvalidRequestBody, invalidBodyMessage)
+	if err := mapRequest(writer, request, &input, handler.maxBodyBytes); err != nil {
+		handler.writeInvalidBody(writer)
 		return
 	}
 
@@ -107,8 +110,8 @@ func (handler *Handler) GetServices(writer http.ResponseWriter, request *http.Re
 func (handler *Handler) Unregister(writer http.ResponseWriter, request *http.Request) {
 	var input UnregisterRequest
 
-	if err := mapRequest(writer, request, &input); err != nil {
-		handler.writeError(writer, http.StatusBadRequest, codeInvalidRequestBody, invalidBodyMessage)
+	if err := mapRequest(writer, request, &input, handler.maxBodyBytes); err != nil {
+		handler.writeInvalidBody(writer)
 		return
 	}
 
