@@ -10,6 +10,8 @@ import (
 	"github.com/nm1996/beacon/internal/registry"
 )
 
+// setupHandler returns a handler and the empty registry behind it, so tests
+// can seed or inspect state directly.
 func setupHandler() (*ServiceDiscoveryHandler, *registry.Registry) {
 	r := registry.NewRegistry()
 	handler := NewServiceDiscoveryHandler(r)
@@ -17,6 +19,7 @@ func setupHandler() (*ServiceDiscoveryHandler, *registry.Registry) {
 	return handler, r
 }
 
+// mustRegister adds a valid service and fails the test if that is rejected.
 func mustRegister(t *testing.T, r *registry.Registry, name string, port int) string {
 	t.Helper()
 
