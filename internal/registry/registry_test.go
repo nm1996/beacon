@@ -6,6 +6,7 @@ import (
 	"time"
 )
 
+// newService returns a service that passes validation.
 func newService(name string) *Service {
 	return &Service{
 		Name:    name,
@@ -14,6 +15,7 @@ func newService(name string) *Service {
 	}
 }
 
+// mustRegister adds service and fails the test if that is rejected.
 func mustRegister(t *testing.T, r *Registry, service *Service) string {
 	t.Helper()
 
