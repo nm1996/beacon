@@ -20,11 +20,14 @@ func TestNewUsesConfiguredAddress(t *testing.T) {
 func TestNewConnectsServerToRegistry(t *testing.T) {
 	components := New(Settings{Addr: ":0"})
 
-	components.Registry.Register(&registry.Service{
+	_, err := components.Registry.Register(&registry.Service{
 		Name:    "orders",
 		Address: "10.0.0.1",
 		Port:    8081,
 	})
+	if err != nil {
+		t.Fatalf("register service: %v", err)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/services?name=orders", nil)
 	rec := httptest.NewRecorder()
