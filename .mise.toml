@@ -1,0 +1,40 @@
+[tools]
+go = "1.27.3"
+golangci-lint = "2.15.0"
+
+[tasks.fmt]
+description = "Format Go source files with gofmt"
+run = "gofmt -w ."
+
+[tasks.vet]
+description = "Run go vet"
+run = "go vet ./..."
+
+[tasks.lint]
+description = "Run golangci-lint"
+run = "golangci-lint run ./..."
+
+[tasks.test]
+description = "Run tests"
+run = "go test ./..."
+
+[tasks.test-race]
+description = "Run tests with the race detector"
+run = "go test -race ./..."
+
+[tasks.build]
+description = "Build the beacon binary into bin/"
+run = "go build -o bin/beacon ./cmd/beacon"
+
+[tasks.run]
+description = "Run the Beacon server"
+run = "go run ./cmd/beacon"
+
+[tasks.check]
+description = "Format, vet, lint, and run race-enabled tests"
+depends = ["fmt"]
+run = [
+  "go vet ./...",
+  "golangci-lint run ./...",
+  "go test -race ./...",
+]
