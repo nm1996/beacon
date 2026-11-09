@@ -1,0 +1,15 @@
+# Build output
+/bin/
+
+# Test and coverage output
+*.test
+*.out
+coverage.*
+
+# Local configuration
+/beacon.toml
+
+# Editor and OS files
+.idea/
+.vscode/
+.DS_Store
