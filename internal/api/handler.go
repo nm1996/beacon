@@ -1,8 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 
@@ -40,11 +43,12 @@ func NewHandler(store ServiceStore, logger *slog.Logger) *Handler {
 }
 
 // Register adds a new service instance and responds 201 with its ID.
-// Malformed JSON or invalid service fields get 400.
+// An unreadable request body or invalid service fields get 400.
 func (handler *Handler) Register(writer http.ResponseWriter, request *http.Request) {
 	var input RegisterRequest
 
-	if !decodeRequest(writer, request, &input) {
+	if err := mapRequest(writer, request, &input); err != nil {
+		http.Error(writer, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -73,7 +77,8 @@ func (handler *Handler) Register(writer http.ResponseWriter, request *http.Reque
 func (handler *Handler) Heartbeat(writer http.ResponseWriter, request *http.Request) {
 	var input HeartbeatRequest
 
-	if !decodeRequest(writer, request, &input) {
+	if err := mapRequest(writer, request, &input); err != nil {
+		http.Error(writer, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -110,7 +115,8 @@ func (handler *Handler) GetServices(writer http.ResponseWriter, request *http.Re
 func (handler *Handler) Unregister(writer http.ResponseWriter, request *http.Request) {
 	var input UnregisterRequest
 
-	if !decodeRequest(writer, request, &input) {
+	if err := mapRequest(writer, request, &input); err != nil {
+		http.Error(writer, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -165,24 +171,39 @@ func writeStatus(writer http.ResponseWriter, status int) {
 	writer.WriteHeader(status)
 }
 
-// decodeRequest decodes the JSON request body into dto. If that fails it
-// writes the error response itself and returns false: 413 when the body is
-// larger than maxRequestBodyBytes, 400 for anything else.
-func decodeRequest[T any](writer http.ResponseWriter, request *http.Request, dto *T) bool {
-	body := http.MaxBytesReader(writer, request.Body, maxRequestBodyBytes)
+// mapRequest decodes the JSON request body into dto. It returns an error,
+// and the caller should respond 400, when the body:
+//   - is larger than maxRequestBodyBytes,
+//   - is not valid JSON, or is valid JSON but not an object,
+//   - holds anything other than whitespace after that object, such as a
+//     second object,
+//   - contains a field dto does not declare, or a field of the wrong type.
+func mapRequest[T any](writer http.ResponseWriter, request *http.Request, dto *T) error {
+	body := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxRequestBodyBytes))
 
-	err := json.NewDecoder(body).Decode(dto)
-	if err == nil {
-		return true
+	// Read the first value as raw bytes so it can be checked before it is
+	// mapped onto dto; decoding null into a struct would silently succeed.
+	var raw json.RawMessage
+	if err := body.Decode(&raw); err != nil {
+		return fmt.Errorf("read request body: %w", err)
 	}
 
-	var tooLarge *http.MaxBytesError
-	if errors.As(err, &tooLarge) {
-		http.Error(writer, "Request body too large", http.StatusRequestEntityTooLarge)
-		return false
+	if raw[0] != '{' {
+		return errors.New("request body must be a JSON object")
 	}
 
-	http.Error(writer, "Invalid JSON", http.StatusBadRequest)
+	// Decoding again must reach the end of the body; any other outcome means
+	// something follows the object.
+	if err := body.Decode(&json.RawMessage{}); !errors.Is(err, io.EOF) {
+		return errors.New("request body must contain a single JSON object")
+	}
 
-	return false
+	fields := json.NewDecoder(bytes.NewReader(raw))
+	fields.DisallowUnknownFields()
+
+	if err := fields.Decode(dto); err != nil {
+		return fmt.Errorf("map request body: %w", err)
+	}
+
+	return nil
 }
