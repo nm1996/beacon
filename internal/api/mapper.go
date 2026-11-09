@@ -1,10 +1,10 @@
-package http
+package api
 
 import "github.com/nm1996/beacon/internal/registry"
 
-// MapRegisterRequestToService turns a registration request into the service
+// mapRegisterRequest turns a registration request into the service
 // the registry stores. It does not validate anything; the registry does.
-func MapRegisterRequestToService(dto RegisterRequest) *registry.Service {
+func mapRegisterRequest(dto RegisterRequest) *registry.Service {
 	return &registry.Service{
 		Name:    dto.Name,
 		Address: dto.Address,
@@ -12,9 +12,9 @@ func MapRegisterRequestToService(dto RegisterRequest) *registry.Service {
 	}
 }
 
-// MapServiceToResponse picks the fields of a registered service that are
+// mapServiceResponse picks the fields of a registered service that are
 // returned to API clients.
-func MapServiceToResponse(service *registry.Service) Service {
+func mapServiceResponse(service *registry.Service) Service {
 	return Service{
 		Name:    service.Name,
 		Address: service.Address,

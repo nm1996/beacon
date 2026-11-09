@@ -1,6 +1,7 @@
-package http
+package api
 
 import (
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -40,6 +41,12 @@ func TestRouter(t *testing.T) {
 			expectedStatus: http.StatusBadRequest,
 		},
 		{
+			name:           "health route",
+			method:         http.MethodGet,
+			path:           "/health",
+			expectedStatus: http.StatusOK,
+		},
+		{
 			name:           "unknown route",
 			method:         http.MethodGet,
 			path:           "/unknown",
@@ -73,8 +80,8 @@ func TestRouter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			serviceRegistry := registry.NewRegistry()
-			router := NewRouter(serviceRegistry)
+			serviceRegistry := registry.New()
+			router := NewRouter(serviceRegistry, slog.New(slog.DiscardHandler))
 
 			req := httptest.NewRequest(tt.method, tt.path, nil)
 			rec := httptest.NewRecorder()

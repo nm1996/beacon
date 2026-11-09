@@ -4,21 +4,27 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/nm1996/beacon/internal/bootstrap"
+	"github.com/nm1996/beacon/internal/registry"
 )
 
 // For now these are fixed; they will move to configuration once it exists.
 const (
 	listenAddr      = ":8080"
+	readTimeout     = 5 * time.Second
+	writeTimeout    = 10 * time.Second
+	idleTimeout     = 60 * time.Second
 	shutdownTimeout = 10 * time.Second
 
 	// serviceTTL is how long an instance may go without a heartbeat before
@@ -27,10 +33,23 @@ const (
 	cleanupInterval = 5 * time.Second
 )
 
-// main exits with a non-zero status if the server fails to start or stop.
+// main logs as JSON to standard output and exits with a non-zero status if
+// the server fails to start or stop. With --version it prints the build
+// version and exits instead.
 func main() {
-	if err := run(); err != nil {
-		log.Fatal(err)
+	showVersion := flag.Bool("version", false, "print the version and exit")
+	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(buildVersion())
+		return
+	}
+
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+
+	if err := run(logger); err != nil {
+		logger.Error("beacon stopped with an error", slog.Any("error", err))
+		os.Exit(1)
 	}
 }
 
@@ -38,11 +57,16 @@ func main() {
 // server fails or the process gets SIGINT or SIGTERM. On a signal it gives
 // in-flight requests up to shutdownTimeout to finish. The cleanup worker is
 // always stopped and waited for before run returns.
-func run() error {
+func run(logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	components := bootstrap.New(bootstrap.Settings{Addr: listenAddr})
+	components := bootstrap.New(bootstrap.Settings{
+		Addr:         listenAddr,
+		ReadTimeout:  readTimeout,
+		WriteTimeout: writeTimeout,
+		IdleTimeout:  idleTimeout,
+	}, logger)
 	server := components.Server
 
 	workerCtx, stopWorkers := context.WithCancel(ctx)
@@ -53,14 +77,20 @@ func run() error {
 	}()
 
 	workers.Go(func() {
-		if err := components.Registry.RunCleanup(workerCtx, cleanupInterval, serviceTTL); err != nil {
-			log.Printf("cleanup worker: %v", err)
+		if err := components.Registry.RunCleanup(workerCtx, registry.CleanupConfig{
+			Interval: cleanupInterval,
+			TTL:      serviceTTL,
+		}, logger); err != nil {
+			logger.Error("cleanup worker stopped", slog.Any("error", err))
 		}
 	})
 
 	serveErr := make(chan error, 1)
 	go func() {
-		log.Printf("Beacon listening on %s", server.Addr)
+		logger.Info("beacon listening",
+			slog.String("addr", server.Addr),
+			slog.String("version", buildVersion()),
+		)
 		serveErr <- server.ListenAndServe()
 	}()
 
@@ -73,7 +103,7 @@ func run() error {
 	case <-ctx.Done():
 	}
 
-	log.Println("Beacon shutting down")
+	logger.Info("beacon shutting down")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
@@ -83,4 +113,17 @@ func run() error {
 	}
 
 	return nil
+}
+
+// buildVersion returns the version the Go toolchain stamped into the binary:
+// a release tag such as v0.1.0, or a pseudo-version built from the git
+// commit. Binaries built without version control information report
+// "(devel)".
+func buildVersion() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok || info.Main.Version == "" {
+		return "unknown"
+	}
+
+	return info.Main.Version
 }

@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Format, lint, test and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Installs the Go and golangci-lint versions pinned in .mise.toml.
+      - uses: jdx/mise-action@v5
+
+      - name: Check formatting
+        run: mise run fmt-check
+
+      - name: Vet
+        run: mise run vet
+
+      - name: Lint
+        run: mise run lint
+
+      - name: Test with the race detector
+        run: mise run test-race
+
+      - name: Check for known vulnerabilities
+        run: mise run vuln
+
+      - name: Build
+        run: mise run build

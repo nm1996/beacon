@@ -18,4 +18,7 @@ coverage.*
 /AGENTS.md
 /CLAUDE.md
 /docs/
-/.github/
+# Only CI workflows and Dependabot are published from .github/.
+/.github/*
+!/.github/workflows/
+!/.github/dependabot.yml
