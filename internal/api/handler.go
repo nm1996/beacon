@@ -1,4 +1,4 @@
-package http
+package api
 
 import (
 	"encoding/json"
@@ -9,22 +9,32 @@ import (
 	"github.com/nm1996/beacon/internal/registry"
 )
 
-// ServiceDiscoveryHandler serves the registry API endpoints. Every method is
-// an http.HandlerFunc; NewRouter decides which path and method reach each one.
-type ServiceDiscoveryHandler struct {
-	registry *registry.Registry
+// ServiceStore is the part of the registry the API needs. It is declared
+// here, where it is used, so the handlers depend only on these four methods
+// and tests can swap in a fake. *registry.Registry satisfies it.
+type ServiceStore interface {
+	Register(service *registry.Service) (string, error)
+	Heartbeat(serviceID string) error
+	GetServices(name string) []*registry.Service
+	Unregister(serviceID string) error
 }
 
-// NewServiceDiscoveryHandler returns a handler backed by the given registry.
-func NewServiceDiscoveryHandler(registry *registry.Registry) *ServiceDiscoveryHandler {
-	return &ServiceDiscoveryHandler{
-		registry: registry,
+// Handler serves the registry API endpoints. Every method is an
+// http.HandlerFunc; NewRouter decides which path and method reach each one.
+type Handler struct {
+	store ServiceStore
+}
+
+// NewHandler returns a handler that keeps services in store.
+func NewHandler(store ServiceStore) *Handler {
+	return &Handler{
+		store: store,
 	}
 }
 
 // Register adds a new service instance and responds 201 with its ID.
 // Malformed JSON or invalid service fields get 400.
-func (handler *ServiceDiscoveryHandler) Register(writer http.ResponseWriter, request *http.Request) {
+func (handler *Handler) Register(writer http.ResponseWriter, request *http.Request) {
 	var input RegisterRequest
 
 	err := mapRequest(&input, request)
@@ -33,9 +43,9 @@ func (handler *ServiceDiscoveryHandler) Register(writer http.ResponseWriter, req
 		return
 	}
 
-	service := MapRegisterRequestToService(input)
+	service := mapRegisterRequest(input)
 
-	serviceID, err := handler.registry.Register(service)
+	serviceID, err := handler.store.Register(service)
 	if err != nil {
 		writeRegistryError(writer, err)
 		return
@@ -48,7 +58,7 @@ func (handler *ServiceDiscoveryHandler) Register(writer http.ResponseWriter, req
 
 // Heartbeat marks an instance as still alive and responds 204.
 // A missing ID gets 400 and an unknown ID gets 404.
-func (handler *ServiceDiscoveryHandler) Heartbeat(writer http.ResponseWriter, request *http.Request) {
+func (handler *Handler) Heartbeat(writer http.ResponseWriter, request *http.Request) {
 	var input HeartbeatRequest
 
 	err := mapRequest(&input, request)
@@ -62,7 +72,7 @@ func (handler *ServiceDiscoveryHandler) Heartbeat(writer http.ResponseWriter, re
 		return
 	}
 
-	if err := handler.registry.Heartbeat(input.ID); err != nil {
+	if err := handler.store.Heartbeat(input.ID); err != nil {
 		writeRegistryError(writer, err)
 		return
 	}
@@ -72,14 +82,14 @@ func (handler *ServiceDiscoveryHandler) Heartbeat(writer http.ResponseWriter, re
 
 // GetServices lists registered instances as a JSON array, filtered by the
 // optional "name" query parameter. An empty registry gives an empty array.
-func (handler *ServiceDiscoveryHandler) GetServices(writer http.ResponseWriter, request *http.Request) {
+func (handler *Handler) GetServices(writer http.ResponseWriter, request *http.Request) {
 	name := request.URL.Query().Get("name")
 
-	services := handler.registry.GetServices(name)
+	services := handler.store.GetServices(name)
 	result := make([]Service, 0, len(services))
 
 	for _, service := range services {
-		result = append(result, MapServiceToResponse(service))
+		result = append(result, mapServiceResponse(service))
 	}
 
 	writeJSON(writer, http.StatusOK, result)
@@ -87,7 +97,7 @@ func (handler *ServiceDiscoveryHandler) GetServices(writer http.ResponseWriter, 
 
 // Unregister removes an instance and responds 204.
 // A missing ID gets 400 and an unknown ID gets 404.
-func (handler *ServiceDiscoveryHandler) Unregister(writer http.ResponseWriter, request *http.Request) {
+func (handler *Handler) Unregister(writer http.ResponseWriter, request *http.Request) {
 	var input UnregisterRequest
 
 	err := mapRequest(&input, request)
@@ -101,7 +111,7 @@ func (handler *ServiceDiscoveryHandler) Unregister(writer http.ResponseWriter, r
 		return
 	}
 
-	if err := handler.registry.Unregister(input.ID); err != nil {
+	if err := handler.store.Unregister(input.ID); err != nil {
 		writeRegistryError(writer, err)
 		return
 	}

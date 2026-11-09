@@ -10,10 +10,12 @@ import (
 // startCleanup runs RunCleanup in the background and returns a channel that
 // receives its result once it stops.
 func startCleanup(ctx context.Context, r *Registry, interval, ttl time.Duration) <-chan error {
+	config := CleanupConfig{Interval: interval, TTL: ttl}
+
 	done := make(chan error, 1)
 
 	go func() {
-		done <- r.RunCleanup(ctx, interval, ttl)
+		done <- r.RunCleanup(ctx, config)
 	}()
 
 	return done
@@ -24,7 +26,7 @@ func TestRunCleanupRemovesStaleServices(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 
-		r := NewRegistry()
+		r := New()
 		staleID := mustRegister(t, r, newService("stale-service"))
 		activeID := mustRegister(t, r, newService("active-service"))
 
@@ -55,7 +57,7 @@ func TestRunCleanupKeepsServicesWithinTTL(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 
-		r := NewRegistry()
+		r := New()
 		mustRegister(t, r, newService("payment-service"))
 
 		startCleanup(ctx, r, time.Second, 3*time.Second)
@@ -74,7 +76,7 @@ func TestRunCleanupStopsWhenContextIsCancelled(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 
-		done := startCleanup(ctx, NewRegistry(), time.Second, time.Minute)
+		done := startCleanup(ctx, New(), time.Second, time.Minute)
 
 		time.Sleep(5 * time.Second)
 		cancel()
@@ -105,7 +107,7 @@ func TestRunCleanupRejectsInvalidSettings(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := NewRegistry().RunCleanup(t.Context(), tt.interval, tt.ttl)
+			err := New().RunCleanup(t.Context(), CleanupConfig{Interval: tt.interval, TTL: tt.ttl})
 
 			if err == nil {
 				t.Error("expected an error for invalid settings")

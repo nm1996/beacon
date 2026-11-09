@@ -28,7 +28,7 @@ func mustRegister(t *testing.T, r *Registry, service *Service) string {
 }
 
 func TestRegister(t *testing.T) {
-	r := NewRegistry()
+	r := New()
 
 	input := newService("payment-service")
 
@@ -64,7 +64,7 @@ func TestRegister(t *testing.T) {
 }
 
 func TestRegisterCopiesInput(t *testing.T) {
-	r := NewRegistry()
+	r := New()
 
 	input := newService("payment-service")
 
@@ -90,7 +90,7 @@ func TestRegisterCopiesInput(t *testing.T) {
 }
 
 func TestRegisterNil(t *testing.T) {
-	r := NewRegistry()
+	r := New()
 
 	id, err := r.Register(nil)
 
@@ -119,7 +119,7 @@ func TestRegisterRejectsInvalidService(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := NewRegistry()
+			r := New()
 
 			id, err := r.Register(&tt.service)
 
@@ -140,7 +140,7 @@ func TestRegisterRejectsInvalidService(t *testing.T) {
 
 func TestRegisterAcceptsPortBoundaries(t *testing.T) {
 	for _, port := range []int{1, 65535} {
-		r := NewRegistry()
+		r := New()
 
 		service := newService("orders")
 		service.Port = port
@@ -152,7 +152,7 @@ func TestRegisterAcceptsPortBoundaries(t *testing.T) {
 }
 
 func TestHeartbeat(t *testing.T) {
-	r := NewRegistry()
+	r := New()
 
 	id := mustRegister(t, r, newService("payment-service"))
 
@@ -174,7 +174,7 @@ func TestHeartbeat(t *testing.T) {
 }
 
 func TestHeartbeatUnknownService(t *testing.T) {
-	r := NewRegistry()
+	r := New()
 
 	err := r.Heartbeat("unknown-id")
 
@@ -184,7 +184,7 @@ func TestHeartbeatUnknownService(t *testing.T) {
 }
 
 func TestGetServices(t *testing.T) {
-	r := NewRegistry()
+	r := New()
 
 	mustRegister(t, r, newService("payment-service"))
 	mustRegister(t, r, newService("payment-service"))
@@ -204,7 +204,7 @@ func TestGetServices(t *testing.T) {
 }
 
 func TestGetServicesReturnsCopies(t *testing.T) {
-	r := NewRegistry()
+	r := New()
 
 	mustRegister(t, r, newService("payment-service"))
 
@@ -231,7 +231,7 @@ func TestGetServicesReturnsCopies(t *testing.T) {
 }
 
 func TestUnregister(t *testing.T) {
-	r := NewRegistry()
+	r := New()
 
 	id := mustRegister(t, r, newService("payment-service"))
 
@@ -247,7 +247,7 @@ func TestUnregister(t *testing.T) {
 }
 
 func TestUnregisterUnknownService(t *testing.T) {
-	r := NewRegistry()
+	r := New()
 
 	err := r.Unregister("unknown-id")
 
@@ -257,7 +257,7 @@ func TestUnregisterUnknownService(t *testing.T) {
 }
 
 func TestCleanup(t *testing.T) {
-	r := NewRegistry()
+	r := New()
 
 	staleID := mustRegister(t, r, newService("stale-service"))
 	mustRegister(t, r, newService("active-service"))
@@ -279,7 +279,7 @@ func TestCleanup(t *testing.T) {
 }
 
 func TestCleanupDoesNotRemoveActiveServices(t *testing.T) {
-	r := NewRegistry()
+	r := New()
 
 	mustRegister(t, r, newService("active-service"))
 

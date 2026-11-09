@@ -7,7 +7,7 @@ package bootstrap
 import (
 	"net/http"
 
-	httpapi "github.com/nm1996/beacon/internal/http"
+	"github.com/nm1996/beacon/internal/api"
 	"github.com/nm1996/beacon/internal/registry"
 )
 
@@ -28,13 +28,13 @@ type Components struct {
 
 // New builds the registry and the HTTP server that serves it.
 func New(settings Settings) *Components {
-	serviceRegistry := registry.NewRegistry()
+	serviceRegistry := registry.New()
 
 	return &Components{
 		Registry: serviceRegistry,
 		Server: &http.Server{
 			Addr:    settings.Addr,
-			Handler: httpapi.NewRouter(serviceRegistry),
+			Handler: api.NewRouter(serviceRegistry),
 		},
 	}
 }
