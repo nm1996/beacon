@@ -3,17 +3,21 @@
 # Copy this file to a location of your choice and pass it to Beacon with:
 #   beacon --config /path/to/beacon.toml
 #
-# Keep this file synchronized with the typed configuration in internal/config.
+# Every key is optional; anything left out keeps the value shown here, which
+# is also what Beacon uses when started without --config. Unknown keys are
+# rejected. Durations use Go syntax such as "500ms", "5s" or "1m30s".
+#
+# Keep this file synchronized with internal/config.
 # Do not put passwords, tokens, or other secrets in this file.
 
 [server]
-# Address on which the HTTP server listens.
+# Interface the HTTP server listens on. "0.0.0.0" means all interfaces.
 host = "0.0.0.0"
 
 # TCP port for the HTTP API.
 port = 8080
 
-# Maximum time allowed to read an incoming request.
+# Maximum time allowed to read an incoming request, headers included.
 read_timeout = "5s"
 
 # Maximum time allowed to write a response.
@@ -21,6 +25,12 @@ write_timeout = "10s"
 
 # Maximum time to keep an idle HTTP connection open.
 idle_timeout = "60s"
+
+# Time in-flight requests get to finish when Beacon shuts down.
+shutdown_timeout = "10s"
+
+# Largest request body the API accepts, in bytes. Larger bodies get 400.
+max_request_body_bytes = 65536
 
 [registry]
 # A service instance is considered stale after this period without a heartbeat.
@@ -30,8 +40,8 @@ service_ttl = "30s"
 cleanup_interval = "5s"
 
 [logging]
-# Supported levels should be defined and validated by the application.
+# Minimum level logged: "debug", "info", "warn" or "error".
 level = "info"
 
-# Initial supported formats: "text" or "json".
+# "json" for machines and log collectors, "text" for reading in a terminal.
 format = "json"

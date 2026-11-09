@@ -51,8 +51,10 @@ Beacon covers the core of the problem and nothing more: one small binary, no ext
 | ✅ | `GET /health` endpoint for liveness checks |
 | ✅ | Server timeouts and request size limits |
 | ✅ | Structured JSON logs |
-| 🔜 | TOML configuration file and environment overrides |
-| 🔜 | Versioned API (`/api/v1`) with consistent JSON errors |
+| ✅ | TOML configuration file with validation |
+| 🔜 | Environment variable overrides |
+| ✅ | Consistent JSON error responses with stable codes |
+| 🔜 | Versioned API (`/api/v1`) |
 | 🔜 | Native Go client with automatic heartbeats |
 | 🔜 | Docker image and Compose example |
 | 🔜 | Prometheus metrics |
@@ -118,7 +120,7 @@ Instances of the same service share a name. Registering again creates a new inst
 
 ## HTTP API
 
-All request and response bodies are JSON. Error responses are plain text for now.
+All request and response bodies are JSON, including errors.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -128,7 +130,27 @@ All request and response bodies are JSON. Error responses are plain text for now
 | `DELETE` | [`/unregister`](#delete-unregister) | Remove an instance |
 | `GET` | [`/health`](#get-health) | Check that Beacon is running |
 
-Unknown paths return `404`, and a known path called with the wrong method returns `405`. Request bodies must be a single JSON object of at most 64 KiB containing only the fields documented below. Anything else (unknown fields, a second JSON value, trailing text, an oversized body) is rejected with `400 Invalid request body`.
+Unknown paths return `404`, and a known path called with the wrong method returns `405`. Request bodies must be a single JSON object of at most 64 KiB (configurable) containing only the fields documented below. Anything else (unknown fields, a second JSON value, trailing text, an oversized body) is rejected with `400` and the code `invalid_request_body`.
+
+### Errors
+
+Every error response has the same shape:
+
+```json
+{ "error": { "code": "service_not_found", "message": "No service is registered with this ID" } }
+```
+
+`code` is stable and meant for programs; `message` is meant for people and may change.
+
+| Status | Code | When |
+|---|---|---|
+| `400` | `invalid_request_body` | The body is not a single JSON object within the size limit with only the documented fields |
+| `400` | `invalid_service` | A registration field breaks a rule, for example a port outside `1`–`65535` |
+| `400` | `missing_id` | A heartbeat or unregister request has no `id` |
+| `404` | `service_not_found` | No instance is registered with the given ID |
+| `404` | `not_found` | No endpoint exists at the path |
+| `405` | `method_not_allowed` | The endpoint exists but not for this method; the `Allow` header lists the supported one |
+| `500` | `internal_error` | Something unexpected went wrong on the server |
 
 ### `POST /register`
 
@@ -200,22 +222,33 @@ Always returns `200 OK` while the process is serving requests. Use it for contai
 
 ## Configuration
 
-Beacon does not read a configuration file yet. It currently runs with these fixed values:
+Beacon reads its settings from a TOML file passed with `--config`:
 
-| Setting | Value |
-|---|---|
-| Listen address | `:8080` |
-| Instance TTL (time without a heartbeat before removal) | `30s` |
-| Cleanup interval | `5s` |
-| Read timeout (headers and body) | `5s` |
-| Write timeout | `10s` |
-| Idle connection timeout | `60s` |
-| Maximum request body | `64 KiB` (larger bodies get `400`) |
-| Shutdown grace period | `10s` |
+```bash
+beacon --config /etc/beacon/beacon.toml
+```
 
-Logs are written to standard output as JSON. Run `beacon --version` to print the build version.
+Without `--config` it runs with the built-in defaults below. A file only needs the keys it changes; every other key keeps its default. [`configs/beacon.example.toml`](configs/beacon.example.toml) lists every key with its default value.
 
-[`configs/beacon.example.toml`](configs/beacon.example.toml) shows the planned configuration format. It is not loaded by the server yet.
+| Key | Default | Meaning |
+|---|---|---|
+| `server.host` | `"0.0.0.0"` | Interface to listen on |
+| `server.port` | `8080` | TCP port, `1`–`65535` |
+| `server.read_timeout` | `"5s"` | Time allowed to read a request, headers included |
+| `server.write_timeout` | `"10s"` | Time allowed to write a response |
+| `server.idle_timeout` | `"60s"` | Time an idle keep-alive connection stays open |
+| `server.shutdown_timeout` | `"10s"` | Time in-flight requests get to finish on shutdown |
+| `server.max_request_body_bytes` | `65536` | Largest accepted request body |
+| `registry.service_ttl` | `"30s"` | Time without a heartbeat before an instance is removed |
+| `registry.cleanup_interval` | `"5s"` | How often stale instances are removed |
+| `logging.level` | `"info"` | `debug`, `info`, `warn` or `error` |
+| `logging.format` | `"json"` | `json` or `text` |
+
+Durations use Go syntax such as `"500ms"`, `"5s"` or `"1m30s"`. All durations and sizes must be positive.
+
+Beacon refuses to start, and lists every problem it found, if the file is missing, is not valid TOML, contains an unknown key, or sets a value out of range. Environment variable overrides are not supported yet.
+
+Logs go to standard output. Run `beacon --version` to print the build version.
 
 ## Limitations
 
@@ -253,10 +286,11 @@ Run `mise tasks` to list them all. CI runs the same tasks on every pull request.
 
 ```text
 .
-├── cmd/beacon/          # Entry point: logging, signals, cleanup worker and shutdown
+├── cmd/beacon/          # Entry point: flags, config, logging, signals, cleanup worker and shutdown
 ├── internal/
 │   ├── api/             # HTTP routes and handlers
 │   ├── bootstrap/       # Builds the registry and HTTP server and connects them
+│   ├── config/          # Loads and validates the TOML configuration
 │   └── registry/        # In-memory registry, validation and stale-instance cleanup
 ├── configs/             # Example configuration
 ├── .github/workflows/   # CI
@@ -276,11 +310,13 @@ Run `mise tasks` to list them all. CI runs the same tasks on every pull request.
 - [x] Health endpoint
 - [x] Structured logging
 - [x] CI pipeline
+- [x] TOML configuration
+- [x] Consistent JSON error responses
 
 **Next**
 
-- [ ] TOML configuration with environment overrides
-- [ ] Versioned REST API with consistent JSON errors
+- [ ] Environment variable overrides for configuration
+- [ ] Versioned REST API
 - [ ] Go client library
 - [ ] Docker image and Compose example
 - [ ] Prometheus metrics

@@ -10,9 +10,11 @@ import (
 )
 
 // NewRouter returns a handler that serves the registry API routes backed by
-// store. Requests with an unsupported method get 405 and unknown paths get 404.
-func NewRouter(store ServiceStore, logger *slog.Logger) http.Handler {
-	handler := NewHandler(store, logger)
+// store, accepting request bodies of up to maxBodyBytes. Requests with an
+// unsupported method get 405 and unknown paths get 404, both in the JSON
+// error format.
+func NewRouter(store ServiceStore, logger *slog.Logger, maxBodyBytes int64) http.Handler {
+	handler := NewHandler(store, logger, maxBodyBytes)
 
 	mux := http.NewServeMux()
 
@@ -22,5 +24,5 @@ func NewRouter(store ServiceStore, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("DELETE /unregister", handler.Unregister)
 	mux.HandleFunc("GET /health", handler.Health)
 
-	return mux
+	return handler.withJSONErrors(mux)
 }

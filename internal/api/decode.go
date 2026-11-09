@@ -9,19 +9,15 @@ import (
 	"net/http"
 )
 
-// maxRequestBodyBytes caps request bodies. Real requests are well under 1 KiB;
-// the limit stops a client from making the server buffer arbitrary input.
-const maxRequestBodyBytes = 64 << 10
-
 // mapRequest decodes the JSON request body into dto. It returns an error,
 // and the caller should respond 400, when the body:
-//   - is larger than maxRequestBodyBytes,
+//   - is larger than maxBytes,
 //   - is not valid JSON, or is valid JSON but not an object,
 //   - holds anything other than whitespace after that object, such as a
 //     second object,
 //   - contains a field dto does not declare, or a field of the wrong type.
-func mapRequest[T any](writer http.ResponseWriter, request *http.Request, dto *T) error {
-	body := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxRequestBodyBytes))
+func mapRequest[T any](writer http.ResponseWriter, request *http.Request, dto *T, maxBytes int64) error {
+	body := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxBytes))
 
 	// Read the first value as raw bytes so it can be checked before it is
 	// mapped onto dto; decoding null into a struct would silently succeed.

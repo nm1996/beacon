@@ -2,7 +2,6 @@ package api
 
 import (
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"net/http"
 
@@ -22,16 +21,19 @@ type ServiceStore interface {
 // Handler serves the registry API endpoints. Every method is an
 // http.HandlerFunc; NewRouter decides which path and method reach each one.
 type Handler struct {
-	store  ServiceStore
-	logger *slog.Logger
+	store        ServiceStore
+	logger       *slog.Logger
+	maxBodyBytes int64
 }
 
-// NewHandler returns a handler that keeps services in store and reports
-// registrations and unexpected failures to logger.
-func NewHandler(store ServiceStore, logger *slog.Logger) *Handler {
+// NewHandler returns a handler that keeps services in store, reports
+// registrations and unexpected failures to logger, and rejects request
+// bodies larger than maxBodyBytes.
+func NewHandler(store ServiceStore, logger *slog.Logger, maxBodyBytes int64) *Handler {
 	return &Handler{
-		store:  store,
-		logger: logger,
+		store:        store,
+		logger:       logger,
+		maxBodyBytes: maxBodyBytes,
 	}
 }
 
@@ -40,8 +42,8 @@ func NewHandler(store ServiceStore, logger *slog.Logger) *Handler {
 func (handler *Handler) Register(writer http.ResponseWriter, request *http.Request) {
 	var input RegisterRequest
 
-	if err := mapRequest(writer, request, &input); err != nil {
-		http.Error(writer, "Invalid request body", http.StatusBadRequest)
+	if err := mapRequest(writer, request, &input, handler.maxBodyBytes); err != nil {
+		handler.writeInvalidBody(writer)
 		return
 	}
 
@@ -70,13 +72,13 @@ func (handler *Handler) Register(writer http.ResponseWriter, request *http.Reque
 func (handler *Handler) Heartbeat(writer http.ResponseWriter, request *http.Request) {
 	var input HeartbeatRequest
 
-	if err := mapRequest(writer, request, &input); err != nil {
-		http.Error(writer, "Invalid request body", http.StatusBadRequest)
+	if err := mapRequest(writer, request, &input, handler.maxBodyBytes); err != nil {
+		handler.writeInvalidBody(writer)
 		return
 	}
 
 	if input.ID == "" {
-		http.Error(writer, "id is required", http.StatusBadRequest)
+		handler.writeError(writer, http.StatusBadRequest, codeMissingID, "id is required")
 		return
 	}
 
@@ -108,13 +110,13 @@ func (handler *Handler) GetServices(writer http.ResponseWriter, request *http.Re
 func (handler *Handler) Unregister(writer http.ResponseWriter, request *http.Request) {
 	var input UnregisterRequest
 
-	if err := mapRequest(writer, request, &input); err != nil {
-		http.Error(writer, "Invalid request body", http.StatusBadRequest)
+	if err := mapRequest(writer, request, &input, handler.maxBodyBytes); err != nil {
+		handler.writeInvalidBody(writer)
 		return
 	}
 
 	if input.ID == "" {
-		http.Error(writer, "id is required", http.StatusBadRequest)
+		handler.writeError(writer, http.StatusBadRequest, codeMissingID, "id is required")
 		return
 	}
 
@@ -132,20 +134,6 @@ func (handler *Handler) Unregister(writer http.ResponseWriter, request *http.Req
 // responds 200 with {"status":"ok"} and does not touch the registry.
 func (handler *Handler) Health(writer http.ResponseWriter, _ *http.Request) {
 	handler.writeJSON(writer, http.StatusOK, HealthResponse{Status: "ok"})
-}
-
-// writeRegistryError maps a registry error to an HTTP error response.
-// Unexpected errors are logged and reported without internal details.
-func (handler *Handler) writeRegistryError(writer http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, registry.ErrInvalidService):
-		http.Error(writer, err.Error(), http.StatusBadRequest)
-	case errors.Is(err, registry.ErrServiceNotFound):
-		http.Error(writer, "Service not found", http.StatusNotFound)
-	default:
-		handler.logger.Error("registry operation failed", slog.Any("error", err))
-		http.Error(writer, "Internal server error", http.StatusInternalServerError)
-	}
 }
 
 // writeJSON sends data as a JSON body with the given status code.
