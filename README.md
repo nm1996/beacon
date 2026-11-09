@@ -7,6 +7,7 @@
 A lightweight, self-hosted service registry written in Go.<br>
 Services register themselves, send heartbeats, and discover each other over a small HTTP API.
 
+[![CI](https://github.com/nm1996/beacon/actions/workflows/ci.yml/badge.svg)](https://github.com/nm1996/beacon/actions/workflows/ci.yml)
 [![Go version](https://img.shields.io/badge/go-1.27-00ADD8?logo=go&logoColor=white)](go.mod)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Status: work in progress](https://img.shields.io/badge/status-work%20in%20progress-orange)
@@ -47,12 +48,14 @@ Beacon covers the core of the problem and nothing more: one small binary, no ext
 | ✅ | Instances without a recent heartbeat are removed automatically |
 | ✅ | Input validation with clear `400` responses |
 | ✅ | Graceful shutdown on `SIGINT` / `SIGTERM` |
+| ✅ | `GET /health` endpoint for liveness checks |
+| ✅ | Server timeouts and request size limits |
+| ✅ | Structured JSON logs |
 | 🔜 | TOML configuration file and environment overrides |
 | 🔜 | Versioned API (`/api/v1`) with consistent JSON errors |
-| 🔜 | Health and readiness endpoints |
 | 🔜 | Native Go client with automatic heartbeats |
 | 🔜 | Docker image and Compose example |
-| 🔜 | Structured logging and Prometheus metrics |
+| 🔜 | Prometheus metrics |
 
 ## Quick start
 
@@ -63,7 +66,14 @@ git clone https://github.com/nm1996/beacon.git
 cd beacon
 
 go run ./cmd/beacon
-# Beacon listening on :8080
+# {"time":"...","level":"INFO","msg":"beacon listening","addr":":8080","version":"..."}
+```
+
+Check that it is up:
+
+```bash
+curl -s localhost:8080/health
+# {"status":"ok"}
 ```
 
 Register an instance, look it up, and keep it alive:
@@ -116,8 +126,9 @@ All request and response bodies are JSON. Error responses are plain text for now
 | `POST` | [`/heartbeat`](#post-heartbeat) | Keep an instance alive |
 | `GET` | [`/services`](#get-services) | List instances, optionally by name |
 | `DELETE` | [`/unregister`](#delete-unregister) | Remove an instance |
+| `GET` | [`/health`](#get-health) | Check that Beacon is running |
 
-Unknown paths return `404`, and a known path called with the wrong method returns `405`.
+Unknown paths return `404`, and a known path called with the wrong method returns `405`. Request bodies larger than 64 KiB are rejected with `413`.
 
 ### `POST /register`
 
@@ -179,6 +190,14 @@ The order of instances is not defined.
 | `400 Bad Request` | Malformed JSON or missing `id` |
 | `404 Not Found` | No instance with that ID |
 
+### `GET /health`
+
+Always returns `200 OK` while the process is serving requests. Use it for container and load balancer health checks.
+
+```json
+{ "status": "ok" }
+```
+
 ## Configuration
 
 Beacon does not read a configuration file yet. It currently runs with these fixed values:
@@ -188,7 +207,13 @@ Beacon does not read a configuration file yet. It currently runs with these fixe
 | Listen address | `:8080` |
 | Instance TTL (time without a heartbeat before removal) | `30s` |
 | Cleanup interval | `5s` |
+| Read timeout (headers and body) | `5s` |
+| Write timeout | `10s` |
+| Idle connection timeout | `60s` |
+| Maximum request body | `64 KiB` |
 | Shutdown grace period | `10s` |
+
+Logs are written to standard output as JSON. Run `beacon --version` to print the build version.
 
 [`configs/beacon.example.toml`](configs/beacon.example.toml) shows the planned configuration format. It is not loaded by the server yet.
 
@@ -212,26 +237,31 @@ mise run check # format, vet, lint and run tests with the race detector
 | Task | What it does |
 |---|---|
 | `mise run fmt` | Format Go code with `gofmt` |
+| `mise run fmt-check` | Fail if any file is not formatted |
 | `mise run vet` | Run `go vet` |
 | `mise run lint` | Run `golangci-lint` |
 | `mise run test` | Run tests |
 | `mise run test-race` | Run tests with the race detector |
+| `mise run vuln` | Scan for known vulnerabilities with `govulncheck` |
 | `mise run build` | Build `bin/beacon` |
 | `mise run run` | Start the server on `:8080` |
-| `mise run check` | All of the above checks in one go |
+| `mise run check` | Format, vet, lint, race tests and vulnerability scan |
 
-Run `mise tasks` to list them all.
+Run `mise tasks` to list them all. CI runs the same tasks on every pull request.
 
 ## Project layout
 
 ```text
 .
-├── cmd/beacon/          # Entry point: starts the server and cleanup, handles shutdown
+├── cmd/beacon/          # Entry point: logging, signals, cleanup worker and shutdown
 ├── internal/
+│   ├── api/             # HTTP routes and handlers
 │   ├── bootstrap/       # Builds the registry and HTTP server and connects them
-│   ├── http/            # HTTP routes and handlers
 │   └── registry/        # In-memory registry, validation and stale-instance cleanup
-└── configs/             # Example configuration
+├── configs/             # Example configuration
+├── .github/workflows/   # CI
+├── .golangci.yml        # Linter configuration
+└── .mise.toml           # Pinned tools and development tasks
 ```
 
 ## Roadmap
@@ -242,17 +272,18 @@ Run `mise tasks` to list them all.
 - [x] Request validation
 - [x] Automatic removal of stale instances
 - [x] Graceful shutdown
+- [x] Server timeouts and request size limits
+- [x] Health endpoint
+- [x] Structured logging
+- [x] CI pipeline
 
 **Next**
 
 - [ ] TOML configuration with environment overrides
-- [ ] HTTP server timeouts and request size limits
 - [ ] Versioned REST API with consistent JSON errors
-- [ ] Health and readiness endpoints
-- [ ] CI pipeline
 - [ ] Go client library
 - [ ] Docker image and Compose example
-- [ ] Structured logging and metrics
+- [ ] Prometheus metrics
 - [ ] First release, `v0.1.0`
 
 ## Contributing
