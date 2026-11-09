@@ -107,11 +107,10 @@ Use the repository pull request template when available.
 At minimum, run the checks relevant to your change. Common Go checks include:
 
 ```bash
-gofmt -w .
-go test ./...
-go test -race ./...
-go vet ./...
+mise run check
 ```
+
+This formats the code and runs `go vet`, `golangci-lint`, the tests with the race detector and `govulncheck`. CI runs the same checks on every pull request.
 
 Do not report checks as passing unless they were actually executed. If a check cannot be run, explain why.
 
