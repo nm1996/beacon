@@ -97,8 +97,8 @@ Documentation and usage examples will follow as the SDK develops.
 - [x] Heartbeat handling
 - [x] Service discovery
 - [x] Initial HTTP handlers and tests
-- [ ] Automatic cleanup scheduler
-- [ ] Graceful shutdown
+- [x] Automatic cleanup scheduler
+- [x] Graceful shutdown
 - [ ] Core architecture refinement
 
 ### API
