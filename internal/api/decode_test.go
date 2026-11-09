@@ -122,3 +122,22 @@ func TestEndpointsRejectInvalidBodiesWithBadRequest(t *testing.T) {
 		}
 	}
 }
+
+func TestRegisterBodyTooLarge(t *testing.T) {
+	handler, r := setupHandler()
+
+	body := `{"name":"` + strings.Repeat("a", maxRequestBodyBytes) + `","address":"localhost","port":8080}`
+
+	req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	handler.Register(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
+	}
+
+	if len(r.GetServices("")) != 0 {
+		t.Error("expected oversized request not to register a service")
+	}
+}
