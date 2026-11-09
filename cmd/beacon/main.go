@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/nm1996/beacon/internal/bootstrap"
+	"github.com/nm1996/beacon/internal/registry"
 )
 
 // For now these are fixed; they will move to configuration once it exists.
@@ -53,7 +54,10 @@ func run() error {
 	}()
 
 	workers.Go(func() {
-		if err := components.Registry.RunCleanup(workerCtx, cleanupInterval, serviceTTL); err != nil {
+		if err := components.Registry.RunCleanup(workerCtx, registry.CleanupConfig{
+			Interval: cleanupInterval,
+			TTL:      serviceTTL,
+		}); err != nil {
 			log.Printf("cleanup worker: %v", err)
 		}
 	})

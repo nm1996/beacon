@@ -1,4 +1,4 @@
-package http
+package api
 
 // RegisterRequest is the body of POST /register.
 type RegisterRequest struct {
@@ -16,12 +16,6 @@ type RegisterResponse struct {
 // HeartbeatRequest is the body of POST /heartbeat.
 type HeartbeatRequest struct {
 	ID string `json:"id"`
-}
-
-// GetServicesResponse wraps a list of services. It is not used yet:
-// GET /services currently returns a bare JSON array.
-type GetServicesResponse struct {
-	Services []Service `json:"services"`
 }
 
 // Service is how a registered instance appears in API responses.

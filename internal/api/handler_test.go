@@ -1,7 +1,8 @@
-package http
+package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,9 +13,9 @@ import (
 
 // setupHandler returns a handler and the empty registry behind it, so tests
 // can seed or inspect state directly.
-func setupHandler() (*ServiceDiscoveryHandler, *registry.Registry) {
-	r := registry.NewRegistry()
-	handler := NewServiceDiscoveryHandler(r)
+func setupHandler() (*Handler, *registry.Registry) {
+	r := registry.New()
+	handler := NewHandler(r)
 
 	return handler, r
 }
@@ -320,5 +321,54 @@ func TestUnregisterInvalidJSON(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
+	}
+}
+
+// failingStore is a ServiceStore whose every operation fails with err.
+type failingStore struct {
+	err error
+}
+
+// Register always fails.
+func (store failingStore) Register(*registry.Service) (string, error) { return "", store.err }
+
+// Heartbeat always fails.
+func (store failingStore) Heartbeat(string) error { return store.err }
+
+// GetServices always returns no services.
+func (store failingStore) GetServices(string) []*registry.Service { return nil }
+
+// Unregister always fails.
+func (store failingStore) Unregister(string) error { return store.err }
+
+func TestUnexpectedStoreErrorReturnsInternalServerError(t *testing.T) {
+	handler := NewHandler(failingStore{err: errors.New("disk on fire")})
+
+	tests := []struct {
+		name   string
+		serve  http.HandlerFunc
+		method string
+		body   string
+	}{
+		{name: "register", serve: handler.Register, method: http.MethodPost, body: `{"name":"a","address":"b","port":1}`},
+		{name: "heartbeat", serve: handler.Heartbeat, method: http.MethodPost, body: `{"id":"x"}`},
+		{name: "unregister", serve: handler.Unregister, method: http.MethodDelete, body: `{"id":"x"}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, "/", strings.NewReader(tt.body))
+			rec := httptest.NewRecorder()
+
+			tt.serve(rec, req)
+
+			if rec.Code != http.StatusInternalServerError {
+				t.Errorf("expected status %d, got %d", http.StatusInternalServerError, rec.Code)
+			}
+
+			if strings.Contains(rec.Body.String(), "disk on fire") {
+				t.Error("expected internal error details not to leak to the client")
+			}
+		})
 	}
 }
