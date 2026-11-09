@@ -9,10 +9,6 @@ import (
 	"github.com/nm1996/beacon/internal/registry"
 )
 
-// maxRequestBodyBytes caps request bodies. Real requests are well under 1 KiB;
-// the limit stops a client from making the server buffer arbitrary input.
-const maxRequestBodyBytes = 64 << 10
-
 // ServiceStore is the part of the registry the API needs. It is declared
 // here, where it is used, so the handlers depend only on these four methods
 // and tests can swap in a fake. *registry.Registry satisfies it.
@@ -163,26 +159,4 @@ func (handler *Handler) writeJSON(writer http.ResponseWriter, status int, data a
 // writeStatus sends a response with no body.
 func writeStatus(writer http.ResponseWriter, status int) {
 	writer.WriteHeader(status)
-}
-
-// decodeRequest decodes the JSON request body into dto. If that fails it
-// writes the error response itself and returns false: 413 when the body is
-// larger than maxRequestBodyBytes, 400 for anything else.
-func decodeRequest[T any](writer http.ResponseWriter, request *http.Request, dto *T) bool {
-	body := http.MaxBytesReader(writer, request.Body, maxRequestBodyBytes)
-
-	err := json.NewDecoder(body).Decode(dto)
-	if err == nil {
-		return true
-	}
-
-	var tooLarge *http.MaxBytesError
-	if errors.As(err, &tooLarge) {
-		http.Error(writer, "Request body too large", http.StatusRequestEntityTooLarge)
-		return false
-	}
-
-	http.Error(writer, "Invalid JSON", http.StatusBadRequest)
-
-	return false
 }
