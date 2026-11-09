@@ -13,6 +13,10 @@ import (
 // the limit stops a client from making the server buffer arbitrary input.
 const maxRequestBodyBytes = 64 << 10
 
+// invalidBodyMessage is sent for every body mapRequest rejects. It states the
+// rules rather than the specific failure, which would expose Go type names.
+const invalidBodyMessage = "Request body must be a single JSON object of at most 64 KiB with only the documented fields"
+
 // mapRequest decodes the JSON request body into dto. It returns an error,
 // and the caller should respond 400, when the body:
 //   - is larger than maxRequestBodyBytes,

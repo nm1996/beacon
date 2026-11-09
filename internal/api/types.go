@@ -30,6 +30,18 @@ type HealthResponse struct {
 	Status string `json:"status"`
 }
 
+// ErrorResponse is the body of every error response.
+type ErrorResponse struct {
+	Error ErrorDetail `json:"error"`
+}
+
+// ErrorDetail describes what went wrong. Code is stable and meant for
+// programs; Message is meant for people and may change.
+type ErrorDetail struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
 // UnregisterRequest is the body of DELETE /unregister.
 type UnregisterRequest struct {
 	ID string `json:"id"`

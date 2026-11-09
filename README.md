@@ -52,7 +52,8 @@ Beacon covers the core of the problem and nothing more: one small binary, no ext
 | ✅ | Server timeouts and request size limits |
 | ✅ | Structured JSON logs |
 | 🔜 | TOML configuration file and environment overrides |
-| 🔜 | Versioned API (`/api/v1`) with consistent JSON errors |
+| ✅ | Consistent JSON error responses with stable codes |
+| 🔜 | Versioned API (`/api/v1`) |
 | 🔜 | Native Go client with automatic heartbeats |
 | 🔜 | Docker image and Compose example |
 | 🔜 | Prometheus metrics |
@@ -118,7 +119,7 @@ Instances of the same service share a name. Registering again creates a new inst
 
 ## HTTP API
 
-All request and response bodies are JSON. Error responses are plain text for now.
+All request and response bodies are JSON, including errors.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -128,7 +129,27 @@ All request and response bodies are JSON. Error responses are plain text for now
 | `DELETE` | [`/unregister`](#delete-unregister) | Remove an instance |
 | `GET` | [`/health`](#get-health) | Check that Beacon is running |
 
-Unknown paths return `404`, and a known path called with the wrong method returns `405`. Request bodies must be a single JSON object of at most 64 KiB containing only the fields documented below. Anything else (unknown fields, a second JSON value, trailing text, an oversized body) is rejected with `400 Invalid request body`.
+Unknown paths return `404`, and a known path called with the wrong method returns `405`. Request bodies must be a single JSON object of at most 64 KiB containing only the fields documented below. Anything else (unknown fields, a second JSON value, trailing text, an oversized body) is rejected with `400` and the code `invalid_request_body`.
+
+### Errors
+
+Every error response has the same shape:
+
+```json
+{ "error": { "code": "service_not_found", "message": "No service is registered with this ID" } }
+```
+
+`code` is stable and meant for programs; `message` is meant for people and may change.
+
+| Status | Code | When |
+|---|---|---|
+| `400` | `invalid_request_body` | The body is not a single JSON object of at most 64 KiB with only the documented fields |
+| `400` | `invalid_service` | A registration field breaks a rule, for example a port outside `1`–`65535` |
+| `400` | `missing_id` | A heartbeat or unregister request has no `id` |
+| `404` | `service_not_found` | No instance is registered with the given ID |
+| `404` | `not_found` | No endpoint exists at the path |
+| `405` | `method_not_allowed` | The endpoint exists but not for this method; the `Allow` header lists the supported one |
+| `500` | `internal_error` | Something unexpected went wrong on the server |
 
 ### `POST /register`
 
@@ -276,11 +297,12 @@ Run `mise tasks` to list them all. CI runs the same tasks on every pull request.
 - [x] Health endpoint
 - [x] Structured logging
 - [x] CI pipeline
+- [x] Consistent JSON error responses
 
 **Next**
 
 - [ ] TOML configuration with environment overrides
-- [ ] Versioned REST API with consistent JSON errors
+- [ ] Versioned REST API
 - [ ] Go client library
 - [ ] Docker image and Compose example
 - [ ] Prometheus metrics

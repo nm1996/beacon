@@ -110,8 +110,8 @@ func TestEndpointsRejectInvalidBodiesWithBadRequest(t *testing.T) {
 					t.Errorf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
 				}
 
-				if strings.TrimSpace(rec.Body.String()) != "Invalid request body" {
-					t.Errorf("expected message %q, got %q", "Invalid request body", rec.Body.String())
+				if detail := decodeError(t, rec); detail.Code != codeInvalidRequestBody {
+					t.Errorf("expected code %q, got %q", codeInvalidRequestBody, detail.Code)
 				}
 
 				// The rejected request must not have changed the registry.

@@ -2,7 +2,6 @@ package api
 
 import (
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"net/http"
 
@@ -41,7 +40,7 @@ func (handler *Handler) Register(writer http.ResponseWriter, request *http.Reque
 	var input RegisterRequest
 
 	if err := mapRequest(writer, request, &input); err != nil {
-		http.Error(writer, "Invalid request body", http.StatusBadRequest)
+		handler.writeError(writer, http.StatusBadRequest, codeInvalidRequestBody, invalidBodyMessage)
 		return
 	}
 
@@ -71,12 +70,12 @@ func (handler *Handler) Heartbeat(writer http.ResponseWriter, request *http.Requ
 	var input HeartbeatRequest
 
 	if err := mapRequest(writer, request, &input); err != nil {
-		http.Error(writer, "Invalid request body", http.StatusBadRequest)
+		handler.writeError(writer, http.StatusBadRequest, codeInvalidRequestBody, invalidBodyMessage)
 		return
 	}
 
 	if input.ID == "" {
-		http.Error(writer, "id is required", http.StatusBadRequest)
+		handler.writeError(writer, http.StatusBadRequest, codeMissingID, "id is required")
 		return
 	}
 
@@ -109,12 +108,12 @@ func (handler *Handler) Unregister(writer http.ResponseWriter, request *http.Req
 	var input UnregisterRequest
 
 	if err := mapRequest(writer, request, &input); err != nil {
-		http.Error(writer, "Invalid request body", http.StatusBadRequest)
+		handler.writeError(writer, http.StatusBadRequest, codeInvalidRequestBody, invalidBodyMessage)
 		return
 	}
 
 	if input.ID == "" {
-		http.Error(writer, "id is required", http.StatusBadRequest)
+		handler.writeError(writer, http.StatusBadRequest, codeMissingID, "id is required")
 		return
 	}
 
@@ -132,20 +131,6 @@ func (handler *Handler) Unregister(writer http.ResponseWriter, request *http.Req
 // responds 200 with {"status":"ok"} and does not touch the registry.
 func (handler *Handler) Health(writer http.ResponseWriter, _ *http.Request) {
 	handler.writeJSON(writer, http.StatusOK, HealthResponse{Status: "ok"})
-}
-
-// writeRegistryError maps a registry error to an HTTP error response.
-// Unexpected errors are logged and reported without internal details.
-func (handler *Handler) writeRegistryError(writer http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, registry.ErrInvalidService):
-		http.Error(writer, err.Error(), http.StatusBadRequest)
-	case errors.Is(err, registry.ErrServiceNotFound):
-		http.Error(writer, "Service not found", http.StatusNotFound)
-	default:
-		handler.logger.Error("registry operation failed", slog.Any("error", err))
-		http.Error(writer, "Internal server error", http.StatusInternalServerError)
-	}
 }
 
 // writeJSON sends data as a JSON body with the given status code.
