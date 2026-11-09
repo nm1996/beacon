@@ -128,7 +128,7 @@ All request and response bodies are JSON. Error responses are plain text for now
 | `DELETE` | [`/unregister`](#delete-unregister) | Remove an instance |
 | `GET` | [`/health`](#get-health) | Check that Beacon is running |
 
-Unknown paths return `404`, and a known path called with the wrong method returns `405`. Request bodies larger than 64 KiB are rejected with `413`.
+Unknown paths return `404`, and a known path called with the wrong method returns `405`. Request bodies must be a single JSON object with only the fields documented below; unknown fields, a second JSON value or any other trailing data are rejected with `400`. Bodies larger than 64 KiB are rejected with `413`.
 
 ### `POST /register`
 
