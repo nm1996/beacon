@@ -49,7 +49,7 @@ func (registry *Registry) RunCleanup(ctx context.Context, config CleanupConfig, 
 			return nil
 		case <-ticker.C:
 			if removed := registry.Cleanup(config.TTL); removed > 0 {
-				logger.Info("removed stale service instances", slog.Int("count", removed))
+				logger.InfoContext(ctx, "removed stale service instances", slog.Int("count", removed))
 			}
 		}
 	}
