@@ -20,6 +20,7 @@ func NewRouter(store ServiceStore, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("POST /heartbeat", handler.Heartbeat)
 	mux.HandleFunc("GET /services", handler.GetServices)
 	mux.HandleFunc("DELETE /unregister", handler.Unregister)
+	mux.HandleFunc("GET /health", handler.Health)
 
 	return mux
 }

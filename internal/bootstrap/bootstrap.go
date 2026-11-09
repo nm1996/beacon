@@ -7,6 +7,7 @@ package bootstrap
 import (
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/nm1996/beacon/internal/api"
 	"github.com/nm1996/beacon/internal/registry"
@@ -16,6 +17,14 @@ import (
 type Settings struct {
 	// Addr is the TCP address the HTTP server listens on, such as ":8080".
 	Addr string
+	// ReadTimeout limits how long reading a request may take, headers
+	// included. Without it a slow client can hold a connection open forever.
+	ReadTimeout time.Duration
+	// WriteTimeout limits how long writing a response may take.
+	WriteTimeout time.Duration
+	// IdleTimeout is how long a keep-alive connection may wait for its next
+	// request before it is closed.
+	IdleTimeout time.Duration
 }
 
 // Components are the connected parts of a Beacon server.
@@ -35,9 +44,13 @@ func New(settings Settings, logger *slog.Logger) *Components {
 	return &Components{
 		Registry: serviceRegistry,
 		Server: &http.Server{
-			Addr:     settings.Addr,
-			Handler:  api.NewRouter(serviceRegistry, logger),
-			ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelError),
+			Addr:              settings.Addr,
+			Handler:           api.NewRouter(serviceRegistry, logger),
+			ReadHeaderTimeout: settings.ReadTimeout,
+			ReadTimeout:       settings.ReadTimeout,
+			WriteTimeout:      settings.WriteTimeout,
+			IdleTimeout:       settings.IdleTimeout,
+			ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelError),
 		},
 	}
 }

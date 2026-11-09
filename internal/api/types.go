@@ -25,6 +25,11 @@ type Service struct {
 	Port    int    `json:"port"`
 }
 
+// HealthResponse is the body of GET /health.
+type HealthResponse struct {
+	Status string `json:"status"`
+}
+
 // UnregisterRequest is the body of DELETE /unregister.
 type UnregisterRequest struct {
 	ID string `json:"id"`

@@ -41,6 +41,12 @@ func TestRouter(t *testing.T) {
 			expectedStatus: http.StatusBadRequest,
 		},
 		{
+			name:           "health route",
+			method:         http.MethodGet,
+			path:           "/health",
+			expectedStatus: http.StatusOK,
+		},
+		{
 			name:           "unknown route",
 			method:         http.MethodGet,
 			path:           "/unknown",
