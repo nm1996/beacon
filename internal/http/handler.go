@@ -9,16 +9,21 @@ import (
 	"github.com/nm1996/beacon/internal/registry"
 )
 
+// ServiceDiscoveryHandler serves the registry API endpoints. Every method is
+// an http.HandlerFunc; NewRouter decides which path and method reach each one.
 type ServiceDiscoveryHandler struct {
 	registry *registry.Registry
 }
 
+// NewServiceDiscoveryHandler returns a handler backed by the given registry.
 func NewServiceDiscoveryHandler(registry *registry.Registry) *ServiceDiscoveryHandler {
 	return &ServiceDiscoveryHandler{
 		registry: registry,
 	}
 }
 
+// Register adds a new service instance and responds 201 with its ID.
+// Malformed JSON or invalid service fields get 400.
 func (h *ServiceDiscoveryHandler) Register(w http.ResponseWriter, r *http.Request) {
 	var input RegisterRequest
 
@@ -41,6 +46,8 @@ func (h *ServiceDiscoveryHandler) Register(w http.ResponseWriter, r *http.Reques
 	})
 }
 
+// Heartbeat marks an instance as still alive and responds 204.
+// A missing ID gets 400 and an unknown ID gets 404.
 func (h *ServiceDiscoveryHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 	var input HeartbeatRequest
 
@@ -63,6 +70,8 @@ func (h *ServiceDiscoveryHandler) Heartbeat(w http.ResponseWriter, r *http.Reque
 	writeStatus(w, http.StatusNoContent)
 }
 
+// GetServices lists registered instances as a JSON array, filtered by the
+// optional "name" query parameter. An empty registry gives an empty array.
 func (h *ServiceDiscoveryHandler) GetServices(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Query().Get("name")
 
@@ -76,6 +85,8 @@ func (h *ServiceDiscoveryHandler) GetServices(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, result)
 }
 
+// Unregister removes an instance and responds 204.
+// A missing ID gets 400 and an unknown ID gets 404.
 func (h *ServiceDiscoveryHandler) Unregister(w http.ResponseWriter, r *http.Request) {
 	var input UnregisterRequest
 
@@ -112,6 +123,7 @@ func writeRegistryError(w http.ResponseWriter, err error) {
 	}
 }
 
+// writeJSON sends data as a JSON body with the given status code.
 func writeJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	writeStatus(w, status)
@@ -122,10 +134,12 @@ func writeJSON(w http.ResponseWriter, status int, data any) {
 	}
 }
 
+// writeStatus sends a response with no body.
 func writeStatus(w http.ResponseWriter, status int) {
 	w.WriteHeader(status)
 }
 
+// mapRequest decodes the JSON request body into dto.
 func mapRequest[T any](dto *T, r *http.Request) error {
 	return json.NewDecoder(r.Body).Decode(dto)
 }
