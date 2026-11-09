@@ -56,7 +56,7 @@ func (handler *Handler) Register(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 
-	handler.logger.Info("service registered",
+	handler.logger.InfoContext(request.Context(), "service registered",
 		slog.String("id", serviceID),
 		slog.String("name", service.Name),
 		slog.String("address", service.Address),
@@ -124,7 +124,7 @@ func (handler *Handler) Unregister(writer http.ResponseWriter, request *http.Req
 		return
 	}
 
-	handler.logger.Info("service unregistered", slog.String("id", input.ID))
+	handler.logger.InfoContext(request.Context(), "service unregistered", slog.String("id", input.ID))
 
 	writeStatus(writer, http.StatusNoContent)
 }
