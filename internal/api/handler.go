@@ -36,11 +36,12 @@ func NewHandler(store ServiceStore, logger *slog.Logger) *Handler {
 }
 
 // Register adds a new service instance and responds 201 with its ID.
-// Malformed JSON or invalid service fields get 400.
+// An unreadable request body or invalid service fields get 400.
 func (handler *Handler) Register(writer http.ResponseWriter, request *http.Request) {
 	var input RegisterRequest
 
-	if !decodeRequest(writer, request, &input) {
+	if err := mapRequest(writer, request, &input); err != nil {
+		http.Error(writer, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -69,7 +70,8 @@ func (handler *Handler) Register(writer http.ResponseWriter, request *http.Reque
 func (handler *Handler) Heartbeat(writer http.ResponseWriter, request *http.Request) {
 	var input HeartbeatRequest
 
-	if !decodeRequest(writer, request, &input) {
+	if err := mapRequest(writer, request, &input); err != nil {
+		http.Error(writer, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -106,7 +108,8 @@ func (handler *Handler) GetServices(writer http.ResponseWriter, request *http.Re
 func (handler *Handler) Unregister(writer http.ResponseWriter, request *http.Request) {
 	var input UnregisterRequest
 
-	if !decodeRequest(writer, request, &input) {
+	if err := mapRequest(writer, request, &input); err != nil {
+		http.Error(writer, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 

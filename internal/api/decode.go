@@ -1,96 +1,51 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 )
 
 // maxRequestBodyBytes caps request bodies. Real requests are well under 1 KiB;
 // the limit stops a client from making the server buffer arbitrary input.
 const maxRequestBodyBytes = 64 << 10
 
-// errTrailingData reports a body that holds more than one JSON value.
-var errTrailingData = errors.New("trailing data after JSON value")
+// mapRequest decodes the JSON request body into dto. It returns an error,
+// and the caller should respond 400, when the body:
+//   - is larger than maxRequestBodyBytes,
+//   - is not valid JSON, or is valid JSON but not an object,
+//   - holds anything other than whitespace after that object, such as a
+//     second object,
+//   - contains a field dto does not declare, or a field of the wrong type.
+func mapRequest[T any](writer http.ResponseWriter, request *http.Request, dto *T) error {
+	body := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxRequestBodyBytes))
 
-// decodeRequest decodes the JSON request body into dto. The body must be a
-// single JSON value of at most maxRequestBodyBytes, with no fields that dto
-// does not declare. If decoding fails it writes the error response itself
-// and returns false: 413 when the body is too large, 400 otherwise.
-func decodeRequest[T any](writer http.ResponseWriter, request *http.Request, dto *T) bool {
-	err := decodeStrict(http.MaxBytesReader(writer, request.Body, maxRequestBodyBytes), dto)
-	if err == nil {
-		return true
+	// Read the first value as raw bytes so it can be checked before it is
+	// mapped onto dto; decoding null into a struct would silently succeed.
+	var raw json.RawMessage
+	if err := body.Decode(&raw); err != nil {
+		return fmt.Errorf("read request body: %w", err)
 	}
 
-	var tooLarge *http.MaxBytesError
-	if errors.As(err, &tooLarge) {
-		http.Error(writer, "Request body too large", http.StatusRequestEntityTooLarge)
-		return false
+	if raw[0] != '{' {
+		return errors.New("request body must be a JSON object")
 	}
 
-	http.Error(writer, describeDecodeError(err), http.StatusBadRequest)
-
-	return false
-}
-
-// decodeStrict decodes exactly one JSON value from body into dto and fails
-// on unknown fields or on anything but whitespace after that value.
-func decodeStrict(body io.Reader, dto any) error {
-	decoder := json.NewDecoder(body)
-	decoder.DisallowUnknownFields()
-
-	if err := decoder.Decode(dto); err != nil {
-		return err
+	// Decoding again must reach the end of the body; any other outcome means
+	// something follows the object.
+	if err := body.Decode(&json.RawMessage{}); !errors.Is(err, io.EOF) {
+		return errors.New("request body must contain a single JSON object")
 	}
 
-	// A second Decode must hit the end of the body. Anything else, whether
-	// another value like {"id":"a"}{"id":"b"} or stray text, is trailing data,
-	// unless reading it ran past the size limit.
-	var extra json.RawMessage
+	fields := json.NewDecoder(bytes.NewReader(raw))
+	fields.DisallowUnknownFields()
 
-	err := decoder.Decode(&extra)
-	if errors.Is(err, io.EOF) {
-		return nil
+	if err := fields.Decode(dto); err != nil {
+		return fmt.Errorf("map request body: %w", err)
 	}
 
-	var tooLarge *http.MaxBytesError
-	if errors.As(err, &tooLarge) {
-		return err
-	}
-
-	return errTrailingData
-}
-
-// describeDecodeError turns a decoding error into a message that tells the
-// client what to fix without exposing Go type names.
-func describeDecodeError(err error) string {
-	var syntaxErr *json.SyntaxError
-	var typeErr *json.UnmarshalTypeError
-
-	switch {
-	case errors.Is(err, io.EOF):
-		return "Request body is empty"
-	case errors.Is(err, io.ErrUnexpectedEOF), errors.As(err, &syntaxErr):
-		return "Request body is not valid JSON"
-	case errors.As(err, &typeErr):
-		if typeErr.Field == "" {
-			return "Request body must be a JSON object"
-		}
-
-		return fmt.Sprintf("Field %q has the wrong type", typeErr.Field)
-	case errors.Is(err, errTrailingData):
-		return "Request body must contain a single JSON object"
-	}
-
-	// encoding/json has no error type for unknown fields, only this message
-	// format, so matching the text is the only way to recognize it.
-	if field, ok := strings.CutPrefix(err.Error(), "json: unknown field "); ok {
-		return "Unknown field " + field
-	}
-
-	return "Request body is not valid JSON"
+	return nil
 }

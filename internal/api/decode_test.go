@@ -7,105 +7,137 @@ import (
 	"testing"
 )
 
-func TestRegisterDecoding(t *testing.T) {
-	const valid = `{"name":"orders","address":"10.0.0.1","port":8081}`
-
+func TestMapRequestAcceptsSingleObject(t *testing.T) {
 	tests := []struct {
-		name        string
-		body        string
-		wantStatus  int
-		wantMessage string
+		name string
+		body string
 	}{
-		{name: "valid object", body: valid, wantStatus: http.StatusCreated},
-		{name: "trailing whitespace", body: valid + "\n\t ", wantStatus: http.StatusCreated},
-		{name: "empty body", body: "", wantStatus: http.StatusBadRequest, wantMessage: "Request body is empty"},
-		{name: "truncated JSON", body: `{"name":`, wantStatus: http.StatusBadRequest, wantMessage: "not valid JSON"},
-		{name: "syntax error", body: `{name: "orders"}`, wantStatus: http.StatusBadRequest, wantMessage: "not valid JSON"},
-		{
-			name:        "unknown field",
-			body:        `{"name":"orders","address":"10.0.0.1","port":8081,"weight":5}`,
-			wantStatus:  http.StatusBadRequest,
-			wantMessage: `Unknown field "weight"`,
-		},
-		{
-			name:        "abbreviated field name",
-			body:        `{"name":"orders","addr":"10.0.0.1","port":8081}`,
-			wantStatus:  http.StatusBadRequest,
-			wantMessage: `Unknown field "addr"`,
-		},
-		{
-			name:        "wrong field type",
-			body:        `{"name":"orders","address":"10.0.0.1","port":"8081"}`,
-			wantStatus:  http.StatusBadRequest,
-			wantMessage: `Field "port" has the wrong type`,
-		},
-		{name: "array instead of object", body: `[]`, wantStatus: http.StatusBadRequest, wantMessage: "must be a JSON object"},
-		{name: "two objects", body: valid + valid, wantStatus: http.StatusBadRequest, wantMessage: "single JSON object"},
-		{name: "object then text", body: valid + " extra", wantStatus: http.StatusBadRequest, wantMessage: "single JSON object"},
-		{
-			name:       "valid object then padding past the limit",
-			body:       valid + strings.Repeat(" ", maxRequestBodyBytes),
-			wantStatus: http.StatusRequestEntityTooLarge,
-		},
+		{name: "compact object", body: `{"name":"orders","address":"10.0.0.1","port":8081}`},
+		{name: "surrounding whitespace", body: "\n  {\"name\":\"orders\",\"address\":\"10.0.0.1\",\"port\":8081}\r\n\t "},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler, r := setupHandler()
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(tt.body))
 
-			req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(tt.body))
-			rec := httptest.NewRecorder()
-
-			handler.Register(rec, req)
-
-			if rec.Code != tt.wantStatus {
-				t.Fatalf("expected status %d, got %d (body %q)", tt.wantStatus, rec.Code, rec.Body.String())
+			var dto RegisterRequest
+			if err := mapRequest(httptest.NewRecorder(), req, &dto); err != nil {
+				t.Fatalf("expected body to be accepted, got %v", err)
 			}
 
-			if !strings.Contains(rec.Body.String(), tt.wantMessage) {
-				t.Errorf("expected message containing %q, got %q", tt.wantMessage, rec.Body.String())
-			}
-
-			wantRegistered := 0
-			if tt.wantStatus == http.StatusCreated {
-				wantRegistered = 1
-			}
-
-			if got := len(r.GetServices("")); got != wantRegistered {
-				t.Errorf("expected %d registered services, got %d", wantRegistered, got)
+			want := RegisterRequest{Name: "orders", Address: "10.0.0.1", Port: 8081}
+			if dto != want {
+				t.Errorf("expected %+v, got %+v", want, dto)
 			}
 		})
 	}
 }
 
-func TestHeartbeatAndUnregisterRejectUnknownFields(t *testing.T) {
-	handler, r := setupHandler()
-	id := mustRegister(t, r, "orders", 8081)
-
-	body := `{"id":"` + id + `","force":true}`
+func TestMapRequestRejectsInvalidBodies(t *testing.T) {
+	const valid = `{"name":"orders","address":"10.0.0.1","port":8081}`
 
 	tests := []struct {
-		name  string
-		serve http.HandlerFunc
+		name string
+		body string
 	}{
-		{name: "heartbeat", serve: handler.Heartbeat},
-		{name: "unregister", serve: handler.Unregister},
+		// Size limit.
+		{name: "body over the limit", body: `{"name":"` + strings.Repeat("a", maxRequestBodyBytes) + `"}`},
+		{name: "valid object padded past the limit", body: valid + strings.Repeat(" ", maxRequestBodyBytes)},
+
+		// Not a single valid JSON object.
+		{name: "empty body", body: ""},
+		{name: "only whitespace", body: " \n\t"},
+		{name: "truncated object", body: `{"name":"orders"`},
+		{name: "syntax error", body: `{name: "orders"}`},
+		{name: "null", body: `null`},
+		{name: "array", body: `[` + valid + `]`},
+		{name: "string", body: `"orders"`},
+		{name: "number", body: `8081`},
+
+		// Unknown fields and wrong types.
+		{name: "unknown field", body: `{"name":"orders","address":"10.0.0.1","port":8081,"weight":5}`},
+		{name: "wrongly named field", body: `{"name":"orders","addr":"10.0.0.1","port":8081}`},
+		{name: "wrong field type", body: `{"name":"orders","address":"10.0.0.1","port":"8081"}`},
+
+		// Trailing content.
+		{name: "second object", body: valid + valid},
+		{name: "second object after newline", body: valid + "\n" + valid},
+		{name: "trailing array", body: valid + `[]`},
+		{name: "trailing text", body: valid + ` extra`},
+		{name: "trailing comma", body: valid + `,`},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
-			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(tt.body))
 
-			tt.serve(rec, req)
-
-			if rec.Code != http.StatusBadRequest {
-				t.Errorf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
+			var dto RegisterRequest
+			if err := mapRequest(httptest.NewRecorder(), req, &dto); err == nil {
+				t.Errorf("expected body %.60q to be rejected, decoded %+v", tt.body, dto)
 			}
 		})
 	}
+}
 
-	if len(r.GetServices("")) != 1 {
-		t.Error("expected the service to stay registered")
+func TestEndpointsRejectInvalidBodiesWithBadRequest(t *testing.T) {
+	bodies := map[string]string{
+		"too large":     `{"id":"` + strings.Repeat("a", maxRequestBodyBytes) + `"}`,
+		"unknown field": `{"id":"some-id","force":true}`,
+		"two objects":   `{"id":"a"}{"id":"b"}`,
+		"trailing text": `{"id":"a"} extra`,
+		"malformed":     `{"id":`,
+	}
+
+	for bodyName, body := range bodies {
+		for _, endpoint := range []struct {
+			method string
+			path   string
+		}{
+			{method: http.MethodPost, path: "/register"},
+			{method: http.MethodPost, path: "/heartbeat"},
+			{method: http.MethodDelete, path: "/unregister"},
+		} {
+			t.Run(endpoint.path+"/"+bodyName, func(t *testing.T) {
+				handler, r := setupHandler()
+				id := mustRegister(t, r, "orders", 8081)
+
+				req := httptest.NewRequest(endpoint.method, endpoint.path, strings.NewReader(body))
+				rec := httptest.NewRecorder()
+
+				NewRouter(r, handler.logger).ServeHTTP(rec, req)
+
+				if rec.Code != http.StatusBadRequest {
+					t.Errorf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
+				}
+
+				if strings.TrimSpace(rec.Body.String()) != "Invalid request body" {
+					t.Errorf("expected message %q, got %q", "Invalid request body", rec.Body.String())
+				}
+
+				// The rejected request must not have changed the registry.
+				if got := r.GetServices(""); len(got) != 1 || got[0].ID != id {
+					t.Errorf("expected only the seeded service to remain, got %+v", got)
+				}
+			})
+		}
+	}
+}
+
+func TestRegisterBodyTooLarge(t *testing.T) {
+	handler, r := setupHandler()
+
+	body := `{"name":"` + strings.Repeat("a", maxRequestBodyBytes) + `","address":"localhost","port":8080}`
+
+	req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	handler.Register(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
+	}
+
+	if len(r.GetServices("")) != 0 {
+		t.Error("expected oversized request not to register a service")
 	}
 }
