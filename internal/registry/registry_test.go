@@ -1,20 +1,36 @@
 package registry
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
 
-func TestRegister(t *testing.T) {
-	r := NewRegistry()
-
-	input := &Service{
-		Name:    "payment-service",
+func newService(name string) *Service {
+	return &Service{
+		Name:    name,
 		Address: "localhost",
 		Port:    8080,
 	}
+}
 
-	id := r.Register(input)
+func mustRegister(t *testing.T, r *Registry, service *Service) string {
+	t.Helper()
+
+	id, err := r.Register(service)
+	if err != nil {
+		t.Fatalf("register %q: %v", service.Name, err)
+	}
+
+	return id
+}
+
+func TestRegister(t *testing.T) {
+	r := NewRegistry()
+
+	input := newService("payment-service")
+
+	id := mustRegister(t, r, input)
 
 	if id == "" {
 		t.Fatal("expected generated service ID")
@@ -48,12 +64,9 @@ func TestRegister(t *testing.T) {
 func TestRegisterCopiesInput(t *testing.T) {
 	r := NewRegistry()
 
-	input := &Service{
-		Name: "payment-service",
-		Port: 8080,
-	}
+	input := newService("payment-service")
 
-	r.Register(input)
+	mustRegister(t, r, input)
 
 	// Change original input after registration.
 	input.Name = "modified-service"
@@ -77,26 +90,74 @@ func TestRegisterCopiesInput(t *testing.T) {
 func TestRegisterNil(t *testing.T) {
 	r := NewRegistry()
 
-	id := r.Register(nil)
+	id, err := r.Register(nil)
+
+	if !errors.Is(err, ErrInvalidService) {
+		t.Errorf("expected ErrInvalidService, got %v", err)
+	}
 
 	if id != "" {
 		t.Errorf("expected empty ID for nil service, got %s", id)
 	}
 }
 
+func TestRegisterRejectsInvalidService(t *testing.T) {
+	tests := []struct {
+		name    string
+		service Service
+	}{
+		{name: "empty name", service: Service{Address: "localhost", Port: 8080}},
+		{name: "blank name", service: Service{Name: "  ", Address: "localhost", Port: 8080}},
+		{name: "empty address", service: Service{Name: "orders", Port: 8080}},
+		{name: "blank address", service: Service{Name: "orders", Address: "\t", Port: 8080}},
+		{name: "zero port", service: Service{Name: "orders", Address: "localhost"}},
+		{name: "negative port", service: Service{Name: "orders", Address: "localhost", Port: -1}},
+		{name: "port above range", service: Service{Name: "orders", Address: "localhost", Port: 65536}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := NewRegistry()
+
+			id, err := r.Register(&tt.service)
+
+			if !errors.Is(err, ErrInvalidService) {
+				t.Fatalf("expected ErrInvalidService, got %v", err)
+			}
+
+			if id != "" {
+				t.Errorf("expected empty ID, got %s", id)
+			}
+
+			if len(r.GetServices("")) != 0 {
+				t.Error("expected invalid service not to be stored")
+			}
+		})
+	}
+}
+
+func TestRegisterAcceptsPortBoundaries(t *testing.T) {
+	for _, port := range []int{1, 65535} {
+		r := NewRegistry()
+
+		service := newService("orders")
+		service.Port = port
+
+		if _, err := r.Register(service); err != nil {
+			t.Errorf("expected port %d to be accepted, got %v", port, err)
+		}
+	}
+}
+
 func TestHeartbeat(t *testing.T) {
 	r := NewRegistry()
 
-	id := r.Register(&Service{
-		Name: "payment-service",
-	})
+	id := mustRegister(t, r, newService("payment-service"))
 
 	before := time.Now()
 
-	success := r.Heartbeat(id)
-
-	if !success {
-		t.Fatal("expected heartbeat to succeed")
+	if err := r.Heartbeat(id); err != nil {
+		t.Fatalf("expected heartbeat to succeed, got %v", err)
 	}
 
 	services := r.GetServices("payment-service")
@@ -113,19 +174,19 @@ func TestHeartbeat(t *testing.T) {
 func TestHeartbeatUnknownService(t *testing.T) {
 	r := NewRegistry()
 
-	success := r.Heartbeat("unknown-id")
+	err := r.Heartbeat("unknown-id")
 
-	if success {
-		t.Error("expected heartbeat to fail for unknown service")
+	if !errors.Is(err, ErrServiceNotFound) {
+		t.Errorf("expected ErrServiceNotFound, got %v", err)
 	}
 }
 
 func TestGetServices(t *testing.T) {
 	r := NewRegistry()
 
-	r.Register(&Service{Name: "payment-service"})
-	r.Register(&Service{Name: "payment-service"})
-	r.Register(&Service{Name: "user-service"})
+	mustRegister(t, r, newService("payment-service"))
+	mustRegister(t, r, newService("payment-service"))
+	mustRegister(t, r, newService("user-service"))
 
 	paymentServices := r.GetServices("payment-service")
 
@@ -143,10 +204,7 @@ func TestGetServices(t *testing.T) {
 func TestGetServicesReturnsCopies(t *testing.T) {
 	r := NewRegistry()
 
-	r.Register(&Service{
-		Name: "payment-service",
-		Port: 8080,
-	})
+	mustRegister(t, r, newService("payment-service"))
 
 	services := r.GetServices("payment-service")
 
@@ -173,14 +231,10 @@ func TestGetServicesReturnsCopies(t *testing.T) {
 func TestUnregister(t *testing.T) {
 	r := NewRegistry()
 
-	id := r.Register(&Service{
-		Name: "payment-service",
-	})
+	id := mustRegister(t, r, newService("payment-service"))
 
-	success := r.Unregister(id)
-
-	if !success {
-		t.Fatal("expected unregister to succeed")
+	if err := r.Unregister(id); err != nil {
+		t.Fatalf("expected unregister to succeed, got %v", err)
 	}
 
 	services := r.GetServices("payment-service")
@@ -193,23 +247,18 @@ func TestUnregister(t *testing.T) {
 func TestUnregisterUnknownService(t *testing.T) {
 	r := NewRegistry()
 
-	success := r.Unregister("unknown-id")
+	err := r.Unregister("unknown-id")
 
-	if success {
-		t.Error("expected unregister to fail for unknown service")
+	if !errors.Is(err, ErrServiceNotFound) {
+		t.Errorf("expected ErrServiceNotFound, got %v", err)
 	}
 }
 
 func TestCleanup(t *testing.T) {
 	r := NewRegistry()
 
-	staleID := r.Register(&Service{
-		Name: "stale-service",
-	})
-
-	r.Register(&Service{
-		Name: "active-service",
-	})
+	staleID := mustRegister(t, r, newService("stale-service"))
+	mustRegister(t, r, newService("active-service"))
 
 	// Simulate an old heartbeat.
 	r.mu.Lock()
@@ -230,9 +279,7 @@ func TestCleanup(t *testing.T) {
 func TestCleanupDoesNotRemoveActiveServices(t *testing.T) {
 	r := NewRegistry()
 
-	r.Register(&Service{
-		Name: "active-service",
-	})
+	mustRegister(t, r, newService("active-service"))
 
 	removed := r.Cleanup(time.Hour)
 
