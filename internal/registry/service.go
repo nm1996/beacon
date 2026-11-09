@@ -31,20 +31,20 @@ type Service struct {
 
 // validate checks the fields a caller supplies when registering a service.
 // The returned error wraps ErrInvalidService.
-func (s *Service) validate() error {
-	if s == nil {
+func (service *Service) validate() error {
+	if service == nil {
 		return fmt.Errorf("%w: service is required", ErrInvalidService)
 	}
 
-	if strings.TrimSpace(s.Name) == "" {
+	if strings.TrimSpace(service.Name) == "" {
 		return fmt.Errorf("%w: name is required", ErrInvalidService)
 	}
 
-	if strings.TrimSpace(s.Address) == "" {
+	if strings.TrimSpace(service.Address) == "" {
 		return fmt.Errorf("%w: address is required", ErrInvalidService)
 	}
 
-	if s.Port < minPort || s.Port > maxPort {
+	if service.Port < minPort || service.Port > maxPort {
 		return fmt.Errorf("%w: port must be between %d and %d", ErrInvalidService, minPort, maxPort)
 	}
 
