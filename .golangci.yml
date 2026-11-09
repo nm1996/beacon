@@ -1,0 +1,63 @@
+version: "2"
+
+linters:
+  # The standard set (errcheck, govet, ineffassign, staticcheck, unused) plus:
+  enable:
+    - bodyclose     # HTTP response bodies are closed
+    - errorlint     # errors are compared with errors.Is / errors.As
+    - gocritic      # common bugs and simplifications
+    - godot         # doc comments are full sentences
+    - gosec         # security problems, such as servers without timeouts
+    - misspell      # spelling in comments and strings
+    - nilerr        # no returning nil right after checking err != nil
+    - noctx         # outgoing HTTP requests carry a context
+    - revive        # every exported identifier has a doc comment
+    - sloglint      # consistent log/slog usage
+    - unconvert     # no needless type conversions
+    - usestdlibvars # http.MethodGet instead of "GET" and similar
+    - varnamelen    # no single-letter names outside tests
+
+  settings:
+    godot:
+      scope: declarations
+    revive:
+      rules:
+        - name: exported
+          arguments:
+            - checkPrivateReceivers
+        - name: package-comments
+    sloglint:
+      attr-only: true
+      no-global: all
+      context: scope
+    varnamelen:
+      # Our rule is "no single-letter names outside tests". varnamelen only
+      # flags short names used more than a line or so from their declaration,
+      # so it catches most violations but not all; review covers the rest.
+      min-name-length: 2
+      max-distance: 1
+      check-receiver: true
+      check-return: true
+      ignore-type-assert-ok: true
+      ignore-map-index-ok: true
+      ignore-chan-recv-ok: true
+
+  exclusions:
+    presets:
+      - std-error-handling
+    rules:
+      # Short names such as t, tt and r are idiomatic in tests.
+      - path: _test\.go
+        linters:
+          - varnamelen
+          - gosec
+          - noctx
+
+issues:
+  # Report every finding instead of the first few per linter.
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+formatters:
+  enable:
+    - gofmt

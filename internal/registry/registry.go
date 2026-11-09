@@ -12,28 +12,16 @@ import (
 	"github.com/google/uuid"
 )
 
-// ServiceDiscoveryRegistrator lists the operations a service registry offers.
-// Registry is the only implementation today.
-type ServiceDiscoveryRegistrator interface {
-	Register(service *Service) (string, error)
-	Heartbeat(serviceID string) error
-	GetServices(name string) []*Service
-	Unregister(serviceID string) error
-	Cleanup(timeout time.Duration) int
-}
-
 // Registry is a concurrency-safe, in-memory store of service instances keyed
-// by their generated ID. Use NewRegistry to create one; the zero value is not
+// by their generated ID. Use New to create one; the zero value is not
 // ready to use.
 type Registry struct {
 	mu       sync.RWMutex
 	services map[string]*Service
 }
 
-var _ ServiceDiscoveryRegistrator = (*Registry)(nil)
-
-// NewRegistry returns an empty registry.
-func NewRegistry() *Registry {
+// New returns an empty registry.
+func New() *Registry {
 	return &Registry{
 		services: make(map[string]*Service),
 	}

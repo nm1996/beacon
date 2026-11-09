@@ -6,6 +6,10 @@ golangci-lint = "2.15.0"
 description = "Format Go source files with gofmt"
 run = "gofmt -w ."
 
+[tasks.fmt-check]
+description = "Fail if any Go file is not gofmt-formatted"
+run = 'test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }'
+
 [tasks.vet]
 description = "Run go vet"
 run = "go vet ./..."
@@ -22,6 +26,10 @@ run = "go test ./..."
 description = "Run tests with the race detector"
 run = "go test -race ./..."
 
+[tasks.vuln]
+description = "Scan dependencies and code for known vulnerabilities"
+run = "go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./..."
+
 [tasks.build]
 description = "Build the beacon binary into bin/"
 run = "go build -o bin/beacon ./cmd/beacon"
@@ -37,4 +45,5 @@ run = [
   "go vet ./...",
   "golangci-lint run ./...",
   "go test -race ./...",
+  "mise run vuln",
 ]
