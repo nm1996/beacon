@@ -6,6 +6,7 @@
 package registry
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -30,7 +31,14 @@ func New() *Registry {
 // Register validates service and stores a copy under a newly generated ID.
 // It returns an error wrapping ErrInvalidService when validation fails.
 func (registry *Registry) Register(service *Service) (string, error) {
-	if err := service.validate(); err != nil {
+	if service == nil {
+		return "", fmt.Errorf("%w: service is required", ErrInvalidService)
+	}
+
+	// Validate and store the same private copy, so a caller that keeps
+	// changing service cannot slip in values that were never checked.
+	serviceCopy := *service
+	if err := serviceCopy.validate(); err != nil {
 		return "", err
 	}
 
@@ -39,7 +47,6 @@ func (registry *Registry) Register(service *Service) (string, error) {
 
 	now := time.Now()
 
-	serviceCopy := *service
 	serviceCopy.ID = uuid.New().String()
 	serviceCopy.RegisteredAt = now
 	serviceCopy.LastHeartbeat = now

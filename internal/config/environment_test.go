@@ -124,6 +124,14 @@ func TestLoadEnvironmentFailures(test *testing.T) {
 			wantErr:   []string{"invalid config", "server.port"},
 		},
 		{
+			name: "cleanup interval longer than TTL",
+			variables: map[string]string{
+				"BEACON_REGISTRY_SERVICE_TTL":      "5s",
+				"BEACON_REGISTRY_CLEANUP_INTERVAL": "1m",
+			},
+			wantErr: []string{"invalid config", "registry.cleanup_interval", "registry.service_ttl"},
+		},
+		{
 			name:      "unknown log level",
 			variables: map[string]string{"BEACON_LOGGING_LEVEL": "verbose"},
 			wantErr:   []string{"logging.level"},

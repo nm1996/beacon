@@ -152,6 +152,11 @@ func (config Config) Validate() error {
 	registry := config.Registry
 	check(registry.ServiceTTL > 0, "registry.service_ttl must be positive, got %s", registry.ServiceTTL)
 	check(registry.CleanupInterval > 0, "registry.cleanup_interval must be positive, got %s", registry.CleanupInterval)
+	// A stale instance stays visible for up to TTL plus one interval, so an
+	// interval longer than the TTL would more than double that window.
+	check(registry.CleanupInterval <= registry.ServiceTTL,
+		"registry.cleanup_interval (%s) must not be longer than registry.service_ttl (%s)",
+		registry.CleanupInterval, registry.ServiceTTL)
 
 	_, levelErr := config.Logging.SlogLevel()
 	check(levelErr == nil, "logging.level must be debug, info, warn or error, got %q", config.Logging.Level)
