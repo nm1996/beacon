@@ -12,7 +12,8 @@ import (
 // servicesPath is the collection every versioned service route lives under.
 const servicesPath = "/api/v1/services"
 
-// NewRouter returns a handler that serves the registry API backed by store:
+// NewRouter returns a handler that serves the registry API backed by
+// discovery:
 //
 //	POST   /api/v1/services                 register an instance
 //	GET    /api/v1/services?name=orders     list instances
@@ -22,8 +23,8 @@ const servicesPath = "/api/v1/services"
 //
 // Requests with an unsupported method get 405 and unknown paths get 404,
 // both in the JSON error format.
-func NewRouter(store ServiceStore, logger *slog.Logger, config Config) http.Handler {
-	handler := NewHandler(store, logger, config)
+func NewRouter(discovery Discovery, logger *slog.Logger, config Config) http.Handler {
+	handler := NewHandler(discovery, logger, config)
 
 	mux := http.NewServeMux()
 

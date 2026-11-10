@@ -1,57 +1,58 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"time"
 
-	"github.com/nm1996/beacon/internal/registry"
+	"github.com/nm1996/beacon/internal/discovery"
 )
 
-// ServiceStore is the part of the registry the API needs. It is declared
-// here, where it is used, so the handlers depend only on these four methods
-// and tests can swap in a fake. *registry.Registry satisfies it.
-type ServiceStore interface {
-	Register(service *registry.Service) (string, error)
-	Heartbeat(serviceID string) error
-	GetServices(name string) []*registry.Service
-	Unregister(serviceID string) error
+// Discovery is the business layer the API needs. It is declared here, where
+// it is used, so handlers depend only on these methods and tests can swap
+// in a fake. *discovery.Service satisfies it.
+type Discovery interface {
+	Register(ctx context.Context, registration discovery.Registration) (discovery.Instance, error)
+	Heartbeat(ctx context.Context, id string) error
+	Discover(ctx context.Context, name string) ([]discovery.Instance, error)
+	Unregister(ctx context.Context, id string) error
+	TTL() time.Duration
 }
 
 // Config holds the settings the API needs from Beacon's configuration.
 type Config struct {
 	// MaxRequestBodyBytes is the largest request body accepted.
 	MaxRequestBodyBytes int64
-	// ServiceTTL is how long an instance may go without a heartbeat. It is
-	// reported to clients when they register so they can pace heartbeats.
-	ServiceTTL time.Duration
 	// Version is the running build's version, reported by GET /health.
 	Version string
 }
 
 // Handler serves the registry API endpoints. Every method is an
 // http.HandlerFunc; NewRouter decides which path and method reach each one.
+// Handlers only translate between HTTP and the Discovery calls; the rules
+// live in the discovery package.
 type Handler struct {
-	store  ServiceStore
-	logger *slog.Logger
-	config Config
+	discovery Discovery
+	logger    *slog.Logger
+	config    Config
 }
 
-// NewHandler returns a handler that keeps services in store, reports
-// registrations and unexpected failures to logger, and follows config.
-func NewHandler(store ServiceStore, logger *slog.Logger, config Config) *Handler {
+// NewHandler returns a handler backed by discovery that reports unexpected
+// failures to logger and follows config.
+func NewHandler(discovery Discovery, logger *slog.Logger, config Config) *Handler {
 	return &Handler{
-		store:  store,
-		logger: logger,
-		config: config,
+		discovery: discovery,
+		logger:    logger,
+		config:    config,
 	}
 }
 
 // Register adds a new service instance and responds 201 with its ID and the
 // TTL within which it must send heartbeats. The Location header points at
-// the new instance. Malformed bodies or invalid service fields get 400.
+// the new instance. Malformed bodies or invalid fields get 400.
 func (handler *Handler) Register(writer http.ResponseWriter, request *http.Request) {
 	var input RegisterRequest
 
@@ -60,33 +61,24 @@ func (handler *Handler) Register(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 
-	service := mapRegisterRequest(input)
-
-	serviceID, err := handler.store.Register(service)
+	instance, err := handler.discovery.Register(request.Context(), mapRegisterRequest(input))
 	if err != nil {
-		handler.writeRegistryError(writer, err)
+		handler.writeDiscoveryError(writer, request, err)
 		return
 	}
 
-	handler.logger.InfoContext(request.Context(), "service registered",
-		slog.String("id", serviceID),
-		slog.String("name", service.Name),
-		slog.String("address", service.Address),
-		slog.Int("port", service.Port),
-	)
-
-	writer.Header().Set("Location", servicesPath+"/"+url.PathEscape(serviceID))
+	writer.Header().Set("Location", servicesPath+"/"+url.PathEscape(instance.ID))
 	handler.writeJSON(writer, http.StatusCreated, RegisterResponse{
-		ID:         serviceID,
-		TTLSeconds: int64(handler.config.ServiceTTL / time.Second),
+		ID:         instance.ID,
+		TTLSeconds: int64(handler.discovery.TTL() / time.Second),
 	})
 }
 
 // Heartbeat marks the instance named in the path as still alive and
 // responds 204. An unknown ID, including one that already expired, gets 404.
 func (handler *Handler) Heartbeat(writer http.ResponseWriter, request *http.Request) {
-	if err := handler.store.Heartbeat(request.PathValue("id")); err != nil {
-		handler.writeRegistryError(writer, err)
+	if err := handler.discovery.Heartbeat(request.Context(), request.PathValue("id")); err != nil {
+		handler.writeDiscoveryError(writer, request, err)
 		return
 	}
 
@@ -96,13 +88,15 @@ func (handler *Handler) Heartbeat(writer http.ResponseWriter, request *http.Requ
 // GetServices lists registered instances as a JSON array, filtered by the
 // optional "name" query parameter. An empty registry gives an empty array.
 func (handler *Handler) GetServices(writer http.ResponseWriter, request *http.Request) {
-	name := request.URL.Query().Get("name")
+	instances, err := handler.discovery.Discover(request.Context(), request.URL.Query().Get("name"))
+	if err != nil {
+		handler.writeDiscoveryError(writer, request, err)
+		return
+	}
 
-	services := handler.store.GetServices(name)
-	result := make([]Service, 0, len(services))
-
-	for _, service := range services {
-		result = append(result, mapServiceResponse(service))
+	result := make([]Service, 0, len(instances))
+	for _, instance := range instances {
+		result = append(result, mapInstanceResponse(instance))
 	}
 
 	handler.writeJSON(writer, http.StatusOK, result)
@@ -111,14 +105,10 @@ func (handler *Handler) GetServices(writer http.ResponseWriter, request *http.Re
 // Unregister removes the instance named in the path and responds 204. An
 // unknown ID gets 404.
 func (handler *Handler) Unregister(writer http.ResponseWriter, request *http.Request) {
-	serviceID := request.PathValue("id")
-
-	if err := handler.store.Unregister(serviceID); err != nil {
-		handler.writeRegistryError(writer, err)
+	if err := handler.discovery.Unregister(request.Context(), request.PathValue("id")); err != nil {
+		handler.writeDiscoveryError(writer, request, err)
 		return
 	}
-
-	handler.logger.InfoContext(request.Context(), "service unregistered", slog.String("id", serviceID))
 
 	writeStatus(writer, http.StatusNoContent)
 }

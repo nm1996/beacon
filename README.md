@@ -301,17 +301,30 @@ Run `mise tasks` to list them all. CI runs the same tasks on every pull request.
 
 ```text
 .
-├── cmd/beacon/          # Entry point: flags, config, logging, signals, cleanup worker and shutdown
+├── cmd/beacon/              # Entry point: flags, config, logging, signals, cleanup worker and shutdown
 ├── internal/
-│   ├── api/             # HTTP routes and handlers
-│   ├── bootstrap/       # Builds the registry and HTTP server and connects them
-│   ├── config/          # Loads and validates the TOML configuration
-│   └── registry/        # In-memory registry, validation and stale-instance cleanup
-├── configs/             # Example configuration
-├── .github/workflows/   # CI
-├── .golangci.yml        # Linter configuration
-└── .mise.toml           # Pinned tools and development tasks
+│   ├── api/                 # HTTP transport: routes, request decoding, JSON errors
+│   ├── discovery/           # Business rules: validation, IDs, TTL, cleanup; the Registry interface
+│   ├── registry/
+│   │   ├── memory/          # In-memory Registry backend
+│   │   └── registrytest/    # Contract tests every Registry backend must pass
+│   ├── bootstrap/           # Builds the backend, discovery layer and HTTP server and connects them
+│   └── config/              # Loads and validates the TOML configuration and environment overrides
+├── configs/                 # Example configuration
+├── scripts/                 # Release build script
+├── .github/workflows/       # CI and releases
+├── .golangci.yml            # Linter configuration
+└── .mise.toml               # Pinned tools and development tasks
 ```
+
+Requests flow in one direction:
+
+```text
+api (HTTP)  ──►  discovery.Service  ──►  discovery.Registry  ◄──  registry/memory
+transport        business rules          storage interface        storage backend
+```
+
+Transports only translate requests and errors; every rule lives in `discovery`, so a future gRPC transport behaves exactly like HTTP. Storage backends only store, so they are interchangeable. A new backend goes under `internal/registry/` and is done when it passes `registrytest.Run`.
 
 ## Roadmap
 
