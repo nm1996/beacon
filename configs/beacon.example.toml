@@ -7,6 +7,10 @@
 # is also what Beacon uses when started without --config. Unknown keys are
 # rejected. Durations use Go syntax such as "500ms", "5s" or "1m30s".
 #
+# Every key can also be set with an environment variable, which wins over
+# this file: BEACON_ plus the section and key in upper case, for example
+# BEACON_SERVER_PORT=9090 or BEACON_REGISTRY_SERVICE_TTL=2m.
+#
 # Keep this file synchronized with internal/config.
 # Do not put passwords, tokens, or other secrets in this file.
 
