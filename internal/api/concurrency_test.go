@@ -25,7 +25,7 @@ func TestConcurrentTrafficWithBackgroundCleanup(t *testing.T) {
 
 	store := registry.New()
 	logger := slog.New(slog.DiscardHandler)
-	router := NewRouter(store, logger, testMaxBodyBytes)
+	router := NewRouter(store, logger, testConfig)
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -35,7 +35,7 @@ func TestConcurrentTrafficWithBackgroundCleanup(t *testing.T) {
 		cleanupDone <- store.RunCleanup(ctx, registry.CleanupConfig{Interval: time.Millisecond, TTL: time.Hour}, logger)
 	}()
 
-	serve := func(method, path, body string) *httptest.ResponseRecorder {
+	send := func(method, path, body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
@@ -52,7 +52,7 @@ func TestConcurrentTrafficWithBackgroundCleanup(t *testing.T) {
 
 			name := fmt.Sprintf("client-%d", client)
 
-			rec := serve(http.MethodPost, "/register", fmt.Sprintf(`{"name":%q,"address":"10.0.0.1","port":%d}`, name, 8000+client))
+			rec := send(http.MethodPost, "/api/v1/services", fmt.Sprintf(`{"name":%q,"address":"10.0.0.1","port":%d}`, name, 8000+client))
 			if rec.Code != http.StatusCreated {
 				t.Errorf("%s: register: status %d", name, rec.Code)
 				return
@@ -65,11 +65,11 @@ func TestConcurrentTrafficWithBackgroundCleanup(t *testing.T) {
 			}
 
 			for range heartbeatsPerClient {
-				if rec := serve(http.MethodPost, "/heartbeat", fmt.Sprintf(`{"id":%q}`, registered.ID)); rec.Code != http.StatusNoContent {
+				if rec := send(http.MethodPost, "/api/v1/services/"+registered.ID+"/heartbeat", ""); rec.Code != http.StatusNoContent {
 					t.Errorf("%s: heartbeat: status %d", name, rec.Code)
 				}
 
-				rec := serve(http.MethodGet, "/services?name="+name, "")
+				rec := send(http.MethodGet, "/api/v1/services?name="+name, "")
 
 				var services []Service
 				if err := json.Unmarshal(rec.Body.Bytes(), &services); err != nil || len(services) != 1 {
@@ -78,12 +78,12 @@ func TestConcurrentTrafficWithBackgroundCleanup(t *testing.T) {
 
 				// Listing everything races with other clients registering
 				// and unregistering; it must still always be valid JSON.
-				if rec := serve(http.MethodGet, "/services", ""); !json.Valid(rec.Body.Bytes()) {
+				if rec := send(http.MethodGet, "/api/v1/services", ""); !json.Valid(rec.Body.Bytes()) {
 					t.Errorf("%s: list all returned invalid JSON: %q", name, rec.Body.String())
 				}
 			}
 
-			if rec := serve(http.MethodDelete, "/unregister", fmt.Sprintf(`{"id":%q}`, registered.ID)); rec.Code != http.StatusNoContent {
+			if rec := send(http.MethodDelete, "/api/v1/services/"+registered.ID, ""); rec.Code != http.StatusNoContent {
 				t.Errorf("%s: unregister: status %d", name, rec.Code)
 			}
 		})

@@ -13,7 +13,6 @@ import (
 // should branch on these, not on the human-readable message.
 const (
 	codeInvalidRequestBody = "invalid_request_body"
-	codeMissingID          = "missing_id"
 	codeInvalidService     = "invalid_service"
 	codeServiceNotFound    = "service_not_found"
 	codeNotFound           = "not_found"
@@ -34,7 +33,7 @@ func (handler *Handler) writeError(writer http.ResponseWriter, status int, code,
 func (handler *Handler) writeInvalidBody(writer http.ResponseWriter) {
 	handler.writeError(writer, http.StatusBadRequest, codeInvalidRequestBody, fmt.Sprintf(
 		"Request body must be a single JSON object of at most %d bytes with only the documented fields",
-		handler.maxBodyBytes,
+		handler.config.MaxRequestBodyBytes,
 	))
 }
 

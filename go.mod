@@ -1,6 +1,6 @@
 module github.com/nm1996/beacon
 
-go 1.27.3
+go 1.26.0
 
 require (
 	github.com/BurntSushi/toml v1.6.0

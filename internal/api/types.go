@@ -1,6 +1,8 @@
 package api
 
-// RegisterRequest is the body of POST /register.
+import "time"
+
+// RegisterRequest is the body of POST /api/v1/services.
 type RegisterRequest struct {
 	Name    string `json:"name"`
 	Address string `json:"address"`
@@ -8,21 +10,20 @@ type RegisterRequest struct {
 }
 
 // RegisterResponse is returned after a successful registration. Clients keep
-// the ID to send heartbeats and to unregister later.
+// the ID to send heartbeats and to unregister later, and must send a
+// heartbeat at least every TTLSeconds; a third of that is a safe pace.
 type RegisterResponse struct {
-	ID string `json:"id"`
-}
-
-// HeartbeatRequest is the body of POST /heartbeat.
-type HeartbeatRequest struct {
-	ID string `json:"id"`
+	ID         string `json:"id"`
+	TTLSeconds int64  `json:"ttl_seconds"`
 }
 
 // Service is how a registered instance appears in API responses.
 type Service struct {
-	Name    string `json:"name"`
-	Address string `json:"address"`
-	Port    int    `json:"port"`
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	Address       string    `json:"address"`
+	Port          int       `json:"port"`
+	LastHeartbeat time.Time `json:"last_heartbeat"`
 }
 
 // HealthResponse is the body of GET /health.
@@ -40,9 +41,4 @@ type ErrorResponse struct {
 type ErrorDetail struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
-}
-
-// UnregisterRequest is the body of DELETE /unregister.
-type UnregisterRequest struct {
-	ID string `json:"id"`
 }

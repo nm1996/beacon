@@ -31,8 +31,11 @@ func New(settings config.Config, logger *slog.Logger) *Components {
 	return &Components{
 		Registry: serviceRegistry,
 		Server: &http.Server{
-			Addr:              settings.Server.Addr(),
-			Handler:           api.NewRouter(serviceRegistry, logger, settings.Server.MaxRequestBodyBytes),
+			Addr: settings.Server.Addr(),
+			Handler: api.NewRouter(serviceRegistry, logger, api.Config{
+				MaxRequestBodyBytes: settings.Server.MaxRequestBodyBytes,
+				ServiceTTL:          settings.Registry.ServiceTTL,
+			}),
 			ReadHeaderTimeout: settings.Server.ReadTimeout,
 			ReadTimeout:       settings.Server.ReadTimeout,
 			WriteTimeout:      settings.Server.WriteTimeout,
