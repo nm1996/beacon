@@ -330,9 +330,16 @@ Run `mise tasks` to list them all. CI runs the same tasks on every pull request.
 
 - [ ] Versioned REST API
 - [ ] Go client library
+- [ ] Grpc support
 - [ ] Docker image and Compose example
 - [ ] Prometheus metrics
 - [ ] First release, `v0.1.0`
+
+**After v0.1.0**
+
+- [ ] Cache and database
+- [ ] Scale, multiple nodes
+- [ ] Idempotency
 
 ## Contributing
 
