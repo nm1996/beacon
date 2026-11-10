@@ -43,6 +43,11 @@ service_ttl = "30s"
 # How often Beacon checks for stale service instances.
 cleanup_interval = "5s"
 
+[storage]
+# Where registered instances are kept. Only "memory" exists today: fast, and
+# everything is forgotten on restart, so clients register again.
+backend = "memory"
+
 [logging]
 # Minimum level logged: "debug", "info", "warn" or "error".
 level = "info"

@@ -16,6 +16,7 @@ func TestLoadAppliesEveryEnvironmentVariable(test *testing.T) {
 	test.Setenv("BEACON_SERVER_MAX_REQUEST_BODY_BYTES", "1024")
 	test.Setenv("BEACON_REGISTRY_SERVICE_TTL", "1m")
 	test.Setenv("BEACON_REGISTRY_CLEANUP_INTERVAL", "500ms")
+	test.Setenv("BEACON_STORAGE_BACKEND", "memory")
 	test.Setenv("BEACON_LOGGING_LEVEL", "debug")
 	test.Setenv("BEACON_LOGGING_FORMAT", "text")
 
@@ -37,6 +38,9 @@ func TestLoadAppliesEveryEnvironmentVariable(test *testing.T) {
 		Registry: RegistryConfig{
 			ServiceTTL:      time.Minute,
 			CleanupInterval: 500 * time.Millisecond,
+		},
+		Storage: StorageConfig{
+			Backend: StorageMemory,
 		},
 		Logging: LoggingConfig{
 			Level:  "debug",
@@ -130,6 +134,11 @@ func TestLoadEnvironmentFailures(test *testing.T) {
 				"BEACON_REGISTRY_CLEANUP_INTERVAL": "1m",
 			},
 			wantErr: []string{"invalid config", "registry.cleanup_interval", "registry.service_ttl"},
+		},
+		{
+			name:      "unknown storage backend",
+			variables: map[string]string{"BEACON_STORAGE_BACKEND": "redis"},
+			wantErr:   []string{"invalid config", `storage.backend must be one of memory, got "redis"`},
 		},
 		{
 			name:      "unknown log level",

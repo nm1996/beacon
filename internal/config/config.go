@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +24,7 @@ import (
 type Config struct {
 	Server   ServerConfig   `toml:"server"`
 	Registry RegistryConfig `toml:"registry"`
+	Storage  StorageConfig  `toml:"storage"`
 	Logging  LoggingConfig  `toml:"logging"`
 }
 
@@ -53,6 +55,20 @@ type RegistryConfig struct {
 	CleanupInterval time.Duration `toml:"cleanup_interval"`
 }
 
+// StorageMemory selects the in-memory registry backend, which keeps
+// nothing across restarts.
+const StorageMemory = "memory"
+
+// storageBackends lists every value storage.backend accepts. bootstrap
+// builds the matching backend for each one.
+var storageBackends = []string{StorageMemory}
+
+// StorageConfig selects where registered instances are kept.
+type StorageConfig struct {
+	// Backend names the registry backend. Only "memory" exists today.
+	Backend string `toml:"backend"`
+}
+
 // LoggingConfig controls log output.
 type LoggingConfig struct {
 	// Level is the minimum level logged: debug, info, warn or error.
@@ -77,6 +93,9 @@ func Default() Config {
 		Registry: RegistryConfig{
 			ServiceTTL:      30 * time.Second,
 			CleanupInterval: 5 * time.Second,
+		},
+		Storage: StorageConfig{
+			Backend: StorageMemory,
 		},
 		Logging: LoggingConfig{
 			Level:  "info",
@@ -158,6 +177,9 @@ func (config Config) Validate() error {
 	check(registry.CleanupInterval <= registry.ServiceTTL,
 		"registry.cleanup_interval (%s) must not be longer than registry.service_ttl (%s)",
 		registry.CleanupInterval, registry.ServiceTTL)
+
+	check(slices.Contains(storageBackends, config.Storage.Backend),
+		"storage.backend must be one of %s, got %q", strings.Join(storageBackends, ", "), config.Storage.Backend)
 
 	_, levelErr := config.Logging.SlogLevel()
 	check(levelErr == nil, "logging.level must be debug, info, warn or error, got %q", config.Logging.Level)

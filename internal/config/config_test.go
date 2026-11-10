@@ -109,6 +109,8 @@ func TestLoadFailures(t *testing.T) {
 		{name: "zero body limit", content: "[server]\nmax_request_body_bytes = 0", wantErr: []string{"server.max_request_body_bytes"}},
 		{name: "unknown log level", content: "[logging]\nlevel = \"verbose\"", wantErr: []string{"logging.level"}},
 		{name: "unknown log format", content: "[logging]\nformat = \"xml\"", wantErr: []string{"logging.format"}},
+		{name: "unknown storage backend", content: "[storage]\nbackend = \"redis\"", wantErr: []string{`storage.backend must be one of memory, got "redis"`}},
+		{name: "empty storage backend", content: "[storage]\nbackend = \"\"", wantErr: []string{"storage.backend"}},
 		{
 			name:    "cleanup interval longer than TTL",
 			content: "[registry]\nservice_ttl = \"10s\"\ncleanup_interval = \"20s\"",

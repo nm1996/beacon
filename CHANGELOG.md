@@ -24,6 +24,8 @@ HTTP API.
 - `GET /health` reporting status and the running version.
 - TOML configuration (`--config`) with `BEACON_*` environment variable
   overrides and strict validation.
+- `storage.backend` setting (`BEACON_STORAGE_BACKEND`) that selects where
+  instances are kept. `memory` is the only backend so far.
 - Server timeouts, a request body size limit, structured JSON or text logs,
   and graceful shutdown on `SIGINT` / `SIGTERM`.
 - `beacon --version`, and release archives for Linux, macOS and Windows on
