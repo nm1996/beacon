@@ -21,7 +21,7 @@ func TestNewUsesConfiguredAddress(t *testing.T) {
 	settings.Server.Host = "127.0.0.1"
 	settings.Server.Port = 9090
 
-	components := New(settings, discard)
+	components := New(settings, discard, "v0.0.0-test")
 
 	if components.Server.Addr != "127.0.0.1:9090" {
 		t.Fatalf("expected server address %q, got %q", "127.0.0.1:9090", components.Server.Addr)
@@ -34,7 +34,7 @@ func TestNewAppliesServerTimeouts(t *testing.T) {
 	settings.Server.WriteTimeout = 2 * time.Second
 	settings.Server.IdleTimeout = 3 * time.Second
 
-	server := New(settings, discard).Server
+	server := New(settings, discard, "v0.0.0-test").Server
 
 	if server.ReadHeaderTimeout != time.Second || server.ReadTimeout != time.Second {
 		t.Errorf("expected read timeouts of 1s, got header %v, read %v", server.ReadHeaderTimeout, server.ReadTimeout)
@@ -53,7 +53,7 @@ func TestNewAppliesRequestBodyLimit(t *testing.T) {
 	settings := config.Default()
 	settings.Server.MaxRequestBodyBytes = 40
 
-	handler := New(settings, discard).Server.Handler
+	handler := New(settings, discard, "v0.0.0-test").Server.Handler
 
 	tests := []struct {
 		name       string
@@ -79,7 +79,7 @@ func TestNewAppliesRequestBodyLimit(t *testing.T) {
 }
 
 func TestNewConnectsServerToRegistry(t *testing.T) {
-	components := New(config.Default(), discard)
+	components := New(config.Default(), discard, "v0.0.0-test")
 
 	_, err := components.Registry.Register(&registry.Service{
 		Name:    "orders",
@@ -113,7 +113,7 @@ func TestNewReportsConfiguredTTLToClients(t *testing.T) {
 	settings := config.Default()
 	settings.Registry.ServiceTTL = 45 * time.Second
 
-	handler := New(settings, discard).Server.Handler
+	handler := New(settings, discard, "v0.0.0-test").Server.Handler
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/services", strings.NewReader(`{"name":"orders","address":"10.0.0.1","port":8081}`))
 	rec := httptest.NewRecorder()
@@ -129,5 +129,25 @@ func TestNewReportsConfiguredTTLToClients(t *testing.T) {
 
 	if response.TTLSeconds != 45 {
 		t.Errorf("expected ttl_seconds 45, got %d", response.TTLSeconds)
+	}
+}
+
+func TestNewReportsVersionOnHealth(t *testing.T) {
+	handler := New(config.Default(), discard, "v1.2.3").Server.Handler
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	var response struct {
+		Version string `json:"version"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if response.Version != "v1.2.3" {
+		t.Errorf("expected version %q, got %q", "v1.2.3", response.Version)
 	}
 }

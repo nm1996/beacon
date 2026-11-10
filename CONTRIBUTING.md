@@ -97,6 +97,7 @@ A pull request should:
 - Describe relevant design decisions and trade-offs.
 - Include test instructions and their results.
 - Mention configuration, API, or compatibility changes.
+- Add an entry under **Unreleased** in `CHANGELOG.md` for any change users would notice. See the README's Versioning section for what counts as breaking.
 - Link related issues where applicable.
 - Avoid bundling unrelated changes.
 

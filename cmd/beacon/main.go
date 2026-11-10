@@ -21,6 +21,15 @@ import (
 	"github.com/nm1996/beacon/internal/registry"
 )
 
+// version is the release version, set when release binaries are built with
+//
+//	go build -ldflags "-X main.version=v0.1.0" ./cmd/beacon
+//
+// It has to be a package-level variable because that is the only kind
+// -ldflags -X can set, and nothing assigns it at run time. Left empty, the
+// version comes from the build info Go embeds instead.
+var version string
+
 // main loads the configuration from the file and environment, then runs the server until it fails or is
 // told to stop, exiting with a non-zero status on failure. With --version it
 // prints the build version and exits instead.
@@ -72,7 +81,7 @@ func run(settings config.Config, logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	components := bootstrap.New(settings, logger)
+	components := bootstrap.New(settings, logger, buildVersion())
 	server := components.Server
 
 	// Bind before starting anything else, so a port that is already in use
@@ -135,11 +144,15 @@ func run(settings config.Config, logger *slog.Logger) error {
 	return nil
 }
 
-// buildVersion returns the version the Go toolchain stamped into the binary:
-// a release tag such as v0.1.0, or a pseudo-version built from the git
-// commit. Binaries built without version control information report
-// "(devel)".
+// buildVersion returns the version set at link time, if any. Otherwise it
+// returns what the Go toolchain stamped into the binary: a release tag such
+// as v0.1.0, or a pseudo-version built from the git commit. Binaries built
+// without either, such as inside a container without .git, report "(devel)".
 func buildVersion() string {
+	if version != "" {
+		return version
+	}
+
 	info, ok := debug.ReadBuildInfo()
 	if !ok || info.Main.Version == "" {
 		return "unknown"
