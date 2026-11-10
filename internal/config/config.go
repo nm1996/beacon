@@ -150,7 +150,8 @@ func (config Config) Validate() error {
 	check(server.MaxRequestBodyBytes > 0, "server.max_request_body_bytes must be positive, got %d", server.MaxRequestBodyBytes)
 
 	registry := config.Registry
-	check(registry.ServiceTTL > 0, "registry.service_ttl must be positive, got %s", registry.ServiceTTL)
+	// Clients are told the TTL in whole seconds when they register.
+	check(registry.ServiceTTL >= time.Second, "registry.service_ttl must be at least 1s, got %s", registry.ServiceTTL)
 	check(registry.CleanupInterval > 0, "registry.cleanup_interval must be positive, got %s", registry.CleanupInterval)
 	// A stale instance stays visible for up to TTL plus one interval, so an
 	// interval longer than the TTL would more than double that window.

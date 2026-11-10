@@ -40,25 +40,21 @@ func TestErrorResponses(t *testing.T) {
 		wantStatus int
 		wantCode   string
 	}{
-		{name: "malformed body", method: http.MethodPost, path: "/register", body: `{"name":`, wantStatus: http.StatusBadRequest, wantCode: codeInvalidRequestBody},
-		{name: "invalid service", method: http.MethodPost, path: "/register", body: `{"name":"orders","address":"10.0.0.1","port":0}`, wantStatus: http.StatusBadRequest, wantCode: codeInvalidService},
-		{name: "heartbeat without id", method: http.MethodPost, path: "/heartbeat", body: `{}`, wantStatus: http.StatusBadRequest, wantCode: codeMissingID},
-		{name: "unregister without id", method: http.MethodDelete, path: "/unregister", body: `{"id":""}`, wantStatus: http.StatusBadRequest, wantCode: codeMissingID},
-		{name: "heartbeat unknown id", method: http.MethodPost, path: "/heartbeat", body: `{"id":"unknown"}`, wantStatus: http.StatusNotFound, wantCode: codeServiceNotFound},
-		{name: "unregister unknown id", method: http.MethodDelete, path: "/unregister", body: `{"id":"unknown"}`, wantStatus: http.StatusNotFound, wantCode: codeServiceNotFound},
+		{name: "malformed body", method: http.MethodPost, path: "/api/v1/services", body: `{"name":`, wantStatus: http.StatusBadRequest, wantCode: codeInvalidRequestBody},
+		{name: "invalid service", method: http.MethodPost, path: "/api/v1/services", body: `{"name":"orders","address":"10.0.0.1","port":0}`, wantStatus: http.StatusBadRequest, wantCode: codeInvalidService},
+		{name: "heartbeat unknown id", method: http.MethodPost, path: "/api/v1/services/unknown/heartbeat", wantStatus: http.StatusNotFound, wantCode: codeServiceNotFound},
+		{name: "unregister unknown id", method: http.MethodDelete, path: "/api/v1/services/unknown", wantStatus: http.StatusNotFound, wantCode: codeServiceNotFound},
 		{name: "unknown path", method: http.MethodGet, path: "/nope", wantStatus: http.StatusNotFound, wantCode: codeNotFound},
-		{name: "wrong method", method: http.MethodGet, path: "/register", wantStatus: http.StatusMethodNotAllowed, wantCode: codeMethodNotAllowed},
+		{name: "unversioned path from before v1", method: http.MethodPost, path: "/register", wantStatus: http.StatusNotFound, wantCode: codeNotFound},
+		{name: "wrong method on collection", method: http.MethodPut, path: "/api/v1/services", wantStatus: http.StatusMethodNotAllowed, wantCode: codeMethodNotAllowed},
+		{name: "wrong method on instance", method: http.MethodGet, path: "/api/v1/services/some-id", wantStatus: http.StatusMethodNotAllowed, wantCode: codeMethodNotAllowed},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler, r := setupHandler()
-			router := NewRouter(r, handler.logger, testMaxBodyBytes)
+			router, _ := setupRouter()
 
-			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
-			rec := httptest.NewRecorder()
-
-			router.ServeHTTP(rec, req)
+			rec := serve(router, tt.method, tt.path, tt.body)
 
 			if rec.Code != tt.wantStatus {
 				t.Fatalf("expected status %d, got %d", tt.wantStatus, rec.Code)
@@ -74,7 +70,7 @@ func TestErrorResponses(t *testing.T) {
 func TestInvalidServiceMessageNamesTheProblem(t *testing.T) {
 	handler, _ := setupHandler()
 
-	req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(`{"name":"orders","address":"10.0.0.1","port":70000}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/services", strings.NewReader(`{"name":"orders","address":"10.0.0.1","port":70000}`))
 	rec := httptest.NewRecorder()
 
 	handler.Register(rec, req)
@@ -85,25 +81,29 @@ func TestInvalidServiceMessageNamesTheProblem(t *testing.T) {
 }
 
 func TestMethodNotAllowedKeepsAllowHeader(t *testing.T) {
-	handler, r := setupHandler()
+	router, _ := setupRouter()
 
-	req := httptest.NewRequest(http.MethodGet, "/unregister", nil)
-	rec := httptest.NewRecorder()
+	tests := []struct {
+		path      string
+		wantAllow string
+	}{
+		{path: "/api/v1/services/some-id", wantAllow: http.MethodDelete},
+		{path: "/api/v1/services/some-id/heartbeat", wantAllow: http.MethodPost},
+	}
 
-	NewRouter(r, handler.logger, testMaxBodyBytes).ServeHTTP(rec, req)
+	for _, tt := range tests {
+		rec := serve(router, http.MethodGet, tt.path, "")
 
-	if got := rec.Header().Get("Allow"); got != http.MethodDelete {
-		t.Errorf("expected Allow %q, got %q", http.MethodDelete, got)
+		if got := rec.Header().Get("Allow"); got != tt.wantAllow {
+			t.Errorf("%s: expected Allow %q, got %q", tt.path, tt.wantAllow, got)
+		}
 	}
 }
 
 func TestInternalErrorUsesJSONFormat(t *testing.T) {
-	handler := NewHandler(failingStore{err: errors.New("disk on fire")}, slog.New(slog.DiscardHandler), testMaxBodyBytes)
+	router := NewRouter(failingStore{err: errors.New("disk on fire")}, slog.New(slog.DiscardHandler), testConfig)
 
-	req := httptest.NewRequest(http.MethodPost, "/heartbeat", strings.NewReader(`{"id":"x"}`))
-	rec := httptest.NewRecorder()
-
-	handler.Heartbeat(rec, req)
+	rec := serve(router, http.MethodPost, "/api/v1/services/x/heartbeat", "")
 
 	detail := decodeError(t, rec)
 

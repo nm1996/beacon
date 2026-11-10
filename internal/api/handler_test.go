@@ -3,11 +3,13 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nm1996/beacon/internal/registry"
 )
@@ -15,13 +17,37 @@ import (
 // testMaxBodyBytes is the request body limit handlers get in tests.
 const testMaxBodyBytes = 64 << 10
 
+// testConfig is the API configuration used in tests.
+var testConfig = Config{MaxRequestBodyBytes: testMaxBodyBytes, ServiceTTL: 30 * time.Second}
+
 // setupHandler returns a handler and the empty registry behind it, so tests
 // can seed or inspect state directly.
 func setupHandler() (*Handler, *registry.Registry) {
 	r := registry.New()
-	handler := NewHandler(r, slog.New(slog.DiscardHandler), testMaxBodyBytes)
+	handler := NewHandler(r, slog.New(slog.DiscardHandler), testConfig)
 
 	return handler, r
+}
+
+// setupRouter returns a router and the empty registry behind it.
+func setupRouter() (http.Handler, *registry.Registry) {
+	r := registry.New()
+
+	return NewRouter(r, slog.New(slog.DiscardHandler), testConfig), r
+}
+
+// serve sends one request through router and returns the recorded response.
+func serve(router http.Handler, method, path, body string) *httptest.ResponseRecorder {
+	var reader io.Reader
+	if body != "" {
+		reader = strings.NewReader(body)
+	}
+
+	req := httptest.NewRequest(method, path, reader)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	return rec
 }
 
 // mustRegister adds a valid service and fails the test if that is rejected.
@@ -41,25 +67,19 @@ func mustRegister(t *testing.T, r *registry.Registry, name string, port int) str
 }
 
 func TestRegister(t *testing.T) {
-	handler, r := setupHandler()
+	router, r := setupRouter()
 
-	body := `{
+	rec := serve(router, http.MethodPost, "/api/v1/services", `{
 		"name": "payment-service",
 		"address": "localhost",
 		"port": 8080
-	}`
-
-	req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(body))
-	rec := httptest.NewRecorder()
-
-	handler.Register(rec, req)
+	}`)
 
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("expected status %d, got %d", http.StatusCreated, rec.Code)
 	}
 
 	var response RegisterResponse
-
 	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
@@ -68,25 +88,44 @@ func TestRegister(t *testing.T) {
 		t.Fatal("expected generated service ID")
 	}
 
-	services := r.GetServices("payment-service")
+	if response.TTLSeconds != 30 {
+		t.Errorf("expected ttl_seconds 30, got %d", response.TTLSeconds)
+	}
 
-	if len(services) != 1 {
-		t.Fatalf("expected 1 registered service, got %d", len(services))
+	if got, want := rec.Header().Get("Location"), "/api/v1/services/"+response.ID; got != want {
+		t.Errorf("expected Location %q, got %q", want, got)
+	}
+
+	services := r.GetServices("payment-service")
+	if len(services) != 1 || services[0].ID != response.ID {
+		t.Fatalf("expected the returned ID to be registered, got %+v", services)
+	}
+}
+
+func TestRegisterReportsTTLInWholeSeconds(t *testing.T) {
+	r := registry.New()
+	router := NewRouter(r, slog.New(slog.DiscardHandler), Config{
+		MaxRequestBodyBytes: testMaxBodyBytes,
+		ServiceTTL:          90*time.Second + 900*time.Millisecond,
+	})
+
+	rec := serve(router, http.MethodPost, "/api/v1/services", `{"name":"orders","address":"10.0.0.1","port":8081}`)
+
+	var response RegisterResponse
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	// Rounding down keeps clients on the safe side of the real TTL.
+	if response.TTLSeconds != 90 {
+		t.Errorf("expected ttl_seconds 90, got %d", response.TTLSeconds)
 	}
 }
 
 func TestRegisterInvalidJSON(t *testing.T) {
-	handler, _ := setupHandler()
+	router, _ := setupRouter()
 
-	req := httptest.NewRequest(
-		http.MethodPost,
-		"/register",
-		strings.NewReader(`{"name":`),
-	)
-
-	rec := httptest.NewRecorder()
-
-	handler.Register(rec, req)
+	rec := serve(router, http.MethodPost, "/api/v1/services", `{"name":`)
 
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
@@ -106,12 +145,9 @@ func TestRegisterInvalidService(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler, r := setupHandler()
+			router, r := setupRouter()
 
-			req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(tt.body))
-			rec := httptest.NewRecorder()
-
-			handler.Register(rec, req)
+			rec := serve(router, http.MethodPost, "/api/v1/services", tt.body)
 
 			if rec.Code != http.StatusBadRequest {
 				t.Errorf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
@@ -125,98 +161,45 @@ func TestRegisterInvalidService(t *testing.T) {
 }
 
 func TestHeartbeat(t *testing.T) {
-	handler, r := setupHandler()
+	router, r := setupRouter()
 
 	id := mustRegister(t, r, "payment-service", 8080)
+	before := r.GetServices("")[0].LastHeartbeat
 
-	body := `{"id":"` + id + `"}`
-
-	req := httptest.NewRequest(
-		http.MethodPost,
-		"/heartbeat",
-		strings.NewReader(body),
-	)
-
-	rec := httptest.NewRecorder()
-
-	handler.Heartbeat(rec, req)
+	rec := serve(router, http.MethodPost, "/api/v1/services/"+id+"/heartbeat", "")
 
 	if rec.Code != http.StatusNoContent {
-		t.Errorf("expected status %d, got %d", http.StatusNoContent, rec.Code)
+		t.Fatalf("expected status %d, got %d", http.StatusNoContent, rec.Code)
+	}
+
+	if after := r.GetServices("")[0].LastHeartbeat; after.Before(before) {
+		t.Errorf("expected LastHeartbeat to move forward, went from %v to %v", before, after)
 	}
 }
 
 func TestHeartbeatUnknownService(t *testing.T) {
-	handler, _ := setupHandler()
+	router, _ := setupRouter()
 
-	req := httptest.NewRequest(
-		http.MethodPost,
-		"/heartbeat",
-		strings.NewReader(`{"id":"unknown-id"}`),
-	)
-
-	rec := httptest.NewRecorder()
-
-	handler.Heartbeat(rec, req)
+	rec := serve(router, http.MethodPost, "/api/v1/services/unknown-id/heartbeat", "")
 
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("expected status %d, got %d", http.StatusNotFound, rec.Code)
 	}
 }
 
-func TestHeartbeatMissingID(t *testing.T) {
-	handler, _ := setupHandler()
-
-	req := httptest.NewRequest(http.MethodPost, "/heartbeat", strings.NewReader(`{}`))
-	rec := httptest.NewRecorder()
-
-	handler.Heartbeat(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
-	}
-}
-
-func TestHeartbeatInvalidJSON(t *testing.T) {
-	handler, _ := setupHandler()
-
-	req := httptest.NewRequest(
-		http.MethodPost,
-		"/heartbeat",
-		strings.NewReader(`{"id":`),
-	)
-
-	rec := httptest.NewRecorder()
-
-	handler.Heartbeat(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
-	}
-}
-
 func TestGetServices(t *testing.T) {
-	handler, r := setupHandler()
+	router, r := setupRouter()
 
-	mustRegister(t, r, "payment-service", 8080)
+	id := mustRegister(t, r, "payment-service", 8080)
 	mustRegister(t, r, "user-service", 8081)
 
-	req := httptest.NewRequest(
-		http.MethodGet,
-		"/services?name=payment-service",
-		nil,
-	)
-
-	rec := httptest.NewRecorder()
-
-	handler.GetServices(rec, req)
+	rec := serve(router, http.MethodGet, "/api/v1/services?name=payment-service", "")
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
 	}
 
 	var response []Service
-
 	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
@@ -225,106 +208,58 @@ func TestGetServices(t *testing.T) {
 		t.Fatalf("expected 1 service, got %d", len(response))
 	}
 
-	if response[0].Name != "payment-service" {
-		t.Errorf("expected payment-service, got %s", response[0].Name)
+	service := response[0]
+
+	if service.ID != id || service.Name != "payment-service" || service.Address != "localhost" || service.Port != 8080 {
+		t.Errorf("unexpected service %+v", service)
+	}
+
+	if service.LastHeartbeat.IsZero() || service.LastHeartbeat.Location() != time.UTC {
+		t.Errorf("expected a UTC last_heartbeat, got %v", service.LastHeartbeat)
 	}
 }
 
 func TestGetServicesEmpty(t *testing.T) {
-	handler, _ := setupHandler()
+	router, _ := setupRouter()
 
-	req := httptest.NewRequest(http.MethodGet, "/services", nil)
-	rec := httptest.NewRecorder()
-
-	handler.GetServices(rec, req)
+	rec := serve(router, http.MethodGet, "/api/v1/services", "")
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
 	}
 
-	var response []Service
-
-	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
-
-	if len(response) != 0 {
-		t.Errorf("expected empty response, got %d services", len(response))
+	if body := strings.TrimSpace(rec.Body.String()); body != "[]" {
+		t.Errorf("expected an empty JSON array, got %q", body)
 	}
 }
 
 func TestUnregister(t *testing.T) {
-	handler, r := setupHandler()
+	router, r := setupRouter()
 
 	id := mustRegister(t, r, "payment-service", 8080)
 
-	body := `{"id":"` + id + `"}`
-
-	req := httptest.NewRequest(
-		http.MethodDelete,
-		"/unregister",
-		strings.NewReader(body),
-	)
-
-	rec := httptest.NewRecorder()
-
-	handler.Unregister(rec, req)
+	rec := serve(router, http.MethodDelete, "/api/v1/services/"+id, "")
 
 	if rec.Code != http.StatusNoContent {
-		t.Errorf("expected status %d, got %d", http.StatusNoContent, rec.Code)
+		t.Fatalf("expected status %d, got %d", http.StatusNoContent, rec.Code)
 	}
 
 	if len(r.GetServices("")) != 0 {
 		t.Error("expected service to be removed")
 	}
+
+	if rec := serve(router, http.MethodDelete, "/api/v1/services/"+id, ""); rec.Code != http.StatusNotFound {
+		t.Errorf("expected a second unregister to get %d, got %d", http.StatusNotFound, rec.Code)
+	}
 }
 
 func TestUnregisterUnknownService(t *testing.T) {
-	handler, _ := setupHandler()
+	router, _ := setupRouter()
 
-	req := httptest.NewRequest(
-		http.MethodDelete,
-		"/unregister",
-		strings.NewReader(`{"id":"unknown-id"}`),
-	)
-
-	rec := httptest.NewRecorder()
-
-	handler.Unregister(rec, req)
+	rec := serve(router, http.MethodDelete, "/api/v1/services/unknown-id", "")
 
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("expected status %d, got %d", http.StatusNotFound, rec.Code)
-	}
-}
-
-func TestUnregisterMissingID(t *testing.T) {
-	handler, _ := setupHandler()
-
-	req := httptest.NewRequest(http.MethodDelete, "/unregister", strings.NewReader(`{"id":""}`))
-	rec := httptest.NewRecorder()
-
-	handler.Unregister(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
-	}
-}
-
-func TestUnregisterInvalidJSON(t *testing.T) {
-	handler, _ := setupHandler()
-
-	req := httptest.NewRequest(
-		http.MethodDelete,
-		"/unregister",
-		strings.NewReader(`{"id":`),
-	)
-
-	rec := httptest.NewRecorder()
-
-	handler.Unregister(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
 	}
 }
 
@@ -346,25 +281,22 @@ func (store failingStore) GetServices(string) []*registry.Service { return nil }
 func (store failingStore) Unregister(string) error { return store.err }
 
 func TestUnexpectedStoreErrorReturnsInternalServerError(t *testing.T) {
-	handler := NewHandler(failingStore{err: errors.New("disk on fire")}, slog.New(slog.DiscardHandler), testMaxBodyBytes)
+	router := NewRouter(failingStore{err: errors.New("disk on fire")}, slog.New(slog.DiscardHandler), testConfig)
 
 	tests := []struct {
 		name   string
-		serve  http.HandlerFunc
 		method string
+		path   string
 		body   string
 	}{
-		{name: "register", serve: handler.Register, method: http.MethodPost, body: `{"name":"a","address":"b","port":1}`},
-		{name: "heartbeat", serve: handler.Heartbeat, method: http.MethodPost, body: `{"id":"x"}`},
-		{name: "unregister", serve: handler.Unregister, method: http.MethodDelete, body: `{"id":"x"}`},
+		{name: "register", method: http.MethodPost, path: "/api/v1/services", body: `{"name":"a","address":"b","port":1}`},
+		{name: "heartbeat", method: http.MethodPost, path: "/api/v1/services/x/heartbeat"},
+		{name: "unregister", method: http.MethodDelete, path: "/api/v1/services/x"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(tt.method, "/", strings.NewReader(tt.body))
-			rec := httptest.NewRecorder()
-
-			tt.serve(rec, req)
+			rec := serve(router, tt.method, tt.path, tt.body)
 
 			if rec.Code != http.StatusInternalServerError {
 				t.Errorf("expected status %d, got %d", http.StatusInternalServerError, rec.Code)
@@ -378,12 +310,9 @@ func TestUnexpectedStoreErrorReturnsInternalServerError(t *testing.T) {
 }
 
 func TestHealth(t *testing.T) {
-	handler, _ := setupHandler()
+	router, _ := setupRouter()
 
-	req := httptest.NewRequest(http.MethodGet, "/health", nil)
-	rec := httptest.NewRecorder()
-
-	handler.Health(rec, req)
+	rec := serve(router, http.MethodGet, "/health", "")
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)

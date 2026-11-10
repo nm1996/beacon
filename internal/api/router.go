@@ -9,19 +9,28 @@ import (
 	"net/http"
 )
 
-// NewRouter returns a handler that serves the registry API routes backed by
-// store, accepting request bodies of up to maxBodyBytes. Requests with an
-// unsupported method get 405 and unknown paths get 404, both in the JSON
-// error format.
-func NewRouter(store ServiceStore, logger *slog.Logger, maxBodyBytes int64) http.Handler {
-	handler := NewHandler(store, logger, maxBodyBytes)
+// servicesPath is the collection every versioned service route lives under.
+const servicesPath = "/api/v1/services"
+
+// NewRouter returns a handler that serves the registry API backed by store:
+//
+//	POST   /api/v1/services                 register an instance
+//	GET    /api/v1/services?name=orders     list instances
+//	POST   /api/v1/services/{id}/heartbeat  keep an instance alive
+//	DELETE /api/v1/services/{id}            unregister an instance
+//	GET    /health                          liveness check, not versioned
+//
+// Requests with an unsupported method get 405 and unknown paths get 404,
+// both in the JSON error format.
+func NewRouter(store ServiceStore, logger *slog.Logger, config Config) http.Handler {
+	handler := NewHandler(store, logger, config)
 
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("POST /register", handler.Register)
-	mux.HandleFunc("POST /heartbeat", handler.Heartbeat)
-	mux.HandleFunc("GET /services", handler.GetServices)
-	mux.HandleFunc("DELETE /unregister", handler.Unregister)
+	mux.HandleFunc("POST "+servicesPath, handler.Register)
+	mux.HandleFunc("GET "+servicesPath, handler.GetServices)
+	mux.HandleFunc("POST "+servicesPath+"/{id}/heartbeat", handler.Heartbeat)
+	mux.HandleFunc("DELETE "+servicesPath+"/{id}", handler.Unregister)
 	mux.HandleFunc("GET /health", handler.Health)
 
 	return handler.withJSONErrors(mux)

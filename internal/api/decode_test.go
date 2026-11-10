@@ -79,7 +79,7 @@ func TestMapRequestRejectsInvalidBodies(t *testing.T) {
 	}
 }
 
-func TestEndpointsRejectInvalidBodiesWithBadRequest(t *testing.T) {
+func TestRegisterRejectsInvalidBodiesWithBadRequest(t *testing.T) {
 	bodies := map[string]string{
 		"too large":     `{"id":"` + strings.Repeat("a", testMaxBodyBytes) + `"}`,
 		"unknown field": `{"id":"some-id","force":true}`,
@@ -88,38 +88,28 @@ func TestEndpointsRejectInvalidBodiesWithBadRequest(t *testing.T) {
 		"malformed":     `{"id":`,
 	}
 
+	// Register is the only endpoint that reads a body; the others take the
+	// instance ID from the path.
 	for bodyName, body := range bodies {
-		for _, endpoint := range []struct {
-			method string
-			path   string
-		}{
-			{method: http.MethodPost, path: "/register"},
-			{method: http.MethodPost, path: "/heartbeat"},
-			{method: http.MethodDelete, path: "/unregister"},
-		} {
-			t.Run(endpoint.path+"/"+bodyName, func(t *testing.T) {
-				handler, r := setupHandler()
-				id := mustRegister(t, r, "orders", 8081)
+		t.Run(bodyName, func(t *testing.T) {
+			router, r := setupRouter()
+			id := mustRegister(t, r, "orders", 8081)
 
-				req := httptest.NewRequest(endpoint.method, endpoint.path, strings.NewReader(body))
-				rec := httptest.NewRecorder()
+			rec := serve(router, http.MethodPost, "/api/v1/services", body)
 
-				NewRouter(r, handler.logger, testMaxBodyBytes).ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Errorf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
+			}
 
-				if rec.Code != http.StatusBadRequest {
-					t.Errorf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
-				}
+			if detail := decodeError(t, rec); detail.Code != codeInvalidRequestBody {
+				t.Errorf("expected code %q, got %q", codeInvalidRequestBody, detail.Code)
+			}
 
-				if detail := decodeError(t, rec); detail.Code != codeInvalidRequestBody {
-					t.Errorf("expected code %q, got %q", codeInvalidRequestBody, detail.Code)
-				}
-
-				// The rejected request must not have changed the registry.
-				if got := r.GetServices(""); len(got) != 1 || got[0].ID != id {
-					t.Errorf("expected only the seeded service to remain, got %+v", got)
-				}
-			})
-		}
+			// The rejected request must not have changed the registry.
+			if got := r.GetServices(""); len(got) != 1 || got[0].ID != id {
+				t.Errorf("expected only the seeded service to remain, got %+v", got)
+			}
+		})
 	}
 }
 
@@ -128,7 +118,7 @@ func TestRegisterBodyTooLarge(t *testing.T) {
 
 	body := `{"name":"` + strings.Repeat("a", testMaxBodyBytes) + `","address":"localhost","port":8080}`
 
-	req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/services", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 
 	handler.Register(rec, req)

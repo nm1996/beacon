@@ -66,7 +66,7 @@ func TestNewAppliesRequestBodyLimit(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(tt.body))
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/services", strings.NewReader(tt.body))
 			rec := httptest.NewRecorder()
 
 			handler.ServeHTTP(rec, req)
@@ -90,7 +90,7 @@ func TestNewConnectsServerToRegistry(t *testing.T) {
 		t.Fatalf("register service: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/services?name=orders", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/services?name=orders", nil)
 	rec := httptest.NewRecorder()
 
 	components.Server.Handler.ServeHTTP(rec, req)
@@ -106,5 +106,28 @@ func TestNewConnectsServerToRegistry(t *testing.T) {
 
 	if len(services) != 1 {
 		t.Fatalf("expected 1 service from the wired registry, got %d", len(services))
+	}
+}
+
+func TestNewReportsConfiguredTTLToClients(t *testing.T) {
+	settings := config.Default()
+	settings.Registry.ServiceTTL = 45 * time.Second
+
+	handler := New(settings, discard).Server.Handler
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/services", strings.NewReader(`{"name":"orders","address":"10.0.0.1","port":8081}`))
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	var response struct {
+		TTLSeconds int64 `json:"ttl_seconds"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if response.TTLSeconds != 45 {
+		t.Errorf("expected ttl_seconds 45, got %d", response.TTLSeconds)
 	}
 }

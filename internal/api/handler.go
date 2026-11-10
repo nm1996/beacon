@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"time"
 
 	"github.com/nm1996/beacon/internal/registry"
 )
@@ -18,31 +20,40 @@ type ServiceStore interface {
 	Unregister(serviceID string) error
 }
 
+// Config holds the settings the API needs from Beacon's configuration.
+type Config struct {
+	// MaxRequestBodyBytes is the largest request body accepted.
+	MaxRequestBodyBytes int64
+	// ServiceTTL is how long an instance may go without a heartbeat. It is
+	// reported to clients when they register so they can pace heartbeats.
+	ServiceTTL time.Duration
+}
+
 // Handler serves the registry API endpoints. Every method is an
 // http.HandlerFunc; NewRouter decides which path and method reach each one.
 type Handler struct {
-	store        ServiceStore
-	logger       *slog.Logger
-	maxBodyBytes int64
+	store  ServiceStore
+	logger *slog.Logger
+	config Config
 }
 
 // NewHandler returns a handler that keeps services in store, reports
-// registrations and unexpected failures to logger, and rejects request
-// bodies larger than maxBodyBytes.
-func NewHandler(store ServiceStore, logger *slog.Logger, maxBodyBytes int64) *Handler {
+// registrations and unexpected failures to logger, and follows config.
+func NewHandler(store ServiceStore, logger *slog.Logger, config Config) *Handler {
 	return &Handler{
-		store:        store,
-		logger:       logger,
-		maxBodyBytes: maxBodyBytes,
+		store:  store,
+		logger: logger,
+		config: config,
 	}
 }
 
-// Register adds a new service instance and responds 201 with its ID.
-// An unreadable request body or invalid service fields get 400.
+// Register adds a new service instance and responds 201 with its ID and the
+// TTL within which it must send heartbeats. The Location header points at
+// the new instance. Malformed bodies or invalid service fields get 400.
 func (handler *Handler) Register(writer http.ResponseWriter, request *http.Request) {
 	var input RegisterRequest
 
-	if err := mapRequest(writer, request, &input, handler.maxBodyBytes); err != nil {
+	if err := mapRequest(writer, request, &input, handler.config.MaxRequestBodyBytes); err != nil {
 		handler.writeInvalidBody(writer)
 		return
 	}
@@ -62,27 +73,17 @@ func (handler *Handler) Register(writer http.ResponseWriter, request *http.Reque
 		slog.Int("port", service.Port),
 	)
 
+	writer.Header().Set("Location", servicesPath+"/"+url.PathEscape(serviceID))
 	handler.writeJSON(writer, http.StatusCreated, RegisterResponse{
-		ID: serviceID,
+		ID:         serviceID,
+		TTLSeconds: int64(handler.config.ServiceTTL / time.Second),
 	})
 }
 
-// Heartbeat marks an instance as still alive and responds 204.
-// A missing ID gets 400 and an unknown ID gets 404.
+// Heartbeat marks the instance named in the path as still alive and
+// responds 204. An unknown ID, including one that already expired, gets 404.
 func (handler *Handler) Heartbeat(writer http.ResponseWriter, request *http.Request) {
-	var input HeartbeatRequest
-
-	if err := mapRequest(writer, request, &input, handler.maxBodyBytes); err != nil {
-		handler.writeInvalidBody(writer)
-		return
-	}
-
-	if input.ID == "" {
-		handler.writeError(writer, http.StatusBadRequest, codeMissingID, "id is required")
-		return
-	}
-
-	if err := handler.store.Heartbeat(input.ID); err != nil {
+	if err := handler.store.Heartbeat(request.PathValue("id")); err != nil {
 		handler.writeRegistryError(writer, err)
 		return
 	}
@@ -105,27 +106,17 @@ func (handler *Handler) GetServices(writer http.ResponseWriter, request *http.Re
 	handler.writeJSON(writer, http.StatusOK, result)
 }
 
-// Unregister removes an instance and responds 204.
-// A missing ID gets 400 and an unknown ID gets 404.
+// Unregister removes the instance named in the path and responds 204. An
+// unknown ID gets 404.
 func (handler *Handler) Unregister(writer http.ResponseWriter, request *http.Request) {
-	var input UnregisterRequest
+	serviceID := request.PathValue("id")
 
-	if err := mapRequest(writer, request, &input, handler.maxBodyBytes); err != nil {
-		handler.writeInvalidBody(writer)
-		return
-	}
-
-	if input.ID == "" {
-		handler.writeError(writer, http.StatusBadRequest, codeMissingID, "id is required")
-		return
-	}
-
-	if err := handler.store.Unregister(input.ID); err != nil {
+	if err := handler.store.Unregister(serviceID); err != nil {
 		handler.writeRegistryError(writer, err)
 		return
 	}
 
-	handler.logger.InfoContext(request.Context(), "service unregistered", slog.String("id", input.ID))
+	handler.logger.InfoContext(request.Context(), "service unregistered", slog.String("id", serviceID))
 
 	writeStatus(writer, http.StatusNoContent)
 }

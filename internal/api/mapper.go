@@ -16,8 +16,10 @@ func mapRegisterRequest(dto RegisterRequest) *registry.Service {
 // returned to API clients.
 func mapServiceResponse(service *registry.Service) Service {
 	return Service{
-		Name:    service.Name,
-		Address: service.Address,
-		Port:    service.Port,
+		ID:            service.ID,
+		Name:          service.Name,
+		Address:       service.Address,
+		Port:          service.Port,
+		LastHeartbeat: service.LastHeartbeat.UTC(),
 	}
 }

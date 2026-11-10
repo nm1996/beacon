@@ -8,7 +8,7 @@ A lightweight, self-hosted service registry written in Go.<br>
 Services register themselves, send heartbeats, and discover each other over a small HTTP API.
 
 [![CI](https://github.com/nm1996/beacon/actions/workflows/ci.yml/badge.svg)](https://github.com/nm1996/beacon/actions/workflows/ci.yml)
-[![Go version](https://img.shields.io/badge/go-1.27-00ADD8?logo=go&logoColor=white)](go.mod)
+[![Go version](https://img.shields.io/badge/go-1.26%2B-00ADD8?logo=go&logoColor=white)](go.mod)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Status: work in progress](https://img.shields.io/badge/status-work%20in%20progress-orange)
 
@@ -54,14 +54,14 @@ Beacon covers the core of the problem and nothing more: one small binary, no ext
 | ✅ | TOML configuration file with validation |
 | ✅ | Environment variable overrides |
 | ✅ | Consistent JSON error responses with stable codes |
-| 🔜 | Versioned API (`/api/v1`) |
+| ✅ | Versioned API under `/api/v1` |
 | 🔜 | Native Go client with automatic heartbeats |
 | 🔜 | Docker image and Compose example |
 | 🔜 | Prometheus metrics |
 
 ## Quick start
 
-You need [Go 1.27](https://go.dev/dl/) or newer, or [mise](https://mise.jdx.dev/) to install the pinned toolchain for you.
+You need [Go 1.26](https://go.dev/dl/) or newer, or [mise](https://mise.jdx.dev/) to install the pinned toolchain for you.
 
 ```bash
 git clone https://github.com/nm1996/beacon.git
@@ -81,20 +81,22 @@ curl -s localhost:8080/health
 Register an instance, look it up, and keep it alive:
 
 ```bash
-# Register an instance and save its ID
-curl -s -X POST localhost:8080/register \
+# Register an instance; the response holds its ID and how long it may go without a heartbeat
+curl -s -X POST localhost:8080/api/v1/services \
   -d '{"name": "orders", "address": "10.0.0.12", "port": 8081}'
-# {"id":"8c0f3c56-5d7e-4a63-9a39-2b7c1e5e8f40"}
+# {"id":"8c0f3c56-5d7e-4a63-9a39-2b7c1e5e8f40","ttl_seconds":30}
+
+ID=8c0f3c56-5d7e-4a63-9a39-2b7c1e5e8f40
 
 # Find every instance of "orders"
-curl -s 'localhost:8080/services?name=orders'
-# [{"name":"orders","address":"10.0.0.12","port":8081}]
+curl -s 'localhost:8080/api/v1/services?name=orders'
+# [{"id":"8c0f3c56-...","name":"orders","address":"10.0.0.12","port":8081,"last_heartbeat":"2026-11-10T16:00:00Z"}]
 
-# Tell Beacon the instance is still alive (repeat well within 30 seconds)
-curl -s -X POST localhost:8080/heartbeat -d '{"id": "8c0f3c56-5d7e-4a63-9a39-2b7c1e5e8f40"}'
+# Tell Beacon the instance is still alive (repeat well within ttl_seconds)
+curl -s -X POST localhost:8080/api/v1/services/$ID/heartbeat
 
 # Remove the instance when it shuts down
-curl -s -X DELETE localhost:8080/unregister -d '{"id": "8c0f3c56-5d7e-4a63-9a39-2b7c1e5e8f40"}'
+curl -s -X DELETE localhost:8080/api/v1/services/$ID
 ```
 
 ## How it works
@@ -120,17 +122,17 @@ Instances of the same service share a name. Registering again creates a new inst
 
 ## HTTP API
 
-All request and response bodies are JSON, including errors.
+All service endpoints live under `/api/v1`; `/health` is not versioned. Response bodies are JSON, including errors.
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | [`/register`](#post-register) | Register a new instance |
-| `POST` | [`/heartbeat`](#post-heartbeat) | Keep an instance alive |
-| `GET` | [`/services`](#get-services) | List instances, optionally by name |
-| `DELETE` | [`/unregister`](#delete-unregister) | Remove an instance |
+| `POST` | [`/api/v1/services`](#post-apiv1services) | Register a new instance |
+| `GET` | [`/api/v1/services`](#get-apiv1services) | List instances, optionally by name |
+| `POST` | [`/api/v1/services/{id}/heartbeat`](#post-apiv1servicesidheartbeat) | Keep an instance alive |
+| `DELETE` | [`/api/v1/services/{id}`](#delete-apiv1servicesid) | Remove an instance |
 | `GET` | [`/health`](#get-health) | Check that Beacon is running |
 
-Unknown paths return `404`, and a known path called with the wrong method returns `405`. Request bodies must be a single JSON object of at most 64 KiB (configurable) containing only the fields documented below. Anything else (unknown fields, a second JSON value, trailing text, an oversized body) is rejected with `400` and the code `invalid_request_body`.
+Unknown paths return `404`, and a known path called with the wrong method returns `405`. Only registration reads a request body. It must be a single JSON object of at most 64 KiB (configurable) containing only the fields documented below. Anything else (unknown fields, a second JSON value, trailing text, an oversized body) is rejected with `400` and the code `invalid_request_body`.
 
 ### Errors
 
@@ -146,13 +148,12 @@ Every error response has the same shape:
 |---|---|---|
 | `400` | `invalid_request_body` | The body is not a single JSON object within the size limit with only the documented fields |
 | `400` | `invalid_service` | A registration field breaks a rule, for example a port outside `1`–`65535` |
-| `400` | `missing_id` | A heartbeat or unregister request has no `id` |
 | `404` | `service_not_found` | No instance is registered with the given ID |
 | `404` | `not_found` | No endpoint exists at the path |
 | `405` | `method_not_allowed` | The endpoint exists but not for this method; the `Allow` header lists the supported one |
 | `500` | `internal_error` | Something unexpected went wrong on the server |
 
-### `POST /register`
+### `POST /api/v1/services`
 
 ```json
 { "name": "orders", "address": "10.0.0.12", "port": 8081 }
@@ -166,24 +167,16 @@ Every error response has the same shape:
 
 | Status | Meaning |
 |---|---|
-| `201 Created` | Registered. Body: `{"id": "<instance id>"}` |
-| `400 Bad Request` | Malformed JSON or a field breaks a rule above |
-
-### `POST /heartbeat`
+| `201 Created` | Registered. The `Location` header points at the new instance |
+| `400 Bad Request` | The body is invalid or a field breaks a rule above |
 
 ```json
-{ "id": "8c0f3c56-5d7e-4a63-9a39-2b7c1e5e8f40" }
+{ "id": "8c0f3c56-5d7e-4a63-9a39-2b7c1e5e8f40", "ttl_seconds": 30 }
 ```
 
-| Status | Meaning |
-|---|---|
-| `204 No Content` | Heartbeat recorded |
-| `400 Bad Request` | Malformed JSON or missing `id` |
-| `404 Not Found` | No instance with that ID, possibly because it already expired |
+`ttl_seconds` is how long the instance may go without a heartbeat before Beacon removes it. Sending a heartbeat every third of that leaves room for a missed one.
 
-An instance that gets `404` should register again.
-
-### `GET /services`
+### `GET /api/v1/services`
 
 | Query parameter | Meaning |
 |---|---|
@@ -193,23 +186,31 @@ Always returns `200 OK` with a JSON array, which is empty when nothing matches:
 
 ```json
 [
-  { "name": "orders", "address": "10.0.0.12", "port": 8081 },
-  { "name": "orders", "address": "10.0.0.13", "port": 8081 }
+  { "id": "8c0f3c56-...", "name": "orders", "address": "10.0.0.12", "port": 8081, "last_heartbeat": "2026-11-10T16:00:00Z" },
+  { "id": "1b9e47a2-...", "name": "orders", "address": "10.0.0.13", "port": 8081, "last_heartbeat": "2026-11-10T16:00:04Z" }
 ]
 ```
 
-The order of instances is not defined.
+`last_heartbeat` is in UTC, in RFC 3339 format. The order of instances is not defined.
 
-### `DELETE /unregister`
+### `POST /api/v1/services/{id}/heartbeat`
 
-```json
-{ "id": "8c0f3c56-5d7e-4a63-9a39-2b7c1e5e8f40" }
-```
+No request body.
+
+| Status | Meaning |
+|---|---|
+| `204 No Content` | Heartbeat recorded |
+| `404 Not Found` | No instance with that ID, possibly because it already expired |
+
+An instance that gets `404` should register again.
+
+### `DELETE /api/v1/services/{id}`
+
+No request body.
 
 | Status | Meaning |
 |---|---|
 | `204 No Content` | Instance removed |
-| `400 Bad Request` | Malformed JSON or missing `id` |
 | `404 Not Found` | No instance with that ID |
 
 ### `GET /health`
@@ -256,7 +257,7 @@ BEACON_SERVER_PORT=9090 BEACON_LOGGING_FORMAT=text beacon --config /etc/beacon/b
 
 Environment variables hold plain values without TOML quotes, for example `BEACON_REGISTRY_SERVICE_TTL=2m`. A variable that is set applies even when it is empty, so `BEACON_SERVER_HOST=` listens on all interfaces.
 
-Durations use Go syntax such as `"500ms"`, `"5s"` or `"1m30s"`. All durations and sizes must be positive, and `registry.cleanup_interval` must not be longer than `registry.service_ttl`.
+Durations use Go syntax such as `"500ms"`, `"5s"` or `"1m30s"`. All durations and sizes must be positive, `registry.service_ttl` must be at least `1s`, and `registry.cleanup_interval` must not be longer than `registry.service_ttl`.
 
 Beacon refuses to start, and lists every problem it found, if the file is missing, is not valid TOML or contains an unknown key, if an environment variable cannot be parsed, or if a setting ends up out of range. Range errors name the TOML key, for example `server.port`, whichever source set it.
 
@@ -324,11 +325,11 @@ Run `mise tasks` to list them all. CI runs the same tasks on every pull request.
 - [x] CI pipeline
 - [x] TOML configuration
 - [x] Consistent JSON error responses
+- [x] Versioned REST API
 - [x] Environment variable overrides for configuration
 
 **Next**
 
-- [ ] Versioned REST API
 - [ ] Go client library
 - [ ] Grpc support
 - [ ] Docker image and Compose example
