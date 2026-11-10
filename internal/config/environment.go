@@ -27,6 +27,7 @@ func environmentVariables(config *Config) []environmentVariable {
 		{name: "BEACON_SERVER_MAX_REQUEST_BODY_BYTES", apply: setInt64(&config.Server.MaxRequestBodyBytes)},
 		{name: "BEACON_REGISTRY_SERVICE_TTL", apply: setDuration(&config.Registry.ServiceTTL)},
 		{name: "BEACON_REGISTRY_CLEANUP_INTERVAL", apply: setDuration(&config.Registry.CleanupInterval)},
+		{name: "BEACON_STORAGE_BACKEND", apply: setString(&config.Storage.Backend)},
 		{name: "BEACON_LOGGING_LEVEL", apply: setString(&config.Logging.Level)},
 		{name: "BEACON_LOGGING_FORMAT", apply: setString(&config.Logging.Format)},
 	}

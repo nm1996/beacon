@@ -116,6 +116,7 @@ func run(settings config.Config, logger *slog.Logger) error {
 
 	logger.Info("beacon listening",
 		slog.String("addr", listener.Addr().String()),
+		slog.String("storage", settings.Storage.Backend),
 		slog.String("version", buildVersion()),
 	)
 

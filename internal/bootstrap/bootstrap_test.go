@@ -172,3 +172,16 @@ func TestNewRejectsInvalidDiscoverySettings(t *testing.T) {
 		t.Error("expected an error for a zero TTL")
 	}
 }
+
+func TestNewRejectsUnknownStorageBackend(t *testing.T) {
+	// Config validation normally stops this; bootstrap must still refuse
+	// rather than fall back to some default.
+	settings := config.Default()
+	settings.Storage.Backend = "redis"
+
+	_, err := New(settings, discard, "v0.0.0-test")
+
+	if err == nil || !strings.Contains(err.Error(), `unknown storage backend "redis"`) {
+		t.Errorf("expected an unknown backend error, got %v", err)
+	}
+}

@@ -25,12 +25,17 @@ type Components struct {
 	Server *http.Server
 }
 
-// New builds the registry backend, the discovery layer on top of it and the
+// New builds the registry backend chosen by settings.Storage, the discovery layer on top of it and the
 // HTTP server that serves it, configured by settings. Both the API and the
 // server's own internal errors are reported to logger, and version is what
 // GET /health reports.
 func New(settings config.Config, logger *slog.Logger, version string) (*Components, error) {
-	service, err := discovery.New(memory.New(), discovery.Config{
+	registry, err := newRegistry(settings.Storage)
+	if err != nil {
+		return nil, err
+	}
+
+	service, err := discovery.New(registry, discovery.Config{
 		TTL:             settings.Registry.ServiceTTL,
 		CleanupInterval: settings.Registry.CleanupInterval,
 	}, logger)
@@ -53,4 +58,15 @@ func New(settings config.Config, logger *slog.Logger, version string) (*Componen
 			ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelError),
 		},
 	}, nil
+}
+
+// newRegistry builds the registry backend named by settings.Backend. Adding a
+// backend means adding a case here and its name in internal/config.
+func newRegistry(settings config.StorageConfig) (discovery.Registry, error) {
+	switch settings.Backend {
+	case config.StorageMemory:
+		return memory.New(), nil
+	default:
+		return nil, fmt.Errorf("unknown storage backend %q", settings.Backend)
+	}
 }
