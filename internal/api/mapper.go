@@ -1,25 +1,25 @@
 package api
 
-import "github.com/nm1996/beacon/internal/registry"
+import "github.com/nm1996/beacon/internal/discovery"
 
-// mapRegisterRequest turns a registration request into the service
-// the registry stores. It does not validate anything; the registry does.
-func mapRegisterRequest(dto RegisterRequest) *registry.Service {
-	return &registry.Service{
+// mapRegisterRequest turns a registration request into the registration the
+// discovery layer validates and stores.
+func mapRegisterRequest(dto RegisterRequest) discovery.Registration {
+	return discovery.Registration{
 		Name:    dto.Name,
 		Address: dto.Address,
 		Port:    dto.Port,
 	}
 }
 
-// mapServiceResponse picks the fields of a registered service that are
+// mapInstanceResponse picks the fields of a registered instance that are
 // returned to API clients.
-func mapServiceResponse(service *registry.Service) Service {
+func mapInstanceResponse(instance discovery.Instance) Service {
 	return Service{
-		ID:            service.ID,
-		Name:          service.Name,
-		Address:       service.Address,
-		Port:          service.Port,
-		LastHeartbeat: service.LastHeartbeat.UTC(),
+		ID:            instance.ID,
+		Name:          instance.Name,
+		Address:       instance.Address,
+		Port:          instance.Port,
+		LastHeartbeat: instance.LastHeartbeat.UTC(),
 	}
 }

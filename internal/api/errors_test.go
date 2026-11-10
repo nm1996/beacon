@@ -3,7 +3,6 @@ package api
 import (
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -52,7 +51,7 @@ func TestErrorResponses(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			router, _ := setupRouter()
+			router, _ := setupRouter(t)
 
 			rec := serve(router, tt.method, tt.path, tt.body)
 
@@ -68,7 +67,7 @@ func TestErrorResponses(t *testing.T) {
 }
 
 func TestInvalidServiceMessageNamesTheProblem(t *testing.T) {
-	handler, _ := setupHandler()
+	handler, _ := setupHandler(t)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/services", strings.NewReader(`{"name":"orders","address":"10.0.0.1","port":70000}`))
 	rec := httptest.NewRecorder()
@@ -81,7 +80,7 @@ func TestInvalidServiceMessageNamesTheProblem(t *testing.T) {
 }
 
 func TestMethodNotAllowedKeepsAllowHeader(t *testing.T) {
-	router, _ := setupRouter()
+	router, _ := setupRouter(t)
 
 	tests := []struct {
 		path      string
@@ -101,7 +100,7 @@ func TestMethodNotAllowedKeepsAllowHeader(t *testing.T) {
 }
 
 func TestInternalErrorUsesJSONFormat(t *testing.T) {
-	router := NewRouter(failingStore{err: errors.New("disk on fire")}, slog.New(slog.DiscardHandler), testConfig)
+	router := NewRouter(failingDiscovery{err: errors.New("disk on fire")}, discard, testConfig)
 
 	rec := serve(router, http.MethodPost, "/api/v1/services/x/heartbeat", "")
 

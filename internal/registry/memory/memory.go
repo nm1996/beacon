@@ -1,0 +1,108 @@
+// Package memory is the in-memory discovery.Registry: a map guarded by one
+// sync.RWMutex. It keeps nothing across restarts, which Beacon's clients
+// handle by registering again when a heartbeat gets 404.
+package memory
+
+import (
+	"context"
+	"fmt"
+	"sync"
+	"time"
+
+	"github.com/nm1996/beacon/internal/discovery"
+)
+
+// MemoryRegistry stores instances in memory. Use New to create one; the
+// zero value is not ready to use. It is safe for concurrent use.
+//
+// The name repeats the package on purpose: next to other backends it reads
+// as what it is wherever the type is mentioned alone.
+type MemoryRegistry struct { //nolint:revive // stutter accepted for clarity, see above
+	mu        sync.RWMutex
+	instances map[string]discovery.Instance
+}
+
+var _ discovery.Registry = (*MemoryRegistry)(nil)
+
+// New returns an empty registry.
+func New() *MemoryRegistry {
+	return &MemoryRegistry{instances: make(map[string]discovery.Instance)}
+}
+
+// Create stores instance under its ID and fails if the ID is taken.
+func (registry *MemoryRegistry) Create(_ context.Context, instance discovery.Instance) error {
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+
+	if _, exists := registry.instances[instance.ID]; exists {
+		return fmt.Errorf("instance %s already exists", instance.ID)
+	}
+
+	registry.instances[instance.ID] = instance
+
+	return nil
+}
+
+// Touch sets the LastHeartbeat of the instance with id.
+func (registry *MemoryRegistry) Touch(_ context.Context, id string, at time.Time) error {
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+
+	instance, exists := registry.instances[id]
+	if !exists {
+		return discovery.ErrInstanceNotFound
+	}
+
+	instance.LastHeartbeat = at
+	registry.instances[id] = instance
+
+	return nil
+}
+
+// List returns copies of the instances named name, or of all instances when
+// name is empty.
+func (registry *MemoryRegistry) List(_ context.Context, name string) ([]discovery.Instance, error) {
+	registry.mu.RLock()
+	defer registry.mu.RUnlock()
+
+	result := make([]discovery.Instance, 0, len(registry.instances))
+
+	for _, instance := range registry.instances {
+		if name == "" || instance.Name == name {
+			result = append(result, instance)
+		}
+	}
+
+	return result, nil
+}
+
+// Delete removes the instance with id.
+func (registry *MemoryRegistry) Delete(_ context.Context, id string) error {
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+
+	if _, exists := registry.instances[id]; !exists {
+		return discovery.ErrInstanceNotFound
+	}
+
+	delete(registry.instances, id)
+
+	return nil
+}
+
+// DeleteStale removes every instance whose last heartbeat is before cutoff.
+func (registry *MemoryRegistry) DeleteStale(_ context.Context, cutoff time.Time) (int, error) {
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+
+	removed := 0
+
+	for id, instance := range registry.instances {
+		if instance.LastHeartbeat.Before(cutoff) {
+			delete(registry.instances, id)
+			removed++
+		}
+	}
+
+	return removed, nil
+}

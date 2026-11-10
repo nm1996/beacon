@@ -18,7 +18,6 @@ import (
 
 	"github.com/nm1996/beacon/internal/bootstrap"
 	"github.com/nm1996/beacon/internal/config"
-	"github.com/nm1996/beacon/internal/registry"
 )
 
 // version is the release version, set when release binaries are built with
@@ -81,7 +80,11 @@ func run(settings config.Config, logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	components := bootstrap.New(settings, logger, buildVersion())
+	components, err := bootstrap.New(settings, logger, buildVersion())
+	if err != nil {
+		return err
+	}
+
 	server := components.Server
 
 	// Bind before starting anything else, so a port that is already in use
@@ -101,10 +104,7 @@ func run(settings config.Config, logger *slog.Logger) error {
 	}()
 
 	workers.Go(func() {
-		if err := components.Registry.RunCleanup(workerCtx, registry.CleanupConfig{
-			Interval: settings.Registry.CleanupInterval,
-			TTL:      settings.Registry.ServiceTTL,
-		}, logger); err != nil {
+		if err := components.Discovery.RunCleanup(workerCtx); err != nil {
 			logger.Error("cleanup worker stopped", slog.Any("error", err))
 		}
 	})

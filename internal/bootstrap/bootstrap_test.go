@@ -10,18 +10,30 @@ import (
 	"time"
 
 	"github.com/nm1996/beacon/internal/config"
-	"github.com/nm1996/beacon/internal/registry"
+	"github.com/nm1996/beacon/internal/discovery"
 )
 
 // discard is a logger that drops everything.
 var discard = slog.New(slog.DiscardHandler)
+
+// mustNew builds the components and fails the test if that is rejected.
+func mustNew(t *testing.T, settings config.Config, version string) *Components {
+	t.Helper()
+
+	components, err := New(settings, discard, version)
+	if err != nil {
+		t.Fatalf("new components: %v", err)
+	}
+
+	return components
+}
 
 func TestNewUsesConfiguredAddress(t *testing.T) {
 	settings := config.Default()
 	settings.Server.Host = "127.0.0.1"
 	settings.Server.Port = 9090
 
-	components := New(settings, discard, "v0.0.0-test")
+	components := mustNew(t, settings, "v0.0.0-test")
 
 	if components.Server.Addr != "127.0.0.1:9090" {
 		t.Fatalf("expected server address %q, got %q", "127.0.0.1:9090", components.Server.Addr)
@@ -34,7 +46,7 @@ func TestNewAppliesServerTimeouts(t *testing.T) {
 	settings.Server.WriteTimeout = 2 * time.Second
 	settings.Server.IdleTimeout = 3 * time.Second
 
-	server := New(settings, discard, "v0.0.0-test").Server
+	server := mustNew(t, settings, "v0.0.0-test").Server
 
 	if server.ReadHeaderTimeout != time.Second || server.ReadTimeout != time.Second {
 		t.Errorf("expected read timeouts of 1s, got header %v, read %v", server.ReadHeaderTimeout, server.ReadTimeout)
@@ -53,7 +65,7 @@ func TestNewAppliesRequestBodyLimit(t *testing.T) {
 	settings := config.Default()
 	settings.Server.MaxRequestBodyBytes = 40
 
-	handler := New(settings, discard, "v0.0.0-test").Server.Handler
+	handler := mustNew(t, settings, "v0.0.0-test").Server.Handler
 
 	tests := []struct {
 		name       string
@@ -78,10 +90,10 @@ func TestNewAppliesRequestBodyLimit(t *testing.T) {
 	}
 }
 
-func TestNewConnectsServerToRegistry(t *testing.T) {
-	components := New(config.Default(), discard, "v0.0.0-test")
+func TestNewConnectsServerToDiscovery(t *testing.T) {
+	components := mustNew(t, config.Default(), "v0.0.0-test")
 
-	_, err := components.Registry.Register(&registry.Service{
+	_, err := components.Discovery.Register(t.Context(), discovery.Registration{
 		Name:    "orders",
 		Address: "10.0.0.1",
 		Port:    8081,
@@ -113,7 +125,7 @@ func TestNewReportsConfiguredTTLToClients(t *testing.T) {
 	settings := config.Default()
 	settings.Registry.ServiceTTL = 45 * time.Second
 
-	handler := New(settings, discard, "v0.0.0-test").Server.Handler
+	handler := mustNew(t, settings, "v0.0.0-test").Server.Handler
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/services", strings.NewReader(`{"name":"orders","address":"10.0.0.1","port":8081}`))
 	rec := httptest.NewRecorder()
@@ -133,7 +145,7 @@ func TestNewReportsConfiguredTTLToClients(t *testing.T) {
 }
 
 func TestNewReportsVersionOnHealth(t *testing.T) {
-	handler := New(config.Default(), discard, "v1.2.3").Server.Handler
+	handler := mustNew(t, config.Default(), "v1.2.3").Server.Handler
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
@@ -149,5 +161,14 @@ func TestNewReportsVersionOnHealth(t *testing.T) {
 
 	if response.Version != "v1.2.3" {
 		t.Errorf("expected version %q, got %q", "v1.2.3", response.Version)
+	}
+}
+
+func TestNewRejectsInvalidDiscoverySettings(t *testing.T) {
+	settings := config.Default()
+	settings.Registry.ServiceTTL = 0
+
+	if _, err := New(settings, discard, "v0.0.0-test"); err == nil {
+		t.Error("expected an error for a zero TTL")
 	}
 }

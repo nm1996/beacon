@@ -92,7 +92,7 @@ func TestRegisterRejectsInvalidBodiesWithBadRequest(t *testing.T) {
 	// instance ID from the path.
 	for bodyName, body := range bodies {
 		t.Run(bodyName, func(t *testing.T) {
-			router, r := setupRouter()
+			router, r := setupRouter(t)
 			id := mustRegister(t, r, "orders", 8081)
 
 			rec := serve(router, http.MethodPost, "/api/v1/services", body)
@@ -106,7 +106,7 @@ func TestRegisterRejectsInvalidBodiesWithBadRequest(t *testing.T) {
 			}
 
 			// The rejected request must not have changed the registry.
-			if got := r.GetServices(""); len(got) != 1 || got[0].ID != id {
+			if got := listAll(t, r, ""); len(got) != 1 || got[0].ID != id {
 				t.Errorf("expected only the seeded service to remain, got %+v", got)
 			}
 		})
@@ -114,7 +114,7 @@ func TestRegisterRejectsInvalidBodiesWithBadRequest(t *testing.T) {
 }
 
 func TestRegisterBodyTooLarge(t *testing.T) {
-	handler, r := setupHandler()
+	handler, r := setupHandler(t)
 
 	body := `{"name":"` + strings.Repeat("a", testMaxBodyBytes) + `","address":"localhost","port":8080}`
 
@@ -127,7 +127,7 @@ func TestRegisterBodyTooLarge(t *testing.T) {
 		t.Errorf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
 	}
 
-	if len(r.GetServices("")) != 0 {
+	if len(listAll(t, r, "")) != 0 {
 		t.Error("expected oversized request not to register a service")
 	}
 }

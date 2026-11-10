@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/nm1996/beacon/internal/registry"
+	"github.com/nm1996/beacon/internal/discovery"
 )
 
 // Error codes sent in the "code" field of every error response. Clients
@@ -37,16 +37,17 @@ func (handler *Handler) writeInvalidBody(writer http.ResponseWriter) {
 	))
 }
 
-// writeRegistryError maps a registry error to an HTTP error response.
-// Unexpected errors are logged and reported without internal details.
-func (handler *Handler) writeRegistryError(writer http.ResponseWriter, err error) {
+// writeDiscoveryError maps an error from the discovery layer to an HTTP
+// error response. Unexpected errors, such as an unreachable storage backend,
+// are logged and reported without internal details.
+func (handler *Handler) writeDiscoveryError(writer http.ResponseWriter, request *http.Request, err error) {
 	switch {
-	case errors.Is(err, registry.ErrInvalidService):
+	case errors.Is(err, discovery.ErrInvalidRegistration):
 		handler.writeError(writer, http.StatusBadRequest, codeInvalidService, err.Error())
-	case errors.Is(err, registry.ErrServiceNotFound):
+	case errors.Is(err, discovery.ErrInstanceNotFound):
 		handler.writeError(writer, http.StatusNotFound, codeServiceNotFound, "No service is registered with this ID")
 	default:
-		handler.logger.Error("registry operation failed", slog.Any("error", err))
+		handler.logger.ErrorContext(request.Context(), "discovery operation failed", slog.Any("error", err))
 		handler.writeError(writer, http.StatusInternalServerError, codeInternalError, "Internal server error")
 	}
 }

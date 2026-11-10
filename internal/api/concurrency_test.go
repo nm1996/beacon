@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,7 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nm1996/beacon/internal/registry"
+	"github.com/nm1996/beacon/internal/discovery"
+	"github.com/nm1996/beacon/internal/registry/memory"
 )
 
 // TestConcurrentTrafficWithBackgroundCleanup runs the same mix Beacon sees in
@@ -23,16 +23,19 @@ func TestConcurrentTrafficWithBackgroundCleanup(t *testing.T) {
 	const clients = 16
 	const heartbeatsPerClient = 50
 
-	store := registry.New()
-	logger := slog.New(slog.DiscardHandler)
-	router := NewRouter(store, logger, testConfig)
+	store, err := discovery.New(memory.New(), discovery.Config{TTL: time.Hour, CleanupInterval: time.Millisecond}, discard)
+	if err != nil {
+		t.Fatalf("new discovery: %v", err)
+	}
+
+	router := NewRouter(store, discard, testConfig)
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	cleanupDone := make(chan error, 1)
 
 	go func() {
-		cleanupDone <- store.RunCleanup(ctx, registry.CleanupConfig{Interval: time.Millisecond, TTL: time.Hour}, logger)
+		cleanupDone <- store.RunCleanup(ctx)
 	}()
 
 	send := func(method, path, body string) *httptest.ResponseRecorder {
@@ -97,7 +100,7 @@ func TestConcurrentTrafficWithBackgroundCleanup(t *testing.T) {
 		t.Errorf("expected cleanup to stop cleanly, got %v", err)
 	}
 
-	if remaining := store.GetServices(""); len(remaining) != 0 {
+	if remaining := listAll(t, store, ""); len(remaining) != 0 {
 		t.Errorf("expected every client to have unregistered, %d services remain", len(remaining))
 	}
 }
