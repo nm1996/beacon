@@ -18,7 +18,7 @@ import (
 const testMaxBodyBytes = 64 << 10
 
 // testConfig is the API configuration used in tests.
-var testConfig = Config{MaxRequestBodyBytes: testMaxBodyBytes, ServiceTTL: 30 * time.Second}
+var testConfig = Config{MaxRequestBodyBytes: testMaxBodyBytes, ServiceTTL: 30 * time.Second, Version: "v0.0.0-test"}
 
 // setupHandler returns a handler and the empty registry behind it, so tests
 // can seed or inspect state directly.
@@ -325,5 +325,9 @@ func TestHealth(t *testing.T) {
 
 	if response.Status != "ok" {
 		t.Errorf("expected status %q, got %q", "ok", response.Status)
+	}
+
+	if response.Version != testConfig.Version {
+		t.Errorf("expected version %q, got %q", testConfig.Version, response.Version)
 	}
 }

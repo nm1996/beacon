@@ -34,6 +34,10 @@ run = "go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./..."
 description = "Build the beacon binary into bin/"
 run = "go build -o bin/beacon ./cmd/beacon"
 
+[tasks.dist]
+description = "Build release archives for every platform into dist/ (VERSION defaults to git describe)"
+run = "bash scripts/dist.sh"
+
 [tasks.run]
 description = "Run the Beacon server"
 run = "go run ./cmd/beacon"

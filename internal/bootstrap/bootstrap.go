@@ -23,9 +23,9 @@ type Components struct {
 }
 
 // New builds the registry and the HTTP server that serves it, configured by
-// settings.Server. Both the API and the server's own internal errors are
-// reported to logger.
-func New(settings config.Config, logger *slog.Logger) *Components {
+// settings. Both the API and the server's own internal errors are reported
+// to logger, and version is what GET /health reports.
+func New(settings config.Config, logger *slog.Logger, version string) *Components {
 	serviceRegistry := registry.New()
 
 	return &Components{
@@ -35,6 +35,7 @@ func New(settings config.Config, logger *slog.Logger) *Components {
 			Handler: api.NewRouter(serviceRegistry, logger, api.Config{
 				MaxRequestBodyBytes: settings.Server.MaxRequestBodyBytes,
 				ServiceTTL:          settings.Registry.ServiceTTL,
+				Version:             version,
 			}),
 			ReadHeaderTimeout: settings.Server.ReadTimeout,
 			ReadTimeout:       settings.Server.ReadTimeout,

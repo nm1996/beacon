@@ -29,6 +29,7 @@ Services register themselves, send heartbeats, and discover each other over a sm
 - [Development](#development)
 - [Project layout](#project-layout)
 - [Roadmap](#roadmap)
+- [Versioning](#versioning)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -75,7 +76,7 @@ Check that it is up:
 
 ```bash
 curl -s localhost:8080/health
-# {"status":"ok"}
+# {"status":"ok","version":"..."}
 ```
 
 Register an instance, look it up, and keep it alive:
@@ -215,10 +216,10 @@ No request body.
 
 ### `GET /health`
 
-Always returns `200 OK` while the process is serving requests. Use it for container and load balancer health checks.
+Always returns `200 OK` while the process is serving requests, with the version of the running build. Use it for container and load balancer health checks.
 
 ```json
-{ "status": "ok" }
+{ "status": "ok", "version": "v0.1.0" }
 ```
 
 ## Configuration
@@ -290,6 +291,7 @@ mise run check # format, vet, lint and run tests with the race detector
 | `mise run test-race` | Run tests with the race detector |
 | `mise run vuln` | Scan for known vulnerabilities with `govulncheck` |
 | `mise run build` | Build `bin/beacon` |
+| `mise run dist` | Build release archives for every platform into `dist/` |
 | `mise run run` | Start the server on `:8080` |
 | `mise run check` | Format, vet, lint, race tests and vulnerability scan |
 
@@ -341,6 +343,32 @@ Run `mise tasks` to list them all. CI runs the same tasks on every pull request.
 - [ ] Cache and database
 - [ ] Scale, multiple nodes
 - [ ] Idempotency
+
+## Versioning
+
+Beacon follows [Semantic Versioning](https://semver.org/). Releases are git tags such as `v0.1.0` on `main`, and every change is listed in [CHANGELOG.md](CHANGELOG.md).
+
+| What | How it is versioned | What counts as breaking |
+|---|---|---|
+| Releases (binaries, tags) | `vMAJOR.MINOR.PATCH` | Before `v1.0.0` a breaking change bumps the minor version, anything else the patch version. From `v1.0.0` on, standard SemVer applies. |
+| HTTP API | `/api/v1` in the path | Removing or renaming an endpoint or field, or changing its meaning. Adding endpoints or fields is not breaking and stays in `v1`. A breaking change moves to `/api/v2`, and `/api/v1` keeps working for at least one more minor release. |
+| Configuration | Same as the release | Removing or renaming a key or `BEACON_*` variable, or changing a default in a way that changes behavior. Adding a key with a default is not breaking. |
+
+Commit messages follow Conventional Commits, which map onto these rules: `feat!` or `BREAKING CHANGE` is breaking, `feat` adds functionality, and `fix` is a patch.
+
+### Releasing
+
+1. Move the **Unreleased** entries in `CHANGELOG.md` under a new version heading and merge that change.
+2. Tag the merge commit on `main` and push the tag:
+
+   ```bash
+   git tag -a v0.1.0 -m "v0.1.0"
+   git push origin v0.1.0
+   ```
+
+3. The [release workflow](.github/workflows/release.yml) runs the checks, builds archives for Linux, macOS and Windows on amd64 and arm64, and publishes a GitHub release with checksums. Tags with a suffix, such as `v0.1.0-rc.1`, become pre-releases.
+
+Tags are never moved or deleted once pushed.
 
 ## Contributing
 

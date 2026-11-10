@@ -27,6 +27,8 @@ type Config struct {
 	// ServiceTTL is how long an instance may go without a heartbeat. It is
 	// reported to clients when they register so they can pace heartbeats.
 	ServiceTTL time.Duration
+	// Version is the running build's version, reported by GET /health.
+	Version string
 }
 
 // Handler serves the registry API endpoints. Every method is an
@@ -122,9 +124,10 @@ func (handler *Handler) Unregister(writer http.ResponseWriter, request *http.Req
 }
 
 // Health reports that the process is up and serving requests. It always
-// responds 200 with {"status":"ok"} and does not touch the registry.
+// responds 200 with {"status":"ok","version":"..."} and does not touch the
+// registry.
 func (handler *Handler) Health(writer http.ResponseWriter, _ *http.Request) {
-	handler.writeJSON(writer, http.StatusOK, HealthResponse{Status: "ok"})
+	handler.writeJSON(writer, http.StatusOK, HealthResponse{Status: "ok", Version: handler.config.Version})
 }
 
 // writeJSON sends data as a JSON body with the given status code.

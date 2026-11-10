@@ -28,7 +28,8 @@ type Service struct {
 
 // HealthResponse is the body of GET /health.
 type HealthResponse struct {
-	Status string `json:"status"`
+	Status  string `json:"status"`
+	Version string `json:"version"`
 }
 
 // ErrorResponse is the body of every error response.
