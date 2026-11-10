@@ -1,8 +1,9 @@
-// Package config loads Beacon's settings from a TOML file and validates them.
+// Package config loads Beacon's settings and validates them.
 //
-// Settings start from built-in defaults; a file only needs the keys it wants
-// to change. Unknown keys are rejected so a typo cannot silently fall back
-// to a default.
+// Settings start from built-in defaults, are overlaid by an optional TOML
+// file, and are then overlaid by BEACON_* environment variables. A file only
+// needs the keys it wants to change. Unknown keys are rejected so a typo
+// cannot silently fall back to a default.
 package config
 
 import (
@@ -10,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -84,19 +86,36 @@ func Default() Config {
 }
 
 // Load returns the default settings overlaid with those in the TOML file at
-// path, then validates the result. An empty path means defaults only. It
-// fails if the file is missing, is not valid TOML, contains an unknown key,
-// or sets a value Validate rejects.
+// path, then with any BEACON_* environment variables, and validates the
+// result. An empty path skips the file. It fails if the file is missing, is
+// not valid TOML, contains an unknown key, if an environment variable cannot
+// be parsed, or if the final settings are rejected by Validate.
 func Load(path string) (Config, error) {
 	config := Default()
 
-	if path == "" {
-		return config, nil
+	if path != "" {
+		if err := decodeFile(path, &config); err != nil {
+			return Config{}, err
+		}
 	}
 
-	metadata, err := toml.DecodeFile(path, &config)
+	if err := applyEnvironment(&config, os.LookupEnv); err != nil {
+		return Config{}, fmt.Errorf("read environment: %w", err)
+	}
+
+	if err := config.Validate(); err != nil {
+		return Config{}, fmt.Errorf("invalid config: %w", err)
+	}
+
+	return config, nil
+}
+
+// decodeFile overlays config with the TOML file at path, rejecting keys that
+// do not match a setting.
+func decodeFile(path string, config *Config) error {
+	metadata, err := toml.DecodeFile(path, config)
 	if err != nil {
-		return Config{}, fmt.Errorf("read config %s: %w", path, err)
+		return fmt.Errorf("read config %s: %w", path, err)
 	}
 
 	if undecoded := metadata.Undecoded(); len(undecoded) > 0 {
@@ -105,14 +124,10 @@ func Load(path string) (Config, error) {
 			keys = append(keys, key.String())
 		}
 
-		return Config{}, fmt.Errorf("read config %s: unknown keys: %s", path, strings.Join(keys, ", "))
+		return fmt.Errorf("read config %s: unknown keys: %s", path, strings.Join(keys, ", "))
 	}
 
-	if err := config.Validate(); err != nil {
-		return Config{}, fmt.Errorf("invalid config %s: %w", path, err)
-	}
-
-	return config, nil
+	return nil
 }
 
 // Validate reports every setting that is out of range, each named by its

@@ -20,11 +20,11 @@ import (
 	"github.com/nm1996/beacon/internal/registry"
 )
 
-// main loads the configuration, then runs the server until it fails or is
+// main loads the configuration from the file and environment, then runs the server until it fails or is
 // told to stop, exiting with a non-zero status on failure. With --version it
 // prints the build version and exits instead.
 func main() {
-	configPath := flag.String("config", "", "path to a TOML configuration file; built-in defaults are used when empty")
+	configPath := flag.String("config", "", "path to a TOML configuration file; BEACON_* environment variables override it, and built-in defaults fill the rest")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
 

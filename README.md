@@ -52,7 +52,7 @@ Beacon covers the core of the problem and nothing more: one small binary, no ext
 | ✅ | Server timeouts and request size limits |
 | ✅ | Structured JSON logs |
 | ✅ | TOML configuration file with validation |
-| 🔜 | Environment variable overrides |
+| ✅ | Environment variable overrides |
 | ✅ | Consistent JSON error responses with stable codes |
 | 🔜 | Versioned API (`/api/v1`) |
 | 🔜 | Native Go client with automatic heartbeats |
@@ -222,31 +222,43 @@ Always returns `200 OK` while the process is serving requests. Use it for contai
 
 ## Configuration
 
-Beacon reads its settings from a TOML file passed with `--config`:
+Beacon reads its settings from a TOML file passed with `--config` and from environment variables:
 
 ```bash
 beacon --config /etc/beacon/beacon.toml
 ```
 
-Without `--config` it runs with the built-in defaults below. A file only needs the keys it changes; every other key keeps its default. [`configs/beacon.example.toml`](configs/beacon.example.toml) lists every key with its default value.
+Each setting is taken from the first of these that provides it:
 
-| Key | Default | Meaning |
-|---|---|---|
-| `server.host` | `"0.0.0.0"` | Interface to listen on |
-| `server.port` | `8080` | TCP port, `1`–`65535` |
-| `server.read_timeout` | `"5s"` | Time allowed to read a request, headers included |
-| `server.write_timeout` | `"10s"` | Time allowed to write a response |
-| `server.idle_timeout` | `"60s"` | Time an idle keep-alive connection stays open |
-| `server.shutdown_timeout` | `"10s"` | Time in-flight requests get to finish on shutdown |
-| `server.max_request_body_bytes` | `65536` | Largest accepted request body |
-| `registry.service_ttl` | `"30s"` | Time without a heartbeat before an instance is removed |
-| `registry.cleanup_interval` | `"5s"` | How often stale instances are removed |
-| `logging.level` | `"info"` | `debug`, `info`, `warn` or `error` |
-| `logging.format` | `"json"` | `json` or `text` |
+1. An environment variable such as `BEACON_SERVER_PORT`
+2. The TOML file given with `--config`
+3. The built-in default
+
+A file only needs the keys it changes, and no file is needed at all. [`configs/beacon.example.toml`](configs/beacon.example.toml) lists every key with its default value.
+
+| Key | Environment variable | Default | Meaning |
+|---|---|---|---|
+| `server.host` | `BEACON_SERVER_HOST` | `"0.0.0.0"` | Interface to listen on |
+| `server.port` | `BEACON_SERVER_PORT` | `8080` | TCP port, `1`–`65535` |
+| `server.read_timeout` | `BEACON_SERVER_READ_TIMEOUT` | `"5s"` | Time allowed to read a request, headers included |
+| `server.write_timeout` | `BEACON_SERVER_WRITE_TIMEOUT` | `"10s"` | Time allowed to write a response |
+| `server.idle_timeout` | `BEACON_SERVER_IDLE_TIMEOUT` | `"60s"` | Time an idle keep-alive connection stays open |
+| `server.shutdown_timeout` | `BEACON_SERVER_SHUTDOWN_TIMEOUT` | `"10s"` | Time in-flight requests get to finish on shutdown |
+| `server.max_request_body_bytes` | `BEACON_SERVER_MAX_REQUEST_BODY_BYTES` | `65536` | Largest accepted request body |
+| `registry.service_ttl` | `BEACON_REGISTRY_SERVICE_TTL` | `"30s"` | Time without a heartbeat before an instance is removed |
+| `registry.cleanup_interval` | `BEACON_REGISTRY_CLEANUP_INTERVAL` | `"5s"` | How often stale instances are removed |
+| `logging.level` | `BEACON_LOGGING_LEVEL` | `"info"` | `debug`, `info`, `warn` or `error` |
+| `logging.format` | `BEACON_LOGGING_FORMAT` | `"json"` | `json` or `text` |
+
+```bash
+BEACON_SERVER_PORT=9090 BEACON_LOGGING_FORMAT=text beacon --config /etc/beacon/beacon.toml
+```
+
+Environment variables hold plain values without TOML quotes, for example `BEACON_REGISTRY_SERVICE_TTL=2m`. A variable that is set applies even when it is empty, so `BEACON_SERVER_HOST=` listens on all interfaces.
 
 Durations use Go syntax such as `"500ms"`, `"5s"` or `"1m30s"`. All durations and sizes must be positive.
 
-Beacon refuses to start, and lists every problem it found, if the file is missing, is not valid TOML, contains an unknown key, or sets a value out of range. Environment variable overrides are not supported yet.
+Beacon refuses to start, and lists every problem it found, if the file is missing, is not valid TOML or contains an unknown key, if an environment variable cannot be parsed, or if a setting ends up out of range. Range errors name the TOML key, for example `server.port`, whichever source set it.
 
 Logs go to standard output. Run `beacon --version` to print the build version.
 
@@ -312,10 +324,10 @@ Run `mise tasks` to list them all. CI runs the same tasks on every pull request.
 - [x] CI pipeline
 - [x] TOML configuration
 - [x] Consistent JSON error responses
+- [x] Environment variable overrides for configuration
 
 **Next**
 
-- [ ] Environment variable overrides for configuration
 - [ ] Versioned REST API
 - [ ] Go client library
 - [ ] Docker image and Compose example
