@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -61,16 +62,27 @@ func newLogger(output io.Writer, settings config.LoggingConfig) *slog.Logger {
 	return slog.New(slog.NewJSONHandler(output, options))
 }
 
-// run starts the HTTP server and the cleanup worker, then blocks until the
-// server fails or the process gets SIGINT or SIGTERM. On a signal it gives
-// in-flight requests up to server.shutdown_timeout to finish. The cleanup
-// worker is always stopped and waited for before run returns.
+// run binds the listen address, starts the HTTP server and the cleanup
+// worker, then blocks until the server fails or the process gets SIGINT or
+// SIGTERM. On a signal it gives in-flight requests up to
+// server.shutdown_timeout to finish; a second signal during that time ends
+// the process at once. The cleanup worker is always stopped and waited for
+// before run returns.
 func run(settings config.Config, logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	components := bootstrap.New(settings, logger)
 	server := components.Server
+
+	// Bind before starting anything else, so a port that is already in use
+	// fails startup cleanly instead of after "listening" has been logged.
+	var listenConfig net.ListenConfig
+
+	listener, err := listenConfig.Listen(ctx, "tcp", server.Addr)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", server.Addr, err)
+	}
 
 	workerCtx, stopWorkers := context.WithCancel(ctx)
 	var workers sync.WaitGroup
@@ -90,12 +102,13 @@ func run(settings config.Config, logger *slog.Logger) error {
 
 	serveErr := make(chan error, 1)
 	go func() {
-		logger.Info("beacon listening",
-			slog.String("addr", server.Addr),
-			slog.String("version", buildVersion()),
-		)
-		serveErr <- server.ListenAndServe()
+		serveErr <- server.Serve(listener)
 	}()
+
+	logger.Info("beacon listening",
+		slog.String("addr", listener.Addr().String()),
+		slog.String("version", buildVersion()),
+	)
 
 	select {
 	case err := <-serveErr:
@@ -105,6 +118,10 @@ func run(settings config.Config, logger *slog.Logger) error {
 		return fmt.Errorf("http server: %w", err)
 	case <-ctx.Done():
 	}
+
+	// Restore default signal handling, so a second Ctrl+C or SIGTERM stops
+	// the process immediately instead of waiting for the graceful shutdown.
+	stop()
 
 	logger.Info("beacon shutting down")
 

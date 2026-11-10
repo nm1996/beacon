@@ -32,10 +32,6 @@ type Service struct {
 // validate checks the fields a caller supplies when registering a service.
 // The returned error wraps ErrInvalidService.
 func (service *Service) validate() error {
-	if service == nil {
-		return fmt.Errorf("%w: service is required", ErrInvalidService)
-	}
-
 	if strings.TrimSpace(service.Name) == "" {
 		return fmt.Errorf("%w: name is required", ErrInvalidService)
 	}

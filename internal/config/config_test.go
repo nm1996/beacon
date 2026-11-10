@@ -109,6 +109,11 @@ func TestLoadFailures(t *testing.T) {
 		{name: "unknown log level", content: "[logging]\nlevel = \"verbose\"", wantErr: []string{"logging.level"}},
 		{name: "unknown log format", content: "[logging]\nformat = \"xml\"", wantErr: []string{"logging.format"}},
 		{
+			name:    "cleanup interval longer than TTL",
+			content: "[registry]\nservice_ttl = \"10s\"\ncleanup_interval = \"20s\"",
+			wantErr: []string{"registry.cleanup_interval (20s) must not be longer than registry.service_ttl (10s)"},
+		},
+		{
 			name:    "several problems at once",
 			content: "[server]\nport = 0\n[registry]\ncleanup_interval = \"0s\"",
 			wantErr: []string{"server.port", "registry.cleanup_interval"},
@@ -128,6 +133,14 @@ func TestLoadFailures(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestCleanupIntervalMayEqualTTL(t *testing.T) {
+	path := writeConfig(t, "[registry]\nservice_ttl = \"10s\"\ncleanup_interval = \"10s\"")
+
+	if _, err := Load(path); err != nil {
+		t.Errorf("expected an interval equal to the TTL to be accepted, got %v", err)
 	}
 }
 
