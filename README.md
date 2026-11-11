@@ -59,7 +59,7 @@ Beacon covers the core of the problem and nothing more: one small binary, no ext
 | ✅ | Environment variable overrides |
 | ✅ | Consistent JSON error responses with stable codes |
 | ✅ | Versioned API under `/api/v1` |
-| 🔜 | Native Go client with automatic heartbeats |
+| ✅ | Go client with automatic heartbeats and re-registration |
 | ✅ | Container image (amd64, arm64) with a built-in health check, and a Compose example |
 | ✅ | Prometheus metrics at `/metrics` |
 
@@ -309,16 +309,30 @@ The [`client`](client) package is a Go client for the HTTP API. It uses only the
 go get github.com/nm1996/beacon/client
 ```
 
+Most services need two calls: announce themselves when they start, and look up the services they call.
+
 ```go
-beacon, err := client.New("http://beacon:8080")
+beacon, err := client.New("http://beacon:8080", client.WithLogger(logger))
 if err != nil {
 	return err
 }
 
-// Look up a service
-instances, err := beacon.Discover(ctx, "orders")
+// Register and keep the registration alive until shutdown.
+lease, err := beacon.Announce(ctx, client.Registration{Name: "orders", Address: "10.0.0.12", Port: 8081})
+if err != nil {
+	return err
+}
+defer lease.Close(context.Background())
 
-// Or call the API directly
+// Find the instances of another service.
+instances, err := beacon.Discover(ctx, "payments")
+```
+
+A `Lease` sends a heartbeat every third of the TTL Beacon reported, with a little jitter. If a heartbeat fails it retries after 1s, 2s, 4s and so on, never waiting longer than the normal interval, and keeps trying until `Close`. If Beacon no longer knows the instance, because it restarted or the instance expired, the lease registers again; the instance then has a new ID, which `lease.ID()` always returns. `Close` stops the background goroutine, waits for it and unregisters the instance. With `client.WithLogger`, retries and re-registrations are logged.
+
+For full control, call the API directly:
+
+```go
 registered, err := beacon.Register(ctx, client.Registration{Name: "orders", Address: "10.0.0.12", Port: 8081})
 err = beacon.Heartbeat(ctx, registered.ID)
 err = beacon.Unregister(ctx, registered.ID)
@@ -451,14 +465,17 @@ Transports only translate requests and errors; every rule lives in `discovery`, 
 - [x] Environment variable overrides for configuration
 - [x] Docker image and Compose example
 - [x] Prometheus metrics
+- [x] Go client library
 
 **Next**
 
-- [ ] Go client library
 - [ ] Grpc support
 - [ ] First release, `v0.1.0`
 
 **After v0.1.0**
+
+- [ ] Keep an instance's ID when it registers again, instead of issuing a new one
+- [ ] Client-side caching and load balancing in the Go client
 
 - [ ] Cache and database
 - [ ] Scale, multiple nodes
