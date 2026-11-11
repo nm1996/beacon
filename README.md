@@ -10,12 +10,12 @@ Services register themselves, send heartbeats, and discover each other over a sm
 [![CI](https://github.com/nm1996/beacon/actions/workflows/ci.yml/badge.svg)](https://github.com/nm1996/beacon/actions/workflows/ci.yml)
 [![Go version](https://img.shields.io/badge/go-1.26%2B-00ADD8?logo=go&logoColor=white)](go.mod)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![Status: work in progress](https://img.shields.io/badge/status-work%20in%20progress-orange)
+[![Latest release](https://img.shields.io/github/v/release/nm1996/beacon?sort=semver)](https://github.com/nm1996/beacon/releases/latest)
 
 </div>
 
 > [!NOTE]
-> Beacon is in early development. The HTTP API is not versioned yet and may change before the first release.
+> Beacon is before 1.0. The HTTP API is versioned under `/api/v1` and stays compatible within v1. The Go client and the configuration may still change in a minor release before 1.0; every such change is listed in the [CHANGELOG](CHANGELOG.md).
 
 ## Contents
 
@@ -466,17 +466,13 @@ Transports only translate requests and errors; every rule lives in `discovery`, 
 - [x] Docker image and Compose example
 - [x] Prometheus metrics
 - [x] Go client library
-
-**Next**
-
-- [ ] Grpc support
-- [ ] First release, `v0.1.0`
+- [x] First release, `v0.1.0`
 
 **After v0.1.0**
 
+- [ ] gRPC API alongside HTTP
 - [ ] Keep an instance's ID when it registers again, instead of issuing a new one
 - [ ] Client-side caching and load balancing in the Go client
-
 - [ ] Cache and database
 - [ ] Scale, multiple nodes
 - [ ] Idempotency

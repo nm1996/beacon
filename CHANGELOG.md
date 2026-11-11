@@ -9,6 +9,8 @@ Add an entry under **Unreleased** in the same pull request as the change.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-11
+
 First release. Beacon is a single-node, in-memory service registry with an
 HTTP API.
 
@@ -42,4 +44,5 @@ HTTP API.
   operations, registered and expired instances and the running build,
   controlled by `metrics.enabled` (`BEACON_METRICS_ENABLED`).
 
-[Unreleased]: https://github.com/nm1996/beacon/commits/main
+[Unreleased]: https://github.com/nm1996/beacon/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/nm1996/beacon/releases/tag/v0.1.0
