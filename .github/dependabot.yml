@@ -7,6 +7,13 @@ updates:
     commit-message:
       prefix: build(deps)
 
+  - package-ecosystem: docker
+    directory: /deployments/docker
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build(docker)
+
   - package-ecosystem: github-actions
     directory: /
     schedule:

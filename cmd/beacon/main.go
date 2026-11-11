@@ -29,12 +29,15 @@ import (
 // version comes from the build info Go embeds instead.
 var version string
 
-// main loads the configuration from the file and environment, then runs the server until it fails or is
-// told to stop, exiting with a non-zero status on failure. With --version it
-// prints the build version and exits instead.
+// main loads the configuration from the file and environment, then runs the
+// server until it fails or is told to stop, exiting with a non-zero status on
+// failure. With --version it prints the build version instead, and with
+// --health-check it asks an already running Beacon for its health, which is
+// what the container health check uses since the image has no shell or curl.
 func main() {
 	configPath := flag.String("config", "", "path to a TOML configuration file; BEACON_* environment variables override it, and built-in defaults fill the rest")
 	showVersion := flag.Bool("version", false, "print the version and exit")
+	healthCheck := flag.Bool("health-check", false, "ask the Beacon configured by --config whether it is healthy, then exit 0 if it is and 1 if not")
 	flag.Parse()
 
 	if *showVersion {
@@ -47,6 +50,15 @@ func main() {
 		// No configured logger exists yet, so report in the default format.
 		slog.New(slog.NewJSONHandler(os.Stderr, nil)).Error("beacon failed to start", slog.Any("error", err))
 		os.Exit(1)
+	}
+
+	if *healthCheck {
+		if err := checkHealth(context.Background(), healthURL(settings.Server)); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+
+		return
 	}
 
 	logger := newLogger(os.Stdout, settings.Logging)

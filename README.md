@@ -25,6 +25,7 @@ Services register themselves, send heartbeats, and discover each other over a sm
 - [How it works](#how-it-works)
 - [HTTP API](#http-api)
 - [Configuration](#configuration)
+- [Running in Docker](#running-in-docker)
 - [Limitations](#limitations)
 - [Development](#development)
 - [Project layout](#project-layout)
@@ -57,7 +58,7 @@ Beacon covers the core of the problem and nothing more: one small binary, no ext
 | ✅ | Consistent JSON error responses with stable codes |
 | ✅ | Versioned API under `/api/v1` |
 | 🔜 | Native Go client with automatic heartbeats |
-| 🔜 | Docker image and Compose example |
+| ✅ | Container image (amd64, arm64) with a built-in health check, and a Compose example |
 | 🔜 | Prometheus metrics |
 
 ## Quick start
@@ -265,6 +266,38 @@ Beacon refuses to start, and lists every problem it found, if the file is missin
 
 Logs go to standard output. Run `beacon --version` to print the build version.
 
+## Running in Docker
+
+Release images are published to the GitHub Container Registry for `linux/amd64` and `linux/arm64`:
+
+```bash
+docker run --rm -p 8080:8080 ghcr.io/nm1996/beacon:0.1
+```
+
+| Tag | Points to |
+|---|---|
+| `0.1.0` | That exact release |
+| `0.1` | The newest `0.1.x` release |
+| `latest` | The newest release; pre-releases such as `0.1.0-rc.1` never move it |
+
+The image is built on [distroless](https://github.com/GoogleContainerTools/distroless) `static`: it has no shell or package manager and runs as a non-root user. It reads `/etc/beacon/beacon.toml`, a copy of the example configuration, so every default from [Configuration](#configuration) applies. Change settings either way:
+
+```bash
+# Environment variables
+docker run --rm -p 9090:9090 -e BEACON_SERVER_PORT=9090 ghcr.io/nm1996/beacon:0.1
+
+# Your own file, mounted over the built-in one
+docker run --rm -p 8080:8080 -v "$PWD/beacon.toml:/etc/beacon/beacon.toml:ro" ghcr.io/nm1996/beacon:0.1
+```
+
+The image's health check runs `beacon --health-check`, which asks the running server for `GET /health` using the same configuration and environment. If you start the container with a different `--config` path, mount your file at `/etc/beacon/beacon.toml` instead, so the health check reads it too.
+
+To build and run locally with Compose, which also drops all capabilities and uses a read-only filesystem:
+
+```bash
+docker compose -f deployments/compose/compose.yaml up --build
+```
+
 ## Limitations
 
 Beacon is deliberately small. Before you depend on it, know that:
@@ -292,6 +325,7 @@ mise run check # format, vet, lint and run tests with the race detector
 | `mise run test-race` | Run tests with the race detector |
 | `mise run vuln` | Scan for known vulnerabilities with `govulncheck` |
 | `mise run build` | Build `bin/beacon` |
+| `mise run docker-build` | Build the `beacon:dev` container image |
 | `mise run dist` | Build release archives for every platform into `dist/` |
 | `mise run run` | Start the server on `:8080` |
 | `mise run check` | Format, vet, lint, race tests and vulnerability scan |
@@ -311,6 +345,9 @@ Run `mise tasks` to list them all. CI runs the same tasks on every pull request.
 │   │   └── registrytest/    # Contract tests every Registry backend must pass
 │   ├── bootstrap/           # Builds the backend, discovery layer and HTTP server and connects them
 │   └── config/              # Loads and validates the TOML configuration and environment overrides
+├── deployments/
+│   ├── docker/              # Dockerfile
+│   └── compose/             # Compose example
 ├── configs/                 # Example configuration
 ├── scripts/                 # Release build script
 ├── .github/workflows/       # CI and releases
@@ -343,12 +380,12 @@ Transports only translate requests and errors; every rule lives in `discovery`, 
 - [x] Consistent JSON error responses
 - [x] Versioned REST API
 - [x] Environment variable overrides for configuration
+- [x] Docker image and Compose example
 
 **Next**
 
 - [ ] Go client library
 - [ ] Grpc support
-- [ ] Docker image and Compose example
 - [ ] Prometheus metrics
 - [ ] First release, `v0.1.0`
 

@@ -1,0 +1,30 @@
+# Run Beacon locally:
+#
+#   docker compose -f deployments/compose/compose.yaml up --build
+#
+# Then: curl localhost:8080/health
+
+name: beacon
+
+services:
+  beacon:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile
+      args:
+        VERSION: dev
+    image: beacon:dev
+    ports:
+      - "8080:8080"
+    environment:
+      # Any setting can be overridden this way; see the README for the list.
+      BEACON_LOGGING_FORMAT: text
+    # To use your own configuration, mount it over the built-in one:
+    # volumes:
+    #   - ./beacon.toml:/etc/beacon/beacon.toml:ro
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped

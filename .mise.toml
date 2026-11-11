@@ -1,4 +1,5 @@
 [tools]
+# Keep in step with GO_VERSION in deployments/docker/Dockerfile.
 go = "1.27.4"
 golangci-lint = "2.15.0"
 
@@ -37,6 +38,10 @@ run = "go build -o bin/beacon ./cmd/beacon"
 [tasks.dist]
 description = "Build release archives for every platform into dist/ (VERSION defaults to git describe)"
 run = "bash scripts/dist.sh"
+
+[tasks.docker-build]
+description = "Build the beacon:dev container image"
+run = "docker build -f deployments/docker/Dockerfile --build-arg VERSION=$(git describe --tags --always --dirty) -t beacon:dev ."
 
 [tasks.run]
 description = "Run the Beacon server"

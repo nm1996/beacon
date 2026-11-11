@@ -30,5 +30,8 @@ HTTP API.
   and graceful shutdown on `SIGINT` / `SIGTERM`.
 - `beacon --version`, and release archives for Linux, macOS and Windows on
   amd64 and arm64.
+- Container image on GHCR for `linux/amd64` and `linux/arm64`, based on
+  distroless and running as non-root, with a Compose example.
+- `beacon --health-check`, which the image uses as its health check.
 
 [Unreleased]: https://github.com/nm1996/beacon/commits/main
