@@ -26,6 +26,7 @@ Services register themselves, send heartbeats, and discover each other over a sm
 - [HTTP API](#http-api)
 - [Configuration](#configuration)
 - [Running in Docker](#running-in-docker)
+- [Go client](#go-client)
 - [Metrics](#metrics)
 - [Limitations](#limitations)
 - [Development](#development)
@@ -300,6 +301,31 @@ To build and run locally with Compose, which also drops all capabilities and use
 docker compose -f deployments/compose/compose.yaml up --build
 ```
 
+## Go client
+
+The [`client`](client) package is a Go client for the HTTP API. It uses only the standard library, so it adds nothing else to your build.
+
+```bash
+go get github.com/nm1996/beacon/client
+```
+
+```go
+beacon, err := client.New("http://beacon:8080")
+if err != nil {
+	return err
+}
+
+// Look up a service
+instances, err := beacon.Discover(ctx, "orders")
+
+// Or call the API directly
+registered, err := beacon.Register(ctx, client.Registration{Name: "orders", Address: "10.0.0.12", Port: 8081})
+err = beacon.Heartbeat(ctx, registered.ID)
+err = beacon.Unregister(ctx, registered.ID)
+```
+
+Errors from Beacon are `*client.Error` values carrying the status and Beacon's error code, and they match `client.ErrNotFound` and `client.ErrInvalid` with `errors.Is`. `client.WithHTTPClient` sets a custom `http.Client`; by default every request times out after 10 seconds. `Register` is never retried, because repeating it would create a second instance.
+
 ## Metrics
 
 With `metrics.enabled` (the default), Beacon serves Prometheus metrics at `GET /metrics` on the API port. Point Prometheus at it:
@@ -377,6 +403,7 @@ Run `mise tasks` to list them all. CI runs the same tasks on every pull request.
 
 ```text
 .
+├── client/                  # Go client for the HTTP API
 ├── cmd/beacon/              # Entry point: flags, config, logging, signals, cleanup worker and shutdown
 ├── internal/
 │   ├── api/                 # HTTP transport: routes, request decoding, JSON errors
