@@ -185,3 +185,53 @@ func TestNewRejectsUnknownStorageBackend(t *testing.T) {
 		t.Errorf("expected an unknown backend error, got %v", err)
 	}
 }
+
+// get sends a GET for path to handler and returns the response.
+func get(handler http.Handler, path string) *httptest.ResponseRecorder {
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+
+	return rec
+}
+
+func TestNewServesMetricsWhenEnabled(t *testing.T) {
+	handler := mustNew(t, config.Default(), "v1.2.3").Server.Handler
+
+	if rec := get(handler, "/api/v1/services"); rec.Code != http.StatusOK {
+		t.Fatalf("expected the API to keep working, got %d", rec.Code)
+	}
+
+	get(handler, "/metrics")
+
+	rec := get(handler, "/metrics")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected /metrics to answer 200, got %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+
+	for _, want := range []string{
+		`beacon_http_requests_total{code="200",method="GET",route="GET /api/v1/services"} 1`,
+		`beacon_registry_operations_total{operation="list",result="ok"} 1`,
+		`beacon_build_info{goversion=`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected /metrics to contain %q", want)
+		}
+	}
+
+	if strings.Contains(body, `route="GET /metrics"`) || strings.Contains(body, `route="/"`) {
+		t.Error("expected scrapes and the outer mux to stay out of the HTTP metrics")
+	}
+}
+
+func TestNewOmitsMetricsWhenDisabled(t *testing.T) {
+	settings := config.Default()
+	settings.Metrics.Enabled = false
+
+	rec := get(mustNew(t, settings, "v1.2.3").Server.Handler, "/metrics")
+
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), `"not_found"`) {
+		t.Errorf("expected the API's JSON 404 for /metrics, got %d %q", rec.Code, rec.Body.String())
+	}
+}

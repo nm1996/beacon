@@ -17,6 +17,7 @@ func TestLoadAppliesEveryEnvironmentVariable(test *testing.T) {
 	test.Setenv("BEACON_REGISTRY_SERVICE_TTL", "1m")
 	test.Setenv("BEACON_REGISTRY_CLEANUP_INTERVAL", "500ms")
 	test.Setenv("BEACON_STORAGE_BACKEND", "memory")
+	test.Setenv("BEACON_METRICS_ENABLED", "false")
 	test.Setenv("BEACON_LOGGING_LEVEL", "debug")
 	test.Setenv("BEACON_LOGGING_FORMAT", "text")
 
@@ -41,6 +42,9 @@ func TestLoadAppliesEveryEnvironmentVariable(test *testing.T) {
 		},
 		Storage: StorageConfig{
 			Backend: StorageMemory,
+		},
+		Metrics: MetricsConfig{
+			Enabled: false,
 		},
 		Logging: LoggingConfig{
 			Level:  "debug",
@@ -134,6 +138,11 @@ func TestLoadEnvironmentFailures(test *testing.T) {
 				"BEACON_REGISTRY_CLEANUP_INTERVAL": "1m",
 			},
 			wantErr: []string{"invalid config", "registry.cleanup_interval", "registry.service_ttl"},
+		},
+		{
+			name:      "metrics flag is not a boolean",
+			variables: map[string]string{"BEACON_METRICS_ENABLED": "sometimes"},
+			wantErr:   []string{"BEACON_METRICS_ENABLED must be true or false"},
 		},
 		{
 			name:      "unknown storage backend",

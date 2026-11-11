@@ -101,7 +101,7 @@ func TestLoadFailures(t *testing.T) {
 		{name: "wrong value type", content: "[server]\nport = \"8080\"", wantErr: []string{"read config"}},
 		{name: "unparsable duration", content: "[registry]\nservice_ttl = \"soon\"", wantErr: []string{"read config"}},
 		{name: "unknown key", content: "[server]\nprot = 8080", wantErr: []string{"unknown keys", "server.prot"}},
-		{name: "unknown section", content: "[metrics]\nenabled = true", wantErr: []string{"unknown keys", "metrics"}},
+		{name: "unknown section", content: "[tracing]\nenabled = true", wantErr: []string{"unknown keys", "tracing"}},
 		{name: "port out of range", content: "[server]\nport = 70000", wantErr: []string{"server.port"}},
 		{name: "zero timeout", content: "[server]\nwrite_timeout = \"0s\"", wantErr: []string{"server.write_timeout"}},
 		{name: "negative TTL", content: "[registry]\nservice_ttl = \"-5s\"", wantErr: []string{"registry.service_ttl"}},
@@ -109,6 +109,7 @@ func TestLoadFailures(t *testing.T) {
 		{name: "zero body limit", content: "[server]\nmax_request_body_bytes = 0", wantErr: []string{"server.max_request_body_bytes"}},
 		{name: "unknown log level", content: "[logging]\nlevel = \"verbose\"", wantErr: []string{"logging.level"}},
 		{name: "unknown log format", content: "[logging]\nformat = \"xml\"", wantErr: []string{"logging.format"}},
+		{name: "metrics flag is not a boolean", content: "[metrics]\nenabled = \"yes\"", wantErr: []string{"read config"}},
 		{name: "unknown storage backend", content: "[storage]\nbackend = \"redis\"", wantErr: []string{`storage.backend must be one of memory, got "redis"`}},
 		{name: "empty storage backend", content: "[storage]\nbackend = \"\"", wantErr: []string{"storage.backend"}},
 		{
