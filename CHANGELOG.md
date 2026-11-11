@@ -33,6 +33,8 @@ HTTP API.
 - Container image on GHCR for `linux/amd64` and `linux/arm64`, based on
   distroless and running as non-root, with a Compose example.
 - `beacon --health-check`, which the image uses as its health check.
+- Go client in `github.com/nm1996/beacon/client` for every v1 endpoint,
+  with typed errors matching `ErrNotFound` and `ErrInvalid`.
 - Prometheus metrics at `GET /metrics` for HTTP requests, storage backend
   operations, registered and expired instances and the running build,
   controlled by `metrics.enabled` (`BEACON_METRICS_ENABLED`).
