@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 
 	"github.com/nm1996/beacon/client"
 )
@@ -49,4 +50,30 @@ func ExampleClient_Heartbeat() {
 	}
 
 	fmt.Println(registered.ID)
+}
+
+// Keep a service registered for as long as it runs.
+func ExampleClient_Announce() {
+	ctx := context.Background()
+
+	beacon, err := client.New("http://beacon:8080", client.WithLogger(slog.Default()))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	lease, err := beacon.Announce(ctx, client.Registration{Name: "orders", Address: "10.0.0.12", Port: 8081})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Stop heartbeats and unregister on shutdown.
+	defer func() {
+		if err := lease.Close(context.Background()); err != nil {
+			log.Printf("unregister: %v", err)
+		}
+	}()
+
+	fmt.Println("registered as", lease.ID())
+
+	// ... serve requests until the process is told to stop ...
 }

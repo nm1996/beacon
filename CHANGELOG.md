@@ -35,6 +35,9 @@ HTTP API.
 - `beacon --health-check`, which the image uses as its health check.
 - Go client in `github.com/nm1996/beacon/client` for every v1 endpoint,
   with typed errors matching `ErrNotFound` and `ErrInvalid`.
+- `client.Announce`, which registers an instance and keeps it alive with
+  heartbeats, retries with backoff and registers again after Beacon
+  restarts, until `Lease.Close` unregisters it.
 - Prometheus metrics at `GET /metrics` for HTTP requests, storage backend
   operations, registered and expired instances and the running build,
   controlled by `metrics.enabled` (`BEACON_METRICS_ENABLED`).
