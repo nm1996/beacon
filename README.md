@@ -26,6 +26,7 @@ Services register themselves, send heartbeats, and discover each other over a sm
 - [HTTP API](#http-api)
 - [Configuration](#configuration)
 - [Running in Docker](#running-in-docker)
+- [Metrics](#metrics)
 - [Limitations](#limitations)
 - [Development](#development)
 - [Project layout](#project-layout)
@@ -59,7 +60,7 @@ Beacon covers the core of the problem and nothing more: one small binary, no ext
 | ✅ | Versioned API under `/api/v1` |
 | 🔜 | Native Go client with automatic heartbeats |
 | ✅ | Container image (amd64, arm64) with a built-in health check, and a Compose example |
-| 🔜 | Prometheus metrics |
+| ✅ | Prometheus metrics at `/metrics` |
 
 ## Quick start
 
@@ -251,6 +252,7 @@ A file only needs the keys it changes, and no file is needed at all. [`configs/b
 | `registry.service_ttl` | `BEACON_REGISTRY_SERVICE_TTL` | `"30s"` | Time without a heartbeat before an instance is removed |
 | `registry.cleanup_interval` | `BEACON_REGISTRY_CLEANUP_INTERVAL` | `"5s"` | How often stale instances are removed |
 | `storage.backend` | `BEACON_STORAGE_BACKEND` | `"memory"` | Where instances are kept. Only `memory` exists today |
+| `metrics.enabled` | `BEACON_METRICS_ENABLED` | `true` | Serve Prometheus metrics at `GET /metrics` |
 | `logging.level` | `BEACON_LOGGING_LEVEL` | `"info"` | `debug`, `info`, `warn` or `error` |
 | `logging.format` | `BEACON_LOGGING_FORMAT` | `"json"` | `json` or `text` |
 
@@ -298,6 +300,45 @@ To build and run locally with Compose, which also drops all capabilities and use
 docker compose -f deployments/compose/compose.yaml up --build
 ```
 
+## Metrics
+
+With `metrics.enabled` (the default), Beacon serves Prometheus metrics at `GET /metrics` on the API port. Point Prometheus at it:
+
+```yaml
+scrape_configs:
+  - job_name: beacon
+    static_configs:
+      - targets: ["beacon:8080"]
+```
+
+| Metric | Type | Labels | Meaning |
+|---|---|---|---|
+| `beacon_http_requests_total` | counter | `method`, `route`, `code` | Requests served. `route` is the route pattern, such as `POST /api/v1/services/{id}/heartbeat`, or `unmatched` |
+| `beacon_http_request_duration_seconds` | histogram | `method`, `route` | Time spent serving requests |
+| `beacon_instances` | gauge | `service` | Registered instances per service name |
+| `beacon_expired_instances_total` | counter | | Instances removed because they stopped sending heartbeats |
+| `beacon_registry_operations_total` | counter | `operation`, `result` | Calls to the storage backend; `result` is `ok`, `not_found` or `error` |
+| `beacon_registry_operation_duration_seconds` | histogram | `operation` | Time spent in the storage backend |
+| `beacon_build_info` | gauge | `version`, `goversion` | Always `1`; describes the running build |
+
+The standard `go_*` and `process_*` metrics are included too. Labels never contain instance IDs or raw paths, so the number of series stays small however many instances register. Requests to `/metrics` itself are not counted.
+
+A few useful queries:
+
+```promql
+# Instances per service
+sum by (service) (beacon_instances)
+
+# Instances expiring per minute, a sign of crashing or unreachable services
+rate(beacon_expired_instances_total[5m]) * 60
+
+# Share of heartbeats for unknown instances, which then register again
+sum(rate(beacon_http_requests_total{route="POST /api/v1/services/{id}/heartbeat",code="404"}[5m]))
+  / sum(rate(beacon_http_requests_total{route="POST /api/v1/services/{id}/heartbeat"}[5m]))
+```
+
+`/metrics` has no authentication, like the rest of the API. Disable it with `BEACON_METRICS_ENABLED=false` if it must not be reachable.
+
 ## Limitations
 
 Beacon is deliberately small. Before you depend on it, know that:
@@ -340,6 +381,7 @@ Run `mise tasks` to list them all. CI runs the same tasks on every pull request.
 ├── internal/
 │   ├── api/                 # HTTP transport: routes, request decoding, JSON errors
 │   ├── discovery/           # Business rules: validation, IDs, TTL, cleanup; the Registry interface
+│   ├── metrics/             # Prometheus metrics around the HTTP handler and any Registry backend
 │   ├── registry/
 │   │   ├── memory/          # In-memory Registry backend
 │   │   └── registrytest/    # Contract tests every Registry backend must pass
@@ -381,12 +423,12 @@ Transports only translate requests and errors; every rule lives in `discovery`, 
 - [x] Versioned REST API
 - [x] Environment variable overrides for configuration
 - [x] Docker image and Compose example
+- [x] Prometheus metrics
 
 **Next**
 
 - [ ] Go client library
 - [ ] Grpc support
-- [ ] Prometheus metrics
 - [ ] First release, `v0.1.0`
 
 **After v0.1.0**

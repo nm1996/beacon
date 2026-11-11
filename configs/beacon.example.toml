@@ -48,6 +48,10 @@ cleanup_interval = "5s"
 # everything is forgotten on restart, so clients register again.
 backend = "memory"
 
+[metrics]
+# Serve Prometheus metrics at GET /metrics on the API port.
+enabled = true
+
 [logging]
 # Minimum level logged: "debug", "info", "warn" or "error".
 level = "info"

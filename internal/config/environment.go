@@ -28,6 +28,7 @@ func environmentVariables(config *Config) []environmentVariable {
 		{name: "BEACON_REGISTRY_SERVICE_TTL", apply: setDuration(&config.Registry.ServiceTTL)},
 		{name: "BEACON_REGISTRY_CLEANUP_INTERVAL", apply: setDuration(&config.Registry.CleanupInterval)},
 		{name: "BEACON_STORAGE_BACKEND", apply: setString(&config.Storage.Backend)},
+		{name: "BEACON_METRICS_ENABLED", apply: setBool(&config.Metrics.Enabled)},
 		{name: "BEACON_LOGGING_LEVEL", apply: setString(&config.Logging.Level)},
 		{name: "BEACON_LOGGING_FORMAT", apply: setString(&config.Logging.Format)},
 	}
@@ -77,6 +78,18 @@ func setInt64(target *int64) func(string) error {
 		parsed, err := strconv.ParseInt(value, 10, 64)
 		if err != nil {
 			return errors.New("must be an integer")
+		}
+
+		*target = parsed
+		return nil
+	}
+}
+
+func setBool(target *bool) func(string) error {
+	return func(value string) error {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return errors.New("must be true or false")
 		}
 
 		*target = parsed

@@ -25,6 +25,7 @@ type Config struct {
 	Server   ServerConfig   `toml:"server"`
 	Registry RegistryConfig `toml:"registry"`
 	Storage  StorageConfig  `toml:"storage"`
+	Metrics  MetricsConfig  `toml:"metrics"`
 	Logging  LoggingConfig  `toml:"logging"`
 }
 
@@ -69,6 +70,12 @@ type StorageConfig struct {
 	Backend string `toml:"backend"`
 }
 
+// MetricsConfig controls the Prometheus endpoint.
+type MetricsConfig struct {
+	// Enabled serves Prometheus metrics at GET /metrics on the API port.
+	Enabled bool `toml:"enabled"`
+}
+
 // LoggingConfig controls log output.
 type LoggingConfig struct {
 	// Level is the minimum level logged: debug, info, warn or error.
@@ -96,6 +103,9 @@ func Default() Config {
 		},
 		Storage: StorageConfig{
 			Backend: StorageMemory,
+		},
+		Metrics: MetricsConfig{
+			Enabled: true,
 		},
 		Logging: LoggingConfig{
 			Level:  "info",
