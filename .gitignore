@@ -9,6 +9,7 @@ coverage.*
 
 # Local configuration
 /beacon.toml
+/certs/
 
 # Editor and OS files
 .idea/

@@ -36,6 +36,15 @@ shutdown_timeout = "10s"
 # Largest request body the API accepts, in bytes. Larger bodies get 400.
 max_request_body_bytes = 65536
 
+[tls]
+# Serve HTTPS instead of plain HTTP. Set both files to turn TLS on, or leave
+# both empty for plain HTTP. cert_file is a PEM certificate chain, leaf first;
+# key_file is the PEM private key for that leaf. Both are read at startup, and
+# Beacon refuses to start if they are missing or do not match. TLS 1.2 is the
+# minimum version accepted.
+cert_file = ""
+key_file = ""
+
 [registry]
 # A service instance is considered stale after this period without a heartbeat.
 service_ttl = "30s"

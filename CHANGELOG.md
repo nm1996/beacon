@@ -9,6 +9,15 @@ Add an entry under **Unreleased** in the same pull request as the change.
 
 ## [Unreleased]
 
+### Added
+
+- HTTPS: setting `tls.cert_file` and `tls.key_file` (`BEACON_TLS_CERT_FILE`,
+  `BEACON_TLS_KEY_FILE`) serves the API, `/health` and `/metrics` over TLS
+  1.2 or newer, with HTTP/2. Beacon refuses to start if only one of the two is
+  set or the files cannot be loaded. Plain HTTP stays the default.
+- `beacon --health-check` uses HTTPS when TLS is configured.
+- A startup warning when Beacon serves plain HTTP on a non-loopback address.
+
 ## [0.1.0] - 2026-11-11
 
 First release. Beacon is a single-node, in-memory service registry with an

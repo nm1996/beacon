@@ -23,6 +23,7 @@ import (
 // Config holds every setting Beacon reads at startup.
 type Config struct {
 	Server   ServerConfig   `toml:"server"`
+	TLS      TLSConfig      `toml:"tls"`
 	Registry RegistryConfig `toml:"registry"`
 	Storage  StorageConfig  `toml:"storage"`
 	Metrics  MetricsConfig  `toml:"metrics"`
@@ -45,6 +46,21 @@ type ServerConfig struct {
 	ShutdownTimeout time.Duration `toml:"shutdown_timeout"`
 	// MaxRequestBodyBytes is the largest request body the API accepts.
 	MaxRequestBodyBytes int64 `toml:"max_request_body_bytes"`
+}
+
+// TLSConfig turns on HTTPS. Setting both files serves the API, /health and
+// /metrics over TLS only; leaving both empty serves plain HTTP.
+type TLSConfig struct {
+	// CertFile is the PEM certificate chain the server presents, leaf first.
+	CertFile string `toml:"cert_file"`
+	// KeyFile is the PEM private key for the leaf certificate in CertFile.
+	KeyFile string `toml:"key_file"`
+}
+
+// Enabled reports whether the server should serve TLS. Validate ensures both
+// files are set whenever either one is.
+func (tls TLSConfig) Enabled() bool {
+	return tls.CertFile != "" && tls.KeyFile != ""
 }
 
 // RegistryConfig controls how long instances live without heartbeats.
@@ -177,6 +193,10 @@ func (config Config) Validate() error {
 	check(server.IdleTimeout > 0, "server.idle_timeout must be positive, got %s", server.IdleTimeout)
 	check(server.ShutdownTimeout > 0, "server.shutdown_timeout must be positive, got %s", server.ShutdownTimeout)
 	check(server.MaxRequestBodyBytes > 0, "server.max_request_body_bytes must be positive, got %d", server.MaxRequestBodyBytes)
+
+	tls := config.TLS
+	check((tls.CertFile == "") == (tls.KeyFile == ""),
+		"tls.cert_file and tls.key_file must be set together, got cert_file %q and key_file %q", tls.CertFile, tls.KeyFile)
 
 	registry := config.Registry
 	// Clients are told the TTL in whole seconds when they register.

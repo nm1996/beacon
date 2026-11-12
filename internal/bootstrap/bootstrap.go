@@ -5,6 +5,7 @@
 package bootstrap
 
 import (
+	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -22,16 +23,25 @@ type Components struct {
 	// exposed so the caller can run its cleanup worker against the same
 	// state the server uses.
 	Discovery *discovery.Service
-	// Server serves the HTTP API. It is built but not started.
+	// Server serves the HTTP API. It is built but not started. Its TLSConfig
+	// is set, with the certificate already loaded, when settings.TLS is
+	// enabled, and nil otherwise.
 	Server *http.Server
 }
 
 // New builds the registry backend chosen by settings.Storage, with metrics
 // around it and the API when settings.Metrics is enabled, the discovery layer on top of it and the
-// HTTP server that serves it, configured by settings. Both the API and the
+// HTTP server that serves it, configured by settings. When settings.TLS is
+// enabled it loads the certificate and key, so unreadable or mismatched files
+// fail here, before anything listens. Both the API and the
 // server's own internal errors are reported to logger, and version is what
 // GET /health reports.
 func New(settings config.Config, logger *slog.Logger, version string) (*Components, error) {
+	tlsConfig, err := newTLSConfig(settings.TLS)
+	if err != nil {
+		return nil, err
+	}
+
 	registry, err := newRegistry(settings.Storage)
 	if err != nil {
 		return nil, err
@@ -68,12 +78,31 @@ func New(settings config.Config, logger *slog.Logger, version string) (*Componen
 		Server: &http.Server{
 			Addr:              settings.Server.Addr(),
 			Handler:           handler,
+			TLSConfig:         tlsConfig,
 			ReadHeaderTimeout: settings.Server.ReadTimeout,
 			ReadTimeout:       settings.Server.ReadTimeout,
 			WriteTimeout:      settings.Server.WriteTimeout,
 			IdleTimeout:       settings.Server.IdleTimeout,
 			ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelError),
 		},
+	}, nil
+}
+
+// newTLSConfig loads the certificate and key named by settings, or returns nil
+// when TLS is not enabled.
+func newTLSConfig(settings config.TLSConfig) (*tls.Config, error) {
+	if !settings.Enabled() {
+		return nil, nil
+	}
+
+	certificate, err := tls.LoadX509KeyPair(settings.CertFile, settings.KeyFile)
+	if err != nil {
+		return nil, fmt.Errorf("load TLS certificate %s and key %s: %w", settings.CertFile, settings.KeyFile, err)
+	}
+
+	return &tls.Config{
+		Certificates: []tls.Certificate{certificate},
+		MinVersion:   tls.VersionTLS12,
 	}, nil
 }
 

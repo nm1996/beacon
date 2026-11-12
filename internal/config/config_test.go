@@ -118,6 +118,17 @@ func TestLoadFailures(t *testing.T) {
 			wantErr: []string{"registry.cleanup_interval (20s) must not be longer than registry.service_ttl (10s)"},
 		},
 		{
+			name:    "TLS certificate without key",
+			content: "[tls]\ncert_file = \"cert.pem\"",
+			wantErr: []string{"tls.cert_file and tls.key_file must be set together"},
+		},
+		{
+			name:    "TLS key without certificate",
+			content: "[tls]\nkey_file = \"key.pem\"",
+			wantErr: []string{"tls.cert_file and tls.key_file must be set together"},
+		},
+		{name: "unknown TLS key", content: "[tls]\nca_file = \"ca.pem\"", wantErr: []string{"unknown keys", "tls.ca_file"}},
+		{
 			name:    "several problems at once",
 			content: "[server]\nport = 0\n[registry]\ncleanup_interval = \"0s\"",
 			wantErr: []string{"server.port", "registry.cleanup_interval"},
@@ -153,6 +164,23 @@ func TestLoadMissingFile(t *testing.T) {
 
 	if !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("expected a file-not-found error, got %v", err)
+	}
+}
+
+func TestTLSEnabled(test *testing.T) {
+	path := writeConfig(test, "[tls]\ncert_file = \"cert.pem\"\nkey_file = \"key.pem\"")
+
+	config, err := Load(path)
+	if err != nil {
+		test.Fatalf("load: %v", err)
+	}
+
+	if !config.TLS.Enabled() {
+		test.Error("expected TLS to be enabled when both files are set")
+	}
+
+	if Default().TLS.Enabled() {
+		test.Error("expected TLS to be disabled by default")
 	}
 }
 
