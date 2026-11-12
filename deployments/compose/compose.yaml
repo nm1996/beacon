@@ -38,6 +38,10 @@ services:
     # environment:
     #   BEACON_AUTH_ENABLED: "true"
     #   BEACON_AUTH_TOKENS_FILE: /etc/beacon/tokens.toml
+    #
+    # To also accept client certificates (mTLS), add the CA bundle to the
+    # mounted TLS directory and list certificates in the tokens file:
+    #   BEACON_TLS_CLIENT_CA_FILE: /etc/beacon/tls/clients-ca.pem
     read_only: true
     cap_drop:
       - ALL

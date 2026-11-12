@@ -45,6 +45,13 @@ max_request_body_bytes = 65536
 cert_file = ""
 key_file = ""
 
+# PEM bundle of the CAs whose client certificates (mTLS) Beacon accepts.
+# Leave empty to accept bearer tokens only. Needs cert_file, key_file and
+# auth.enabled. Clients without a certificate can still connect and send a
+# token; [[certificates]] entries in auth.tokens_file decide what each
+# certificate may do. See "Client certificates (mTLS)" in the README.
+client_ca_file = ""
+
 [auth]
 # Require a bearer token on every endpoint except /health. Clients send it as
 # "Authorization: Bearer <token>". Turn on TLS as well, or tokens cross the

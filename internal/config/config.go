@@ -56,6 +56,10 @@ type TLSConfig struct {
 	CertFile string `toml:"cert_file"`
 	// KeyFile is the PEM private key for the leaf certificate in CertFile.
 	KeyFile string `toml:"key_file"`
+	// ClientCAFile is a PEM bundle of CAs whose client certificates Beacon
+	// accepts as identities. Clients without a certificate can still connect
+	// and use a bearer token. It needs TLS and authentication enabled.
+	ClientCAFile string `toml:"client_ca_file"`
 }
 
 // Enabled reports whether the server should serve TLS. Validate ensures both
@@ -208,6 +212,12 @@ func (config Config) Validate() error {
 	tls := config.TLS
 	check((tls.CertFile == "") == (tls.KeyFile == ""),
 		"tls.cert_file and tls.key_file must be set together, got cert_file %q and key_file %q", tls.CertFile, tls.KeyFile)
+	// Client certificates only arrive over TLS, and only the per-route
+	// checks of authentication decide what a certificate may do.
+	check(tls.ClientCAFile == "" || tls.Enabled(),
+		"tls.client_ca_file needs tls.cert_file and tls.key_file, since client certificates are only sent over TLS")
+	check(tls.ClientCAFile == "" || config.Auth.Enabled,
+		"tls.client_ca_file needs auth.enabled = true, since authentication decides what each certificate may do")
 
 	check(!config.Auth.Enabled || config.Auth.TokensFile != "",
 		"auth.tokens_file must be set when auth.enabled is true")

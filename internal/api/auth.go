@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/x509"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -12,11 +13,13 @@ import (
 // Reasons a Guard refuses a request, passed to its failure callback and
 // used as the reason label of beacon_auth_failures_total.
 const (
-	// AuthFailureMissing is a request without an Authorization header.
+	// AuthFailureMissing is a request with neither an Authorization header
+	// nor a verified client certificate.
 	AuthFailureMissing = "missing"
-	// AuthFailureInvalid is a malformed header or an unknown token.
+	// AuthFailureInvalid is a malformed header, an unknown token, or a
+	// verified client certificate that no entry names.
 	AuthFailureInvalid = "invalid"
-	// AuthFailureForbidden is a known token without the needed permission.
+	// AuthFailureForbidden is a known caller without the needed permission.
 	AuthFailureForbidden = "forbidden"
 )
 
@@ -26,13 +29,14 @@ const (
 	codeForbidden    = "forbidden"
 )
 
-// Authenticator finds the identity a bearer token belongs to.
-// *auth.Tokens satisfies it.
+// Authenticator finds the identity a bearer token or a verified client
+// certificate belongs to. *auth.Identities satisfies it.
 type Authenticator interface {
 	Authenticate(token string) (auth.Identity, bool)
+	AuthenticateCertificate(certificate *x509.Certificate) (auth.Identity, bool)
 }
 
-// Guard requires a bearer token with the right permission before a request
+// Guard requires a caller with the right permission before a request
 // reaches the handler it protects. A nil *Guard lets every request through,
 // which is how authentication is turned off.
 type Guard struct {
@@ -41,9 +45,9 @@ type Guard struct {
 	failed        func(reason string)
 }
 
-// NewGuard returns a Guard that checks tokens with authenticator and logs
-// refused requests to logger. failed, if not nil, is called with one of the
-// AuthFailure reasons for every refused request.
+// NewGuard returns a Guard that identifies callers with authenticator and
+// logs refused requests to logger. failed, if not nil, is called with one
+// of the AuthFailure reasons for every refused request.
 func NewGuard(authenticator Authenticator, logger *slog.Logger, failed func(reason string)) *Guard {
 	if failed == nil {
 		failed = func(string) {}
@@ -52,41 +56,41 @@ func NewGuard(authenticator Authenticator, logger *slog.Logger, failed func(reas
 	return &Guard{authenticator: authenticator, logger: logger, failed: failed}
 }
 
-// Require wraps next so it only serves requests carrying a token that holds
-// permission. A missing or unknown token gets 401 with a WWW-Authenticate
-// challenge; a known token without the permission gets 403.
+// refusal describes why a request was refused and how to answer it.
+type refusal struct {
+	reason     string
+	status     int
+	challenge  string
+	code       string
+	message    string
+	attributes []slog.Attr
+}
+
+// Require wraps next so it only serves requests from a caller that holds
+// permission. A request with an Authorization header is judged by its
+// bearer token alone; one without is judged by its client certificate, if
+// TLS verified one. An unknown or missing caller gets 401 with a
+// WWW-Authenticate challenge; a known one without the permission gets 403.
 func (guard *Guard) Require(permission auth.Permission, next http.Handler) http.Handler {
 	if guard == nil {
 		return next
 	}
 
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		header := request.Header.Get("Authorization")
-		if header == "" {
-			guard.refuse(writer, request, AuthFailureMissing, http.StatusUnauthorized, `Bearer realm="beacon"`,
-				codeUnauthorized, "A bearer token is required")
-			return
+		identity, refused := guard.identify(request)
+		if refused == nil && !identity.Allows(permission) {
+			refused = &refusal{
+				reason:     AuthFailureForbidden,
+				status:     http.StatusForbidden,
+				challenge:  fmt.Sprintf(`Bearer realm="beacon", error="insufficient_scope", scope=%q`, permission),
+				code:       codeForbidden,
+				message:    fmt.Sprintf("%q does not have the %s permission", identity.Name, permission),
+				attributes: []slog.Attr{slog.String("caller", identity.Name)},
+			}
 		}
 
-		token, ok := bearerToken(header)
-		if !ok {
-			guard.refuse(writer, request, AuthFailureInvalid, http.StatusUnauthorized, `Bearer realm="beacon", error="invalid_request"`,
-				codeUnauthorized, `The Authorization header must be "Bearer <token>"`)
-			return
-		}
-
-		identity, ok := guard.authenticator.Authenticate(token)
-		if !ok {
-			guard.refuse(writer, request, AuthFailureInvalid, http.StatusUnauthorized, `Bearer realm="beacon", error="invalid_token"`,
-				codeUnauthorized, "The bearer token is not valid")
-			return
-		}
-
-		if !identity.Allows(permission) {
-			guard.refuse(writer, request, AuthFailureForbidden, http.StatusForbidden,
-				fmt.Sprintf(`Bearer realm="beacon", error="insufficient_scope", scope=%q`, permission),
-				codeForbidden, fmt.Sprintf("Token %q does not have the %s permission", identity.Name, permission),
-				slog.String("token", identity.Name))
+		if refused != nil {
+			guard.refuse(writer, request, refused)
 			return
 		}
 
@@ -94,29 +98,77 @@ func (guard *Guard) Require(permission auth.Permission, next http.Handler) http.
 	})
 }
 
-// refuse reports and answers a refused request. Requests without any token
-// are logged at debug level only, since probes and misconfigured clients
-// can send many; the token itself is never logged.
-func (guard *Guard) refuse(writer http.ResponseWriter, request *http.Request, reason string, status int,
-	challenge, code, message string, attributes ...slog.Attr,
-) {
-	guard.failed(reason)
+// identify finds the caller of request, or says why it cannot.
+func (guard *Guard) identify(request *http.Request) (auth.Identity, *refusal) {
+	header := request.Header.Get("Authorization")
+	if header != "" {
+		token, ok := bearerToken(header)
+		if !ok {
+			return auth.Identity{}, unauthorized(AuthFailureInvalid, `Bearer realm="beacon", error="invalid_request"`,
+				`The Authorization header must be "Bearer <token>"`)
+		}
+
+		identity, ok := guard.authenticator.Authenticate(token)
+		if !ok {
+			return auth.Identity{}, unauthorized(AuthFailureInvalid, `Bearer realm="beacon", error="invalid_token"`,
+				"The bearer token is not valid")
+		}
+
+		return identity, nil
+	}
+
+	certificate := verifiedClientCertificate(request)
+	if certificate == nil {
+		return auth.Identity{}, unauthorized(AuthFailureMissing, `Bearer realm="beacon"`,
+			"A bearer token or client certificate is required")
+	}
+
+	identity, ok := guard.authenticator.AuthenticateCertificate(certificate)
+	if !ok {
+		refused := unauthorized(AuthFailureInvalid, `Bearer realm="beacon"`,
+			"The client certificate is trusted but not listed in Beacon's tokens file")
+		refused.attributes = []slog.Attr{slog.Any("certificate_names", certificateNames(certificate))}
+
+		return auth.Identity{}, refused
+	}
+
+	return identity, nil
+}
+
+// unauthorized builds a 401 refusal.
+func unauthorized(reason, challenge, message string) *refusal {
+	return &refusal{
+		reason:    reason,
+		status:    http.StatusUnauthorized,
+		challenge: challenge,
+		code:      codeUnauthorized,
+		message:   message,
+	}
+}
+
+// refuse reports and answers a refused request. Requests without any
+// credentials are logged at debug level only, since probes and
+// misconfigured clients can send many; tokens are never logged.
+func (guard *Guard) refuse(writer http.ResponseWriter, request *http.Request, refused *refusal) {
+	guard.failed(refused.reason)
 
 	level := slog.LevelWarn
-	if reason == AuthFailureMissing {
+	if refused.reason == AuthFailureMissing {
 		level = slog.LevelDebug
 	}
 
+	attributes := make([]slog.Attr, 0, len(refused.attributes)+4)
+	attributes = append(attributes, refused.attributes...)
 	attributes = append(attributes,
-		slog.String("reason", reason),
+		slog.String("reason", refused.reason),
 		slog.String("method", request.Method),
 		slog.String("path", request.URL.Path),
 		slog.String("remote_addr", request.RemoteAddr),
 	)
 	guard.logger.LogAttrs(request.Context(), level, "request refused", attributes...)
 
-	writer.Header().Set("WWW-Authenticate", challenge)
-	writeJSON(guard.logger, writer, status, ErrorResponse{Error: ErrorDetail{Code: code, Message: message}})
+	writer.Header().Set("WWW-Authenticate", refused.challenge)
+	writeJSON(guard.logger, writer, refused.status, ErrorResponse{Error: ErrorDetail{Code: refused.code, Message: refused.message}})
 }
 
 // bearerToken extracts the token from an Authorization header of the form
@@ -130,4 +182,29 @@ func bearerToken(header string) (string, bool) {
 	token = strings.TrimSpace(token)
 
 	return token, token != ""
+}
+
+// verifiedClientCertificate returns the client's leaf certificate if the TLS
+// handshake verified it against the configured client CAs, and nil
+// otherwise, including for plain HTTP and for certificates sent but not
+// verified.
+func verifiedClientCertificate(request *http.Request) *x509.Certificate {
+	if request.TLS == nil || len(request.TLS.VerifiedChains) == 0 || len(request.TLS.VerifiedChains[0]) == 0 {
+		return nil
+	}
+
+	return request.TLS.VerifiedChains[0][0]
+}
+
+// certificateNames lists the DNS and URI names of certificate, which are not
+// secret, so an operator can see which entry is missing from the tokens file.
+func certificateNames(certificate *x509.Certificate) []string {
+	names := make([]string, 0, len(certificate.DNSNames)+len(certificate.URIs))
+	names = append(names, certificate.DNSNames...)
+
+	for _, uri := range certificate.URIs {
+		names = append(names, uri.String())
+	}
+
+	return names
 }

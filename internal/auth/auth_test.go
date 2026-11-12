@@ -52,7 +52,7 @@ sha256 = "`+strings.ToUpper(mustHash(test, scraperToken))+`"
 permissions = ["metrics"]
 `)
 
-	tokens, err := LoadTokens(path)
+	tokens, err := Load(path)
 	if err != nil {
 		test.Fatalf("load tokens: %v", err)
 	}
@@ -85,7 +85,7 @@ permissions = ["metrics"]
 func TestTokenWithoutPermissionsMayDoEverything(test *testing.T) {
 	path := writeTokens(test, "[[tokens]]\nname = \"admin\"\nsha256 = \""+mustHash(test, ordersToken)+"\"\n")
 
-	tokens, err := LoadTokens(path)
+	tokens, err := Load(path)
 	if err != nil {
 		test.Fatalf("load tokens: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestTokenWithoutPermissionsMayDoEverything(test *testing.T) {
 	}
 }
 
-func TestLoadTokensFailures(test *testing.T) {
+func TestLoadFailures(test *testing.T) {
 	hash := mustHash(test, ordersToken)
 	other := mustHash(test, scraperToken)
 
@@ -112,7 +112,7 @@ func TestLoadTokensFailures(test *testing.T) {
 		wantErr []string
 	}{
 		{name: "invalid TOML", content: "[[tokens]", wantErr: []string{"read tokens file"}},
-		{name: "no tokens", content: "", wantErr: []string{"no tokens listed"}},
+		{name: "no tokens", content: "", wantErr: []string{"no tokens or certificates listed"}},
 		{name: "unknown key", content: "[[tokens]]\nname = \"a\"\nsha256 = \"" + hash + "\"\ntoken = \"secret\"", wantErr: []string{"unknown keys", "tokens.token"}},
 		{name: "missing name", content: "[[tokens]]\nsha256 = \"" + hash + "\"", wantErr: []string{"tokens[0]: name is required"}},
 		{
@@ -147,7 +147,7 @@ func TestLoadTokensFailures(test *testing.T) {
 
 	for _, testCase := range cases {
 		test.Run(testCase.name, func(test *testing.T) {
-			_, err := LoadTokens(writeTokens(test, testCase.content))
+			_, err := Load(writeTokens(test, testCase.content))
 			if err == nil {
 				test.Fatal("expected an error")
 			}
@@ -161,8 +161,8 @@ func TestLoadTokensFailures(test *testing.T) {
 	}
 }
 
-func TestLoadTokensMissingFile(test *testing.T) {
-	_, err := LoadTokens(filepath.Join(test.TempDir(), "missing.toml"))
+func TestLoadMissingFile(test *testing.T) {
+	_, err := Load(filepath.Join(test.TempDir(), "missing.toml"))
 
 	if !errors.Is(err, fs.ErrNotExist) {
 		test.Errorf("expected a file-not-found error, got %v", err)
