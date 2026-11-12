@@ -31,16 +31,25 @@ type Permission string
 const (
 	// PermissionDiscover allows listing instances.
 	PermissionDiscover Permission = "discover"
-	// PermissionRegister allows registering instances, sending their
-	// heartbeats and unregistering them.
+	// PermissionRegister allows registering instances, and sending
+	// heartbeats for and unregistering the instances the same caller
+	// registered.
 	PermissionRegister Permission = "register"
 	// PermissionMetrics allows reading GET /metrics.
 	PermissionMetrics Permission = "metrics"
+	// PermissionManage, together with PermissionRegister, extends heartbeats
+	// and unregistering to instances other callers registered, for example
+	// so an operator can remove a stuck instance.
+	PermissionManage Permission = "manage"
 )
 
 // allPermissions is every permission, in the order error messages list them.
-// An entry that does not list its permissions holds all of them.
-var allPermissions = []Permission{PermissionDiscover, PermissionRegister, PermissionMetrics}
+var allPermissions = []Permission{PermissionDiscover, PermissionRegister, PermissionMetrics, PermissionManage}
+
+// defaultPermissions is what an entry without a permission list holds:
+// everything except PermissionManage, which must be granted explicitly so a
+// loosely configured service token cannot touch other services' instances.
+var defaultPermissions = []Permission{PermissionDiscover, PermissionRegister, PermissionMetrics}
 
 // MinTokenLength is the shortest token HashToken accepts. Tokens are
 // compared by hash, so only their length and randomness protect them from
@@ -292,15 +301,16 @@ func (certificate certificateIdentity) key() string {
 }
 
 // parsePermissions turns an entry's permission list into Permissions. A
-// missing list grants every permission; an empty one is rejected, since an
-// entry that may do nothing is almost certainly a mistake.
+// missing list grants defaultPermissions. An empty list is rejected, since
+// an entry that may do nothing is almost certainly a mistake, and so is
+// manage without register, which would have no effect.
 func parsePermissions(values *[]string) ([]Permission, error) {
 	if values == nil {
-		return allPermissions, nil
+		return defaultPermissions, nil
 	}
 
 	if len(*values) == 0 {
-		return nil, errors.New("permissions is empty; list some, or leave it out to allow everything")
+		return nil, errors.New("permissions is empty; list some, or leave it out to allow discover, register and metrics")
 	}
 
 	permissions := make([]Permission, 0, len(*values))
@@ -314,6 +324,10 @@ func parsePermissions(values *[]string) ([]Permission, error) {
 		if !slices.Contains(permissions, permission) {
 			permissions = append(permissions, permission)
 		}
+	}
+
+	if slices.Contains(permissions, PermissionManage) && !slices.Contains(permissions, PermissionRegister) {
+		return nil, errors.New("manage only works together with register; add register to permissions")
 	}
 
 	return permissions, nil

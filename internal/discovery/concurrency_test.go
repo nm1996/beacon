@@ -44,7 +44,7 @@ func TestConcurrentRegisterGivesUniqueIDs(t *testing.T) {
 
 	runConcurrently(workers, func(worker int) {
 		for op := range opsPerWorker {
-			instance, err := service.Register(t.Context(), registration(fmt.Sprintf("service-%d", op%8)))
+			instance, err := service.Register(t.Context(), registration(fmt.Sprintf("service-%d", op%8)), anyone)
 			if err != nil {
 				t.Errorf("worker %d: register: %v", worker, err)
 				return
@@ -86,7 +86,7 @@ func TestServiceUnderLoadWithCleanupRunning(t *testing.T) {
 		own := mustRegister(t, service, name)
 
 		for range opsPerWorker {
-			if err := service.Heartbeat(ctx, own.ID); err != nil {
+			if err := service.Heartbeat(ctx, own.ID, anyone); err != nil {
 				t.Errorf("heartbeat: %v", err)
 			}
 
@@ -96,7 +96,7 @@ func TestServiceUnderLoadWithCleanupRunning(t *testing.T) {
 
 			// Churn: instances that come and go while cleanup sweeps.
 			churn := mustRegister(t, service, "churn")
-			if err := service.Unregister(ctx, churn.ID); err != nil {
+			if err := service.Unregister(ctx, churn.ID, anyone); err != nil {
 				t.Errorf("unregister churn: %v", err)
 			}
 		}

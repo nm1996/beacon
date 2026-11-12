@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/nm1996/beacon/internal/auth"
 	"github.com/nm1996/beacon/internal/discovery"
 )
 
@@ -15,10 +16,10 @@ import (
 // it is used, so handlers depend only on these methods and tests can swap
 // in a fake. *discovery.Service satisfies it.
 type Discovery interface {
-	Register(ctx context.Context, registration discovery.Registration) (discovery.Instance, error)
-	Heartbeat(ctx context.Context, id string) error
+	Register(ctx context.Context, registration discovery.Registration, caller discovery.Caller) (discovery.Instance, error)
+	Heartbeat(ctx context.Context, id string, caller discovery.Caller) error
 	Discover(ctx context.Context, name string) ([]discovery.Instance, error)
-	Unregister(ctx context.Context, id string) error
+	Unregister(ctx context.Context, id string, caller discovery.Caller) error
 	TTL() time.Duration
 }
 
@@ -64,7 +65,7 @@ func (handler *Handler) Register(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 
-	instance, err := handler.discovery.Register(request.Context(), mapRegisterRequest(input))
+	instance, err := handler.discovery.Register(request.Context(), mapRegisterRequest(input), handler.caller(request))
 	if err != nil {
 		handler.writeDiscoveryError(writer, request, err)
 		return
@@ -80,7 +81,7 @@ func (handler *Handler) Register(writer http.ResponseWriter, request *http.Reque
 // Heartbeat marks the instance named in the path as still alive and
 // responds 204. An unknown ID, including one that already expired, gets 404.
 func (handler *Handler) Heartbeat(writer http.ResponseWriter, request *http.Request) {
-	if err := handler.discovery.Heartbeat(request.Context(), request.PathValue("id")); err != nil {
+	if err := handler.discovery.Heartbeat(request.Context(), request.PathValue("id"), handler.caller(request)); err != nil {
 		handler.writeDiscoveryError(writer, request, err)
 		return
 	}
@@ -108,12 +109,31 @@ func (handler *Handler) GetServices(writer http.ResponseWriter, request *http.Re
 // Unregister removes the instance named in the path and responds 204. An
 // unknown ID gets 404.
 func (handler *Handler) Unregister(writer http.ResponseWriter, request *http.Request) {
-	if err := handler.discovery.Unregister(request.Context(), request.PathValue("id")); err != nil {
+	if err := handler.discovery.Unregister(request.Context(), request.PathValue("id"), handler.caller(request)); err != nil {
 		handler.writeDiscoveryError(writer, request, err)
 		return
 	}
 
 	writeStatus(writer, http.StatusNoContent)
+}
+
+// caller describes who sent request to the discovery layer. Without
+// authentication everyone may change every instance, as before ownership
+// existed. With it, the caller is the identity the guard found, and may
+// change instances other callers registered only with the manage
+// permission. A request that somehow reached a handler without passing the
+// guard gets a nameless caller, which may only change unowned instances.
+func (handler *Handler) caller(request *http.Request) discovery.Caller {
+	if handler.config.Guard == nil {
+		return discovery.Caller{AnyInstance: true}
+	}
+
+	identity, ok := identityFrom(request.Context())
+	if !ok {
+		return discovery.Caller{}
+	}
+
+	return discovery.Caller{Name: identity.Name, AnyInstance: identity.Allows(auth.PermissionManage)}
 }
 
 // Health reports that the process is up and serving requests. It always

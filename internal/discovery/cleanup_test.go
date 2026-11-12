@@ -49,7 +49,7 @@ func TestRunCleanupRemovesStaleInstances(t *testing.T) {
 
 		// Only the active instance keeps sending heartbeats.
 		time.Sleep(2 * time.Second)
-		if err := service.Heartbeat(ctx, active.ID); err != nil {
+		if err := service.Heartbeat(ctx, active.ID, anyone); err != nil {
 			t.Fatalf("heartbeat: %v", err)
 		}
 
@@ -57,7 +57,7 @@ func TestRunCleanupRemovesStaleInstances(t *testing.T) {
 		time.Sleep(2*time.Second + time.Millisecond)
 		synctest.Wait()
 
-		if err := service.Heartbeat(ctx, stale.ID); !errors.Is(err, discovery.ErrInstanceNotFound) {
+		if err := service.Heartbeat(ctx, stale.ID, anyone); !errors.Is(err, discovery.ErrInstanceNotFound) {
 			t.Errorf("expected the stale instance to be removed, heartbeat gave %v", err)
 		}
 

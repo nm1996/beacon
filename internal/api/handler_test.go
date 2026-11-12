@@ -81,7 +81,7 @@ func mustRegister(t *testing.T, service *discovery.Service, name string, port in
 		Name:    name,
 		Address: "localhost",
 		Port:    port,
-	})
+	}, discovery.Caller{AnyInstance: true})
 	if err != nil {
 		t.Fatalf("register %q: %v", name, err)
 	}
@@ -302,12 +302,14 @@ type failingDiscovery struct {
 }
 
 // Register always fails.
-func (fake failingDiscovery) Register(context.Context, discovery.Registration) (discovery.Instance, error) {
+func (fake failingDiscovery) Register(context.Context, discovery.Registration, discovery.Caller) (discovery.Instance, error) {
 	return discovery.Instance{}, fake.err
 }
 
 // Heartbeat always fails.
-func (fake failingDiscovery) Heartbeat(context.Context, string) error { return fake.err }
+func (fake failingDiscovery) Heartbeat(context.Context, string, discovery.Caller) error {
+	return fake.err
+}
 
 // Discover always fails.
 func (fake failingDiscovery) Discover(context.Context, string) ([]discovery.Instance, error) {
@@ -315,7 +317,9 @@ func (fake failingDiscovery) Discover(context.Context, string) ([]discovery.Inst
 }
 
 // Unregister always fails.
-func (fake failingDiscovery) Unregister(context.Context, string) error { return fake.err }
+func (fake failingDiscovery) Unregister(context.Context, string, discovery.Caller) error {
+	return fake.err
+}
 
 // TTL reports the test TTL.
 func (fake failingDiscovery) TTL() time.Duration { return testTTL }

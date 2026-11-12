@@ -32,6 +32,9 @@ func Run(test *testing.T, newRegistry func(test *testing.T) discovery.Registry) 
 		{name: "ListFiltersByName", run: listFiltersByName},
 		{name: "ListOnEmptyRegistry", run: listOnEmptyRegistry},
 		{name: "ListReturnsCopies", run: listReturnsCopies},
+		{name: "GetReturnsStoredInstance", run: getReturnsStoredInstance},
+		{name: "GetUnknownID", run: getUnknownID},
+		{name: "GetReturnsCopy", run: getReturnsCopy},
 		{name: "TouchUpdatesLastHeartbeat", run: touchUpdatesLastHeartbeat},
 		{name: "TouchUnknownID", run: touchUnknownID},
 		{name: "DeleteRemovesInstance", run: deleteRemovesInstance},
@@ -190,6 +193,50 @@ func touchUpdatesLastHeartbeat(test *testing.T, registry discovery.Registry) {
 
 	if !got[0].RegisteredAt.Equal(base) {
 		test.Errorf("expected RegisteredAt to stay %v, got %v", base, got[0].RegisteredAt)
+	}
+}
+
+func getReturnsStoredInstance(test *testing.T, registry discovery.Registry) {
+	stored := instance("a", "orders", base)
+	stored.Owner = "orders-token"
+	mustCreate(test, registry, stored, instance("b", "payments", base))
+
+	got, err := registry.Get(test.Context(), "a")
+	if err != nil {
+		test.Fatalf("get: %v", err)
+	}
+
+	if got != stored {
+		test.Errorf("expected every field, owner included, to round-trip:\nwant %+v\ngot  %+v", stored, got)
+	}
+}
+
+func getUnknownID(test *testing.T, registry discovery.Registry) {
+	_, err := registry.Get(test.Context(), "missing")
+
+	if !errors.Is(err, discovery.ErrInstanceNotFound) {
+		test.Errorf("expected ErrInstanceNotFound, got %v", err)
+	}
+}
+
+func getReturnsCopy(test *testing.T, registry discovery.Registry) {
+	mustCreate(test, registry, instance("a", "orders", base))
+
+	got, err := registry.Get(test.Context(), "a")
+	if err != nil {
+		test.Fatalf("get: %v", err)
+	}
+
+	got.Owner = "changed"
+	got.Port = 1
+
+	again, err := registry.Get(test.Context(), "a")
+	if err != nil {
+		test.Fatalf("get again: %v", err)
+	}
+
+	if again.Owner != "" || again.Port != 8081 {
+		test.Errorf("expected changing a returned instance not to change the stored one, got %+v", again)
 	}
 }
 

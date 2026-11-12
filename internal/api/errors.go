@@ -15,6 +15,7 @@ const (
 	codeInvalidRequestBody = "invalid_request_body"
 	codeInvalidService     = "invalid_service"
 	codeServiceNotFound    = "service_not_found"
+	codeInstanceNotOwned   = "instance_not_owned"
 	codeNotFound           = "not_found"
 	codeMethodNotAllowed   = "method_not_allowed"
 	codeInternalError      = "internal_error"
@@ -46,6 +47,16 @@ func (handler *Handler) writeDiscoveryError(writer http.ResponseWriter, request 
 		handler.writeError(writer, http.StatusBadRequest, codeInvalidService, err.Error())
 	case errors.Is(err, discovery.ErrInstanceNotFound):
 		handler.writeError(writer, http.StatusNotFound, codeServiceNotFound, "No service is registered with this ID")
+	case errors.Is(err, discovery.ErrInstanceNotOwned):
+		caller := handler.caller(request)
+		handler.logger.LogAttrs(request.Context(), slog.LevelWarn, "request refused",
+			slog.String("caller", caller.Name),
+			slog.String("reason", "not_owner"),
+			slog.String("method", request.Method),
+			slog.String("path", request.URL.Path),
+		)
+		handler.writeError(writer, http.StatusForbidden, codeInstanceNotOwned,
+			"This instance was registered by another caller; only it, or a caller with the manage permission, may change it")
 	default:
 		handler.logger.ErrorContext(request.Context(), "discovery operation failed", slog.Any("error", err))
 		handler.writeError(writer, http.StatusInternalServerError, codeInternalError, "Internal server error")

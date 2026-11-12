@@ -68,6 +68,7 @@ Beacon covers the core of the problem and nothing more: one small binary, no ext
 | ✅ | Optional HTTPS (TLS 1.2+) |
 | ✅ | Optional bearer-token authentication with per-token permissions |
 | ✅ | Optional client certificates (mTLS), with the same permissions |
+| ✅ | With authentication on, only the caller that registered an instance may change it |
 
 ## Quick start
 
@@ -158,6 +159,7 @@ Every error response has the same shape:
 |---|---|---|
 | `400` | `invalid_request_body` | The body is not a single JSON object within the size limit with only the documented fields |
 | `400` | `invalid_service` | A registration field breaks a rule, for example a port outside `1`–`65535` |
+| `403` | `instance_not_owned` | [Authentication](#authentication) is on and another caller registered this instance; see [Instance ownership](#instance-ownership) |
 | `404` | `service_not_found` | No instance is registered with the given ID |
 | `404` | `not_found` | No endpoint exists at the path |
 | `401` | `unauthorized` | [Authentication](#authentication) is on and the request has no bearer token, a malformed `Authorization` header or a token Beacon does not accept |
@@ -212,6 +214,7 @@ No request body.
 | Status | Meaning |
 |---|---|
 | `204 No Content` | Heartbeat recorded |
+| `403 Forbidden` | With authentication on: another caller registered this instance (`instance_not_owned`), or the caller lacks `register` (`forbidden`) |
 | `404 Not Found` | No instance with that ID, possibly because it already expired |
 
 An instance that gets `404` should register again.
@@ -223,6 +226,7 @@ No request body.
 | Status | Meaning |
 |---|---|
 | `204 No Content` | Instance removed |
+| `403 Forbidden` | With authentication on: another caller registered this instance (`instance_not_owned`), or the caller lacks `register` (`forbidden`) |
 | `404 Not Found` | No instance with that ID |
 
 ### `GET /health`
@@ -355,7 +359,7 @@ permissions = ["metrics"]
 [[tokens]]
 name = "admin"
 sha256 = "c71e...0b3f"
-# No permissions line: this token may do everything.
+# No permissions line: discover, register and metrics, but not manage.
 ```
 
 ```toml
@@ -367,15 +371,25 @@ tokens_file = "/etc/beacon/tokens.toml"
 
 | Permission | Allows |
 |---|---|
-| `register` | `POST /api/v1/services`, `POST /api/v1/services/{id}/heartbeat`, `DELETE /api/v1/services/{id}` |
+| `register` | `POST /api/v1/services`, and `POST /api/v1/services/{id}/heartbeat` and `DELETE /api/v1/services/{id}` for the instances the same caller registered |
 | `discover` | `GET /api/v1/services` |
 | `metrics` | `GET /metrics` |
+| `manage` | Together with `register`: heartbeats and unregistering for instances other callers registered. Never granted unless listed |
 
 - `name` identifies the token in logs and error messages. It is not secret, and must be unique across tokens and certificates.
 - `sha256` is the hex hash printed by `beacon --hash-token`, in either case. Each token must be unique.
-- `permissions` is optional. Leave it out to allow everything; an empty list is rejected.
+- `permissions` is optional. Leave it out to allow `discover`, `register` and `metrics`. `manage` must always be listed, together with `register`, so a token written without a permission list can never touch another service's instances. An empty list is rejected, and so is `manage` without `register`.
 - Beacon refuses to start if the file is missing, contains an unknown key or an invalid entry, or lists neither tokens nor certificates. Changes take effect on the next [reload](#reloading-certificates-and-tokens), without a restart.
 - A file of hashes is not enough to call Beacon, but keep it readable only by Beacon anyway.
+
+### Instance ownership
+
+With authentication on, Beacon records which token or certificate registered each instance, by its `name`. Only that caller may send the instance's heartbeats or unregister it; anyone else with `register` gets `403` with the code `instance_not_owned`. Every caller with `discover` still sees every instance, since finding other services is the point of a registry.
+
+- An operator who needs to remove a stuck instance of another service uses an entry with `permissions = ["register", "manage"]`, alongside `discover` if it should also list instances.
+- The owner is the entry's `name`. Renaming an entry, or moving a service from a token to a certificate under another name, means its existing instances belong to the old name: their heartbeats get `403`, they expire after `registry.service_ttl`, and a [`Lease`](#go-client) then gets `404` and registers again under the new name.
+- Owners appear in the `service registered` log line (`owner`), and whoever unregistered an instance in `service unregistered` (`by`). `GET /api/v1/services` does not show them.
+- Without authentication nothing is recorded or checked, and anyone may change any instance.
 
 ### Client certificates (mTLS)
 
@@ -568,7 +582,7 @@ When Beacon has [authentication](#authentication) on, give the client its token.
 beacon, err := client.New("https://beacon:8080", client.WithToken(os.Getenv("BEACON_TOKEN")))
 ```
 
-The client then sends `Authorization: Bearer <token>` on every request. Errors for refused requests match `client.ErrUnauthorized` (`401`) and `client.ErrForbidden` (`403`) with `errors.Is`, including a `401` or `403` from a proxy in front of Beacon. A `Lease` whose heartbeats are refused keeps retrying with backoff and logs each failure; it never registers again because of them.
+The client then sends `Authorization: Bearer <token>` on every request. Errors for refused requests match `client.ErrUnauthorized` (`401`) and `client.ErrForbidden` (`403`) with `errors.Is`, including a `401` or `403` from a proxy in front of Beacon. A heartbeat or unregister of an instance another caller registered also matches `client.ErrNotOwned`; see [Instance ownership](#instance-ownership). A `Lease` whose heartbeats are refused keeps retrying with backoff and logs each failure; it never registers again because of them, though once its instance expires it gets `404` and registers again as usual.
 
 For a Beacon served over [TLS](#tls), use an `https://` URL. If its certificate comes from a private CA, trust that CA through `WithHTTPClient`:
 
@@ -677,7 +691,7 @@ Beacon is deliberately small. Before you depend on it, know that:
 - **State lives in memory.** Restarting Beacon forgets every instance. Services find out on their next heartbeat (`404`) and should register again.
 - **It runs as a single node.** There is no clustering or replication.
 - **Authentication is off by default.** Until you turn on [authentication](#authentication), anyone who can reach the port can register, discover and remove instances. [TLS](#tls) encrypts the traffic but does not decide who may connect.
-- **A caller with `register` can affect any instance.** Beacon does not record which token or certificate registered an instance, so any such caller can send heartbeats for, or unregister, instances that other services registered.
+- **Ownership is by name, not by service.** Every instance registered with the same token or certificate belongs to the same caller, so two services sharing one token can change each other's instances. Give each service its own token or certificate.
 - **Client certificates are not checked for revocation.** Use short-lived certificates.
 
 ## Development
@@ -770,6 +784,7 @@ Transports only translate requests and errors; every rule lives in `discovery`, 
 - [x] Authentication with bearer tokens and per-token permissions
 - [x] Client certificates (mTLS) as another way to authenticate
 - [x] Reload certificates and tokens without a restart
+- [x] Only the caller that registered an instance may change it
 - [ ] gRPC API alongside HTTP
 - [ ] Keep an instance's ID when it registers again, instead of issuing a new one
 - [ ] Client-side caching and load balancing in the Go client

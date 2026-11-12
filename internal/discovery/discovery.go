@@ -21,7 +21,30 @@ var (
 	// ErrInstanceNotFound reports that no instance has the given ID. Registry
 	// implementations return it, unwrapped or wrapped, for unknown IDs.
 	ErrInstanceNotFound = errors.New("instance not found")
+
+	// ErrInstanceNotOwned reports that the caller may not change an instance
+	// another caller registered.
+	ErrInstanceNotOwned = errors.New("instance registered by another caller")
 )
+
+// Caller is who asks to change an instance. Transports build it from
+// whatever identity they authenticated; discovery only compares names.
+type Caller struct {
+	// Name identifies the caller, and becomes the Owner of instances it
+	// registers. It is empty when the transport does not authenticate.
+	Name string
+	// AnyInstance lets the caller change instances it did not register. A
+	// transport without authentication sets it, so everyone may change
+	// everything, as before ownership existed.
+	AnyInstance bool
+}
+
+// mayChange reports whether caller may send heartbeats for, or unregister,
+// instance. Instances without an owner, registered while authentication was
+// off, may be changed by anyone.
+func (caller Caller) mayChange(instance Instance) bool {
+	return caller.AnyInstance || instance.Owner == "" || instance.Owner == caller.Name
+}
 
 // Registration is what a service sends to announce one of its instances.
 type Registration struct {
@@ -45,6 +68,10 @@ type Instance struct {
 	Address string
 	// Port is the TCP port the instance listens on.
 	Port int
+	// Owner names the caller that registered the instance, or is empty if it
+	// registered without authentication. Only the owner, or a caller allowed
+	// to change any instance, may send its heartbeats or unregister it.
+	Owner string
 	// RegisteredAt is when the instance registered.
 	RegisteredAt time.Time
 	// LastHeartbeat is when the instance last proved it was alive.
@@ -58,6 +85,9 @@ type Registry interface {
 	// Create stores instance under instance.ID. It fails if an instance with
 	// that ID already exists.
 	Create(ctx context.Context, instance Instance) error
+	// Get returns a copy of the instance with id. It returns
+	// ErrInstanceNotFound if there is none.
+	Get(ctx context.Context, id string) (Instance, error)
 	// Touch sets the LastHeartbeat of the instance with id to at. It returns
 	// ErrInstanceNotFound if there is none.
 	Touch(ctx context.Context, id string, at time.Time) error

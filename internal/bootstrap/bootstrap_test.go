@@ -101,7 +101,7 @@ func TestNewConnectsServerToDiscovery(t *testing.T) {
 		Name:    "orders",
 		Address: "10.0.0.1",
 		Port:    8081,
-	})
+	}, discovery.Caller{AnyInstance: true})
 	if err != nil {
 		t.Fatalf("register service: %v", err)
 	}
