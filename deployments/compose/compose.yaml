@@ -22,6 +22,14 @@ services:
     # To use your own configuration, mount it over the built-in one:
     # volumes:
     #   - ./beacon.toml:/etc/beacon/beacon.toml:ro
+    #
+    # To serve HTTPS, mount a certificate and key readable by UID 65532 and
+    # point Beacon at them (see "TLS" in the README):
+    # volumes:
+    #   - ./certs:/etc/beacon/tls:ro
+    # environment:
+    #   BEACON_TLS_CERT_FILE: /etc/beacon/tls/cert.pem
+    #   BEACON_TLS_KEY_FILE: /etc/beacon/tls/key.pem
     read_only: true
     cap_drop:
       - ALL

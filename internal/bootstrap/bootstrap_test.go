@@ -1,16 +1,19 @@
 package bootstrap
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/nm1996/beacon/internal/config"
 	"github.com/nm1996/beacon/internal/discovery"
+	"github.com/nm1996/beacon/internal/tlstest"
 )
 
 // discard is a logger that drops everything.
@@ -233,5 +236,57 @@ func TestNewOmitsMetricsWhenDisabled(t *testing.T) {
 
 	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), `"not_found"`) {
 		t.Errorf("expected the API's JSON 404 for /metrics, got %d %q", rec.Code, rec.Body.String())
+	}
+}
+
+func TestNewServesPlainHTTPWithoutTLSSettings(test *testing.T) {
+	if tlsConfig := mustNew(test, config.Default(), "v0.0.0-test").Server.TLSConfig; tlsConfig != nil {
+		test.Errorf("expected no TLS config by default, got %+v", tlsConfig)
+	}
+}
+
+func TestNewLoadsTLSCertificate(test *testing.T) {
+	certificate := tlstest.WriteCertificate(test)
+
+	settings := config.Default()
+	settings.TLS = config.TLSConfig{CertFile: certificate.CertFile, KeyFile: certificate.KeyFile}
+
+	tlsConfig := mustNew(test, settings, "v0.0.0-test").Server.TLSConfig
+
+	if tlsConfig == nil || len(tlsConfig.Certificates) != 1 {
+		test.Fatalf("expected one loaded certificate, got %+v", tlsConfig)
+	}
+
+	if tlsConfig.MinVersion != tls.VersionTLS12 {
+		test.Errorf("expected TLS 1.2 as the minimum version, got %#x", tlsConfig.MinVersion)
+	}
+}
+
+func TestNewRejectsUnusableTLSFiles(test *testing.T) {
+	first := tlstest.WriteCertificate(test)
+	second := tlstest.WriteCertificate(test)
+	missing := filepath.Join(test.TempDir(), "missing.pem")
+
+	cases := []struct {
+		name     string
+		settings config.TLSConfig
+	}{
+		{name: "missing certificate", settings: config.TLSConfig{CertFile: missing, KeyFile: first.KeyFile}},
+		{name: "missing key", settings: config.TLSConfig{CertFile: first.CertFile, KeyFile: missing}},
+		{name: "key from another certificate", settings: config.TLSConfig{CertFile: first.CertFile, KeyFile: second.KeyFile}},
+		{name: "key file holds a certificate", settings: config.TLSConfig{CertFile: first.CertFile, KeyFile: first.CertFile}},
+	}
+
+	for _, testCase := range cases {
+		test.Run(testCase.name, func(test *testing.T) {
+			settings := config.Default()
+			settings.TLS = testCase.settings
+
+			_, err := New(settings, discard, "v0.0.0-test")
+
+			if err == nil || !strings.Contains(err.Error(), "load TLS certificate") {
+				test.Errorf("expected a TLS load error, got %v", err)
+			}
+		})
 	}
 }

@@ -14,6 +14,8 @@ func TestLoadAppliesEveryEnvironmentVariable(test *testing.T) {
 	test.Setenv("BEACON_SERVER_IDLE_TIMEOUT", "3s")
 	test.Setenv("BEACON_SERVER_SHUTDOWN_TIMEOUT", "4s")
 	test.Setenv("BEACON_SERVER_MAX_REQUEST_BODY_BYTES", "1024")
+	test.Setenv("BEACON_TLS_CERT_FILE", "/etc/beacon/tls/cert.pem")
+	test.Setenv("BEACON_TLS_KEY_FILE", "/etc/beacon/tls/key.pem")
 	test.Setenv("BEACON_REGISTRY_SERVICE_TTL", "1m")
 	test.Setenv("BEACON_REGISTRY_CLEANUP_INTERVAL", "500ms")
 	test.Setenv("BEACON_STORAGE_BACKEND", "memory")
@@ -35,6 +37,10 @@ func TestLoadAppliesEveryEnvironmentVariable(test *testing.T) {
 			IdleTimeout:         3 * time.Second,
 			ShutdownTimeout:     4 * time.Second,
 			MaxRequestBodyBytes: 1024,
+		},
+		TLS: TLSConfig{
+			CertFile: "/etc/beacon/tls/cert.pem",
+			KeyFile:  "/etc/beacon/tls/key.pem",
 		},
 		Registry: RegistryConfig{
 			ServiceTTL:      time.Minute,

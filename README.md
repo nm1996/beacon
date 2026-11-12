@@ -25,6 +25,7 @@ Services register themselves, send heartbeats, and discover each other over a sm
 - [How it works](#how-it-works)
 - [HTTP API](#http-api)
 - [Configuration](#configuration)
+- [TLS](#tls)
 - [Running in Docker](#running-in-docker)
 - [Go client](#go-client)
 - [Metrics](#metrics)
@@ -62,6 +63,7 @@ Beacon covers the core of the problem and nothing more: one small binary, no ext
 | ✅ | Go client with automatic heartbeats and re-registration |
 | ✅ | Container image (amd64, arm64) with a built-in health check, and a Compose example |
 | ✅ | Prometheus metrics at `/metrics` |
+| ✅ | Optional HTTPS (TLS 1.2+) |
 
 ## Quick start
 
@@ -250,6 +252,8 @@ A file only needs the keys it changes, and no file is needed at all. [`configs/b
 | `server.idle_timeout` | `BEACON_SERVER_IDLE_TIMEOUT` | `"60s"` | Time an idle keep-alive connection stays open |
 | `server.shutdown_timeout` | `BEACON_SERVER_SHUTDOWN_TIMEOUT` | `"10s"` | Time in-flight requests get to finish on shutdown |
 | `server.max_request_body_bytes` | `BEACON_SERVER_MAX_REQUEST_BODY_BYTES` | `65536` | Largest accepted request body |
+| `tls.cert_file` | `BEACON_TLS_CERT_FILE` | `""` | PEM certificate chain to serve HTTPS with; see [TLS](#tls) |
+| `tls.key_file` | `BEACON_TLS_KEY_FILE` | `""` | PEM private key for `tls.cert_file` |
 | `registry.service_ttl` | `BEACON_REGISTRY_SERVICE_TTL` | `"30s"` | Time without a heartbeat before an instance is removed |
 | `registry.cleanup_interval` | `BEACON_REGISTRY_CLEANUP_INTERVAL` | `"5s"` | How often stale instances are removed |
 | `storage.backend` | `BEACON_STORAGE_BACKEND` | `"memory"` | Where instances are kept. Only `memory` exists today |
@@ -268,6 +272,36 @@ Durations use Go syntax such as `"500ms"`, `"5s"` or `"1m30s"`. All durations an
 Beacon refuses to start, and lists every problem it found, if the file is missing, is not valid TOML or contains an unknown key, if an environment variable cannot be parsed, or if a setting ends up out of range. Range errors name the TOML key, for example `server.port`, whichever source set it.
 
 Logs go to standard output. Run `beacon --version` to print the build version.
+
+## TLS
+
+Beacon serves plain HTTP unless you give it a certificate. Set both `tls.cert_file` and `tls.key_file` to serve HTTPS instead:
+
+```toml
+[tls]
+cert_file = "/etc/beacon/tls/cert.pem"
+key_file = "/etc/beacon/tls/key.pem"
+```
+
+- Both files are PEM. `cert_file` holds the server certificate first, followed by any intermediate certificates. `key_file` holds its private key.
+- Set both or neither. Beacon refuses to start if only one is set, or if the files are missing, unreadable or do not belong together.
+- With TLS on, the API, `/health` and `/metrics` are served over HTTPS only, on the same port. HTTP/2 is offered. TLS 1.2 is the minimum version.
+- The files are read once at startup. Restart Beacon to pick up a renewed certificate.
+- Without TLS, Beacon logs a warning at startup if it listens on anything other than a loopback address.
+
+For local testing, make a self-signed certificate valid for `localhost`:
+
+```bash
+mkdir -p certs
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 30 \
+  -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
+  -keyout certs/key.pem -out certs/cert.pem
+
+BEACON_TLS_CERT_FILE=certs/cert.pem BEACON_TLS_KEY_FILE=certs/key.pem go run ./cmd/beacon
+curl --cacert certs/cert.pem https://localhost:8080/health
+```
+
+In production, use a certificate from your own CA or a public one, issued for the name clients use to reach Beacon.
 
 ## Running in Docker
 
@@ -293,7 +327,17 @@ docker run --rm -p 9090:9090 -e BEACON_SERVER_PORT=9090 ghcr.io/nm1996/beacon:0.
 docker run --rm -p 8080:8080 -v "$PWD/beacon.toml:/etc/beacon/beacon.toml:ro" ghcr.io/nm1996/beacon:0.1
 ```
 
-The image's health check runs `beacon --health-check`, which asks the running server for `GET /health` using the same configuration and environment. If you start the container with a different `--config` path, mount your file at `/etc/beacon/beacon.toml` instead, so the health check reads it too.
+The image's health check runs `beacon --health-check`, which asks the running server for `GET /health` using the same configuration and environment. With TLS on it uses HTTPS and does not verify the certificate, because it only connects to the server's own address, sends nothing secret and reads nothing but the status. If you start the container with a different `--config` path, mount your file at `/etc/beacon/beacon.toml` instead, so the health check reads it too.
+
+To serve HTTPS from the container, mount the certificate and key and point Beacon at them. The image runs as the `nonroot` user (UID 65532), which must be able to read both files:
+
+```bash
+docker run --rm -p 8080:8080 \
+  -v "$PWD/certs:/etc/beacon/tls:ro" \
+  -e BEACON_TLS_CERT_FILE=/etc/beacon/tls/cert.pem \
+  -e BEACON_TLS_KEY_FILE=/etc/beacon/tls/key.pem \
+  ghcr.io/nm1996/beacon:0.1
+```
 
 To build and run locally with Compose, which also drops all capabilities and uses a read-only filesystem:
 
@@ -338,7 +382,28 @@ err = beacon.Heartbeat(ctx, registered.ID)
 err = beacon.Unregister(ctx, registered.ID)
 ```
 
-Errors from Beacon are `*client.Error` values carrying the status and Beacon's error code, and they match `client.ErrNotFound` and `client.ErrInvalid` with `errors.Is`. `client.WithHTTPClient` sets a custom `http.Client`; by default every request times out after 10 seconds. `Register` is never retried, because repeating it would create a second instance.
+Errors from Beacon are `*client.Error` values carrying the status and Beacon's error code, and they match `client.ErrNotFound` and `client.ErrInvalid` with `errors.Is`. `client.WithHTTPClient` sets a custom `http.Client`; by default every request times out after 10 seconds.
+
+For a Beacon served over [TLS](#tls), use an `https://` URL. If its certificate comes from a private CA, trust that CA through `WithHTTPClient`:
+
+```go
+caPEM, err := os.ReadFile("/etc/beacon/ca.pem")
+if err != nil {
+	return err
+}
+
+roots := x509.NewCertPool()
+if !roots.AppendCertsFromPEM(caPEM) {
+	return errors.New("no certificates in ca.pem")
+}
+
+beacon, err := client.New("https://beacon:8080", client.WithHTTPClient(&http.Client{
+	Timeout: 10 * time.Second,
+	Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12},
+	},
+}))
+``` `Register` is never retried, because repeating it would create a second instance.
 
 ## Metrics
 
@@ -377,7 +442,7 @@ sum(rate(beacon_http_requests_total{route="POST /api/v1/services/{id}/heartbeat"
   / sum(rate(beacon_http_requests_total{route="POST /api/v1/services/{id}/heartbeat"}[5m]))
 ```
 
-`/metrics` has no authentication, like the rest of the API. Disable it with `BEACON_METRICS_ENABLED=false` if it must not be reachable.
+`/metrics` has no authentication, like the rest of the API. With [TLS](#tls) on, Prometheus must scrape it with `scheme: https`. Disable it with `BEACON_METRICS_ENABLED=false` if it must not be reachable.
 
 ## Limitations
 
@@ -385,7 +450,7 @@ Beacon is deliberately small. Before you depend on it, know that:
 
 - **State lives in memory.** Restarting Beacon forgets every instance. Services find out on their next heartbeat (`404`) and should register again.
 - **It runs as a single node.** There is no clustering or replication.
-- **There is no authentication.** Run it on a trusted network only.
+- **There is no authentication.** Anyone who can reach the port can register, discover and remove instances. [TLS](#tls) encrypts the traffic but does not decide who may connect, so run Beacon on a trusted network only.
 
 ## Development
 
@@ -426,7 +491,8 @@ Run `mise tasks` to list them all. CI runs the same tasks on every pull request.
 │   ├── registry/
 │   │   ├── memory/          # In-memory Registry backend
 │   │   └── registrytest/    # Contract tests every Registry backend must pass
-│   ├── bootstrap/           # Builds the backend, discovery layer and HTTP server and connects them
+│   ├── tlstest/             # Self-signed certificates for tests
+│   ├── bootstrap/           # Builds the backend, discovery layer and HTTP server and connects them, and loads the TLS certificate
 │   └── config/              # Loads and validates the TOML configuration and environment overrides
 ├── deployments/
 │   ├── docker/              # Dockerfile
@@ -470,6 +536,8 @@ Transports only translate requests and errors; every rule lives in `discovery`, 
 
 **After v0.1.0**
 
+- [x] TLS for the HTTP API
+- [ ] Authentication with bearer tokens, and optionally client certificates (mTLS)
 - [ ] gRPC API alongside HTTP
 - [ ] Keep an instance's ID when it registers again, instead of issuing a new one
 - [ ] Client-side caching and load balancing in the Go client

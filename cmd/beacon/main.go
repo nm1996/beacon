@@ -53,7 +53,7 @@ func main() {
 	}
 
 	if *healthCheck {
-		if err := checkHealth(context.Background(), healthURL(settings.Server)); err != nil {
+		if err := checkHealth(context.Background(), healthURL(settings)); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -121,16 +121,16 @@ func run(settings config.Config, logger *slog.Logger) error {
 		}
 	})
 
+	// Read this before serving: Serve fills in a nil TLSConfig while it sets
+	// up HTTP/2, so afterwards it is neither meaningful nor safe to read.
+	servesTLS := server.TLSConfig != nil
+
 	serveErr := make(chan error, 1)
 	go func() {
-		serveErr <- server.Serve(listener)
+		serveErr <- serve(server, listener, servesTLS)
 	}()
 
-	logger.Info("beacon listening",
-		slog.String("addr", listener.Addr().String()),
-		slog.String("storage", settings.Storage.Backend),
-		slog.String("version", buildVersion()),
-	)
+	logListening(logger, listener.Addr(), servesTLS, settings.Storage.Backend)
 
 	select {
 	case err := <-serveErr:
@@ -155,6 +155,42 @@ func run(settings config.Config, logger *slog.Logger) error {
 	}
 
 	return nil
+}
+
+// serve runs server on listener until it stops, over TLS when servesTLS is
+// set. ServeTLS uses the certificate bootstrap already loaded into the
+// server's TLSConfig, and also offers HTTP/2.
+func serve(server *http.Server, listener net.Listener, servesTLS bool) error {
+	if servesTLS {
+		return server.ServeTLS(listener, "", "")
+	}
+
+	return server.Serve(listener)
+}
+
+// logListening reports that Beacon is serving on address, and warns when it
+// serves plain HTTP to anything beyond this host.
+func logListening(logger *slog.Logger, address net.Addr, servesTLS bool, storage string) {
+	logger.Info("beacon listening",
+		slog.String("addr", address.String()),
+		slog.Bool("tls", servesTLS),
+		slog.String("storage", storage),
+		slog.String("version", buildVersion()),
+	)
+
+	if !servesTLS && !isLoopback(address) {
+		logger.Warn("beacon serves plain HTTP on a non-loopback address; set tls.cert_file and tls.key_file to serve HTTPS",
+			slog.String("addr", address.String()),
+		)
+	}
+}
+
+// isLoopback reports whether address only accepts connections from this
+// host. A wildcard address such as 0.0.0.0 or [::] is not loopback.
+func isLoopback(address net.Addr) bool {
+	tcpAddress, ok := address.(*net.TCPAddr)
+
+	return ok && tcpAddress.IP.IsLoopback()
 }
 
 // buildVersion returns the version set at link time, if any. Otherwise it
