@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"slices"
 	"strings"
 
@@ -115,9 +116,20 @@ type certificateEntry struct {
 // twice, a certificate without exactly one of dns and uri or matching the
 // same name as another, or an unknown or empty permission list.
 func Load(path string) (*Identities, error) {
+	contents, err := os.ReadFile(path) //nolint:gosec // The path is the operator's own auth.tokens_file setting.
+	if err != nil {
+		return nil, fmt.Errorf("read tokens file %s: %w", path, err)
+	}
+
+	return Parse(contents, path)
+}
+
+// Parse reads an identities file from contents, as Load does from a file.
+// path only names the file in error messages.
+func Parse(contents []byte, path string) (*Identities, error) {
 	var file identitiesFile
 
-	metadata, err := toml.DecodeFile(path, &file)
+	metadata, err := toml.Decode(string(contents), &file)
 	if err != nil {
 		return nil, fmt.Errorf("read tokens file %s: %w", path, err)
 	}

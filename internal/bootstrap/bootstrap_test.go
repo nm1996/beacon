@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -251,15 +252,39 @@ func TestNewLoadsTLSCertificate(test *testing.T) {
 	settings := config.Default()
 	settings.TLS = config.TLSConfig{CertFile: certificate.CertFile, KeyFile: certificate.KeyFile}
 
-	tlsConfig := mustNew(test, settings, "v0.0.0-test").Server.TLSConfig
+	server := mustNew(test, settings, "v0.0.0-test").Server
+	tlsConfig := handshakeConfig(test, server)
 
-	if tlsConfig == nil || len(tlsConfig.Certificates) != 1 {
-		test.Fatalf("expected one loaded certificate, got %+v", tlsConfig)
+	if len(tlsConfig.Certificates) != 1 {
+		test.Fatalf("expected one loaded certificate, got %d", len(tlsConfig.Certificates))
 	}
 
-	if tlsConfig.MinVersion != tls.VersionTLS12 {
-		test.Errorf("expected TLS 1.2 as the minimum version, got %#x", tlsConfig.MinVersion)
+	for name, minimum := range map[string]uint16{"server": server.TLSConfig.MinVersion, "handshake": tlsConfig.MinVersion} {
+		if minimum != tls.VersionTLS12 {
+			test.Errorf("expected TLS 1.2 as the %s minimum version, got %#x", name, minimum)
+		}
 	}
+
+	if !slices.Equal(tlsConfig.NextProtos, []string{"h2", "http/1.1"}) {
+		test.Errorf("expected the handshake to offer HTTP/2 and HTTP/1.1, got %v", tlsConfig.NextProtos)
+	}
+}
+
+// handshakeConfig returns the TLS configuration server uses for a new
+// handshake, failing the test if server does not serve TLS.
+func handshakeConfig(test *testing.T, server *http.Server) *tls.Config {
+	test.Helper()
+
+	if server.TLSConfig == nil || server.TLSConfig.GetConfigForClient == nil {
+		test.Fatalf("expected a TLS config that picks its certificate per handshake, got %+v", server.TLSConfig)
+	}
+
+	tlsConfig, err := server.TLSConfig.GetConfigForClient(&tls.ClientHelloInfo{})
+	if err != nil || tlsConfig == nil {
+		test.Fatalf("expected a handshake config, got %v, %v", tlsConfig, err)
+	}
+
+	return tlsConfig
 }
 
 func TestNewRejectsUnusableTLSFiles(test *testing.T) {

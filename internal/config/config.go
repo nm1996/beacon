@@ -47,6 +47,10 @@ type ServerConfig struct {
 	ShutdownTimeout time.Duration `toml:"shutdown_timeout"`
 	// MaxRequestBodyBytes is the largest request body the API accepts.
 	MaxRequestBodyBytes int64 `toml:"max_request_body_bytes"`
+	// ReloadInterval is how often the TLS files and the tokens file are
+	// checked for changes and reloaded when their contents differ. Zero
+	// turns checking off; SIGHUP still reloads on platforms that have it.
+	ReloadInterval time.Duration `toml:"reload_interval"`
 }
 
 // TLSConfig turns on HTTPS. Setting both files serves the API, /health and
@@ -208,6 +212,10 @@ func (config Config) Validate() error {
 	check(server.IdleTimeout > 0, "server.idle_timeout must be positive, got %s", server.IdleTimeout)
 	check(server.ShutdownTimeout > 0, "server.shutdown_timeout must be positive, got %s", server.ShutdownTimeout)
 	check(server.MaxRequestBodyBytes > 0, "server.max_request_body_bytes must be positive, got %d", server.MaxRequestBodyBytes)
+	// Each check reads every file, so sub-second intervals would only add
+	// load; zero means off.
+	check(server.ReloadInterval == 0 || server.ReloadInterval >= time.Second,
+		"server.reload_interval must be 0s (off) or at least 1s, got %s", server.ReloadInterval)
 
 	tls := config.TLS
 	check((tls.CertFile == "") == (tls.KeyFile == ""),
