@@ -36,6 +36,12 @@ shutdown_timeout = "10s"
 # Largest request body the API accepts, in bytes. Larger bodies get 400.
 max_request_body_bytes = 65536
 
+# How often to check the TLS files and the tokens file for changes, and
+# reload them when their contents differ, without a restart. "0s" turns
+# checking off. Sending Beacon SIGHUP reloads them at once on Linux and macOS.
+# A reload that fails keeps the files Beacon already has.
+reload_interval = "0s"
+
 [tls]
 # Serve HTTPS instead of plain HTTP. Set both files to turn TLS on, or leave
 # both empty for plain HTTP. cert_file is a PEM certificate chain, leaf first;

@@ -37,7 +37,7 @@ func TestNewAsksForClientCertificatesWithoutRequiringThem(test *testing.T) {
 	authority := tlstest.NewAuthority(test)
 	settings := mtlsSettings(test, authority, "[[certificates]]\nname = \"orders\"\ndns = \"orders.internal\"\n")
 
-	tlsConfig := mustNew(test, settings, "v0.0.0-test").Server.TLSConfig
+	tlsConfig := handshakeConfig(test, mustNew(test, settings, "v0.0.0-test").Server)
 
 	// Requiring a certificate would make /health and bearer tokens
 	// unreachable for clients without one.
@@ -56,7 +56,7 @@ func TestNewLeavesClientCertificatesOffWithoutClientCA(test *testing.T) {
 	settings := config.Default()
 	settings.TLS = config.TLSConfig{CertFile: certificate.CertFile, KeyFile: certificate.KeyFile}
 
-	tlsConfig := mustNew(test, settings, "v0.0.0-test").Server.TLSConfig
+	tlsConfig := handshakeConfig(test, mustNew(test, settings, "v0.0.0-test").Server)
 
 	if tlsConfig.ClientAuth != tls.NoClientCert || tlsConfig.ClientCAs != nil {
 		test.Errorf("expected no client certificates to be requested, got %v", tlsConfig.ClientAuth)

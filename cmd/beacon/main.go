@@ -94,12 +94,13 @@ func newLogger(output io.Writer, settings config.LoggingConfig) *slog.Logger {
 	return slog.New(slog.NewJSONHandler(output, options))
 }
 
-// run binds the listen address, starts the HTTP server and the cleanup
-// worker, then blocks until the server fails or the process gets SIGINT or
-// SIGTERM. On a signal it gives in-flight requests up to
-// server.shutdown_timeout to finish; a second signal during that time ends
-// the process at once. The cleanup worker is always stopped and waited for
-// before run returns.
+// run binds the listen address, starts the HTTP server, the cleanup worker
+// and, when TLS or authentication is on, the credentials reload worker,
+// which reloads on SIGHUP and every server.reload_interval. It then blocks
+// until the server fails or the process gets SIGINT or SIGTERM. On a signal
+// it gives in-flight requests up to server.shutdown_timeout to finish; a
+// second signal during that time ends the process at once. The workers are
+// always stopped and waited for before run returns.
 func run(settings config.Config, logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -132,6 +133,17 @@ func run(settings config.Config, logger *slog.Logger) error {
 			logger.Error("cleanup worker stopped", slog.Any("error", err))
 		}
 	})
+
+	if store := components.Credentials; store != nil {
+		// SIGHUP never arrives on Windows; server.reload_interval covers it.
+		reloadSignals := make(chan os.Signal, 1)
+		signal.Notify(reloadSignals, syscall.SIGHUP)
+		defer signal.Stop(reloadSignals)
+
+		workers.Go(func() {
+			store.Run(workerCtx, reloadSignals, settings.Server.ReloadInterval)
+		})
+	}
 
 	// Read this before serving: Serve fills in a nil TLSConfig while it sets
 	// up HTTP/2, so afterwards it is neither meaningful nor safe to read.

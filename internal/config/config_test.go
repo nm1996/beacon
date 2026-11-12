@@ -107,6 +107,8 @@ func TestLoadFailures(t *testing.T) {
 		{name: "negative TTL", content: "[registry]\nservice_ttl = \"-5s\"", wantErr: []string{"registry.service_ttl"}},
 		{name: "sub-second TTL", content: "[registry]\nservice_ttl = \"500ms\"\ncleanup_interval = \"100ms\"", wantErr: []string{"registry.service_ttl must be at least 1s"}},
 		{name: "zero body limit", content: "[server]\nmax_request_body_bytes = 0", wantErr: []string{"server.max_request_body_bytes"}},
+		{name: "sub-second reload interval", content: "[server]\nreload_interval = \"500ms\"", wantErr: []string{"server.reload_interval must be 0s (off) or at least 1s"}},
+		{name: "negative reload interval", content: "[server]\nreload_interval = \"-1s\"", wantErr: []string{"server.reload_interval"}},
 		{name: "unknown log level", content: "[logging]\nlevel = \"verbose\"", wantErr: []string{"logging.level"}},
 		{name: "unknown log format", content: "[logging]\nformat = \"xml\"", wantErr: []string{"logging.format"}},
 		{name: "metrics flag is not a boolean", content: "[metrics]\nenabled = \"yes\"", wantErr: []string{"read config"}},

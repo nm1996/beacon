@@ -27,6 +27,7 @@ Services register themselves, send heartbeats, and discover each other over a sm
 - [Configuration](#configuration)
 - [TLS](#tls)
 - [Authentication](#authentication)
+- [Reloading certificates and tokens](#reloading-certificates-and-tokens)
 - [Running in Docker](#running-in-docker)
 - [Go client](#go-client)
 - [Metrics](#metrics)
@@ -257,6 +258,7 @@ A file only needs the keys it changes, and no file is needed at all. [`configs/b
 | `server.idle_timeout` | `BEACON_SERVER_IDLE_TIMEOUT` | `"60s"` | Time an idle keep-alive connection stays open |
 | `server.shutdown_timeout` | `BEACON_SERVER_SHUTDOWN_TIMEOUT` | `"10s"` | Time in-flight requests get to finish on shutdown |
 | `server.max_request_body_bytes` | `BEACON_SERVER_MAX_REQUEST_BODY_BYTES` | `65536` | Largest accepted request body |
+| `server.reload_interval` | `BEACON_SERVER_RELOAD_INTERVAL` | `"0s"` | How often to check the TLS files and tokens file for changes; `0s` is off. See [Reloading](#reloading-certificates-and-tokens) |
 | `tls.cert_file` | `BEACON_TLS_CERT_FILE` | `""` | PEM certificate chain to serve HTTPS with; see [TLS](#tls) |
 | `tls.key_file` | `BEACON_TLS_KEY_FILE` | `""` | PEM private key for `tls.cert_file` |
 | `tls.client_ca_file` | `BEACON_TLS_CLIENT_CA_FILE` | `""` | PEM bundle of CAs whose client certificates Beacon accepts; see [Client certificates (mTLS)](#client-certificates-mtls) |
@@ -294,7 +296,7 @@ key_file = "/etc/beacon/tls/key.pem"
 - Both files are PEM. `cert_file` holds the server certificate first, followed by any intermediate certificates. `key_file` holds its private key.
 - Set both or neither. Beacon refuses to start if only one is set, or if the files are missing, unreadable or do not belong together.
 - With TLS on, the API, `/health` and `/metrics` are served over HTTPS only, on the same port. HTTP/2 is offered. TLS 1.2 is the minimum version.
-- The files are read once at startup. Restart Beacon to pick up a renewed certificate.
+- Renewed certificates are picked up without a restart; see [Reloading certificates and tokens](#reloading-certificates-and-tokens).
 - To have clients prove who they are with certificates as well, see [Client certificates (mTLS)](#client-certificates-mtls).
 - Without TLS, Beacon logs a warning at startup if it listens on anything other than a loopback address.
 
@@ -372,7 +374,7 @@ tokens_file = "/etc/beacon/tokens.toml"
 - `name` identifies the token in logs and error messages. It is not secret, and must be unique across tokens and certificates.
 - `sha256` is the hex hash printed by `beacon --hash-token`, in either case. Each token must be unique.
 - `permissions` is optional. Leave it out to allow everything; an empty list is rejected.
-- Beacon reads the file once at startup and refuses to start if it is missing, contains an unknown key or an invalid entry, or lists neither tokens nor certificates. Restart Beacon after changing it.
+- Beacon refuses to start if the file is missing, contains an unknown key or an invalid entry, or lists neither tokens nor certificates. Changes take effect on the next [reload](#reloading-certificates-and-tokens), without a restart.
 - A file of hashes is not enough to call Beacon, but keep it readable only by Beacon anyway.
 
 ### Client certificates (mTLS)
@@ -408,7 +410,7 @@ permissions = ["discover"]
 - Each entry sets exactly one of `dns`, compared case-insensitively with the certificate's DNS names, or `uri`, compared exactly with its URI names, such as a SPIFFE ID. Wildcards are not matched, and the subject's common name is ignored. When several entries match one certificate, the first in the file wins.
 - Clients are asked for a certificate but not required to send one, so `/health` and bearer tokens keep working on the same port. A certificate that does not verify against the bundle, or is not issued for client authentication, fails the TLS handshake. One that verifies but no entry names gets `401`, and the log names it so you can add it.
 - A request with an `Authorization` header is judged by its token alone, even if it also presents a certificate.
-- Beacon does not check revocation lists or OCSP. Issue short-lived client certificates, and remove an entry and restart Beacon to lock one out.
+- Beacon does not check revocation lists or OCSP. Issue short-lived client certificates, and remove an entry and [reload](#reloading-certificates-and-tokens) to lock one out.
 
 To try it locally, make a CA, then a server and a client certificate signed by it. This writes everything to `certs/`, which `.gitignore` already excludes:
 
@@ -448,6 +450,24 @@ On Windows, the `curl` that ships with Git and Windows uses Schannel, which reje
 A request without a token or verified client certificate, with a malformed `Authorization` header, with a token Beacon does not accept, or with a certificate no entry names gets `401` with the code `unauthorized` and a `WWW-Authenticate: Bearer realm="beacon"` header. A known caller without the needed permission gets `403` with the code `forbidden`. Unknown paths and wrong methods still answer `404` and `405`, credentials or not.
 
 Refused requests are logged at `warn` level, with the caller's name when it is known (`caller`), or the certificate's names when no entry matched (`certificate_names`), and at `debug` level when no credentials were sent at all. Tokens themselves are never logged. Refusals are also counted in `beacon_auth_failures_total`; see [Metrics](#metrics).
+
+## Reloading certificates and tokens
+
+Beacon reads the TLS certificate and key, the client CA bundle and the tokens file at startup, and can read them again while it runs, so you can renew a certificate or add and revoke tokens without a restart:
+
+- **On a signal.** Send `SIGHUP` to reload at once, for example `kill -HUP <pid>`, `systemctl reload` with `ExecReload=/bin/kill -HUP $MAINPID`, or `docker kill --signal HUP <container>`. Windows has no `SIGHUP`; use the interval there.
+- **On a change.** Set `server.reload_interval`, for example to `"30s"`, and Beacon checks the files that often and reloads when their contents differ. This suits files that something else rotates, such as cert-manager or a Kubernetes Secret mounted as a volume. Unchanged files are not reloaded.
+
+```toml
+[server]
+reload_interval = "30s"
+```
+
+A reload replaces everything at once or nothing. If any file is missing, unreadable or invalid, for example a new certificate whose key has not been written yet, Beacon logs an error and keeps using the files it already has, so a rotation caught halfway never locks clients out. With the interval, the same broken contents are reported once, not on every check, and tried again as soon as they change.
+
+After a successful reload, every new request is checked against the new tokens file, and every new TLS connection gets the new certificate and client CAs. Connections that are already open keep the certificate they were made with until they close. Only the contents of the files are reloaded: changing `tls.cert_file` or any other setting, or turning TLS or authentication on or off, still needs a restart.
+
+Reloads are logged and counted in `beacon_credential_reloads_total`; see [Metrics](#metrics). Alert on its `result="error"` series to catch a rotation that failed.
 
 ## Running in Docker
 
@@ -615,6 +635,7 @@ scrape_configs:
 | `beacon_registry_operations_total` | counter | `operation`, `result` | Calls to the storage backend; `result` is `ok`, `not_found` or `error` |
 | `beacon_registry_operation_duration_seconds` | histogram | `operation` | Time spent in the storage backend |
 | `beacon_auth_failures_total` | counter | `reason` | Requests refused by [authentication](#authentication); `reason` is `missing`, `invalid` or `forbidden`. Only appears once a request has been refused |
+| `beacon_credential_reloads_total` | counter | `result` | Attempts to [reload](#reloading-certificates-and-tokens) the TLS files and tokens file while running; `result` is `ok` or `error`. Only appears after the first attempt |
 | `beacon_build_info` | gauge | `version`, `goversion` | Always `1`; describes the running build |
 
 The standard `go_*` and `process_*` metrics are included too. Labels never contain instance IDs or raw paths, so the number of series stays small however many instances register. Requests to `/metrics` itself are not counted.
@@ -700,7 +721,8 @@ Run `mise tasks` to list them all. CI runs the same tasks on every pull request.
 │   │   ├── memory/          # In-memory Registry backend
 │   │   └── registrytest/    # Contract tests every Registry backend must pass
 │   ├── tlstest/             # Test certificates: self-signed, and a small CA for mTLS
-│   ├── bootstrap/           # Builds the backend, discovery layer and HTTP server and connects them, and loads the TLS certificate
+│   ├── credentials/         # Loads and reloads the TLS files and tokens file, swapping them in all at once
+│   ├── bootstrap/           # Builds the backend, discovery layer, credentials and HTTP server and connects them
 │   └── config/              # Loads and validates the TOML configuration and environment overrides
 ├── deployments/
 │   ├── docker/              # Dockerfile
@@ -747,7 +769,7 @@ Transports only translate requests and errors; every rule lives in `discovery`, 
 - [x] TLS for the HTTP API
 - [x] Authentication with bearer tokens and per-token permissions
 - [x] Client certificates (mTLS) as another way to authenticate
-- [ ] Reload certificates and tokens without a restart
+- [x] Reload certificates and tokens without a restart
 - [ ] gRPC API alongside HTTP
 - [ ] Keep an instance's ID when it registers again, instead of issuing a new one
 - [ ] Client-side caching and load balancing in the Go client

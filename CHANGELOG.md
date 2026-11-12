@@ -39,6 +39,13 @@ Add an entry under **Unreleased** in the same pull request as the change.
   Requires TLS and `auth.enabled`.
 - Refused-request logs name the caller under `caller`, and an unlisted
   certificate's names under `certificate_names`.
+- Reloading the TLS certificate and key, the client CA bundle and the tokens
+  file without a restart: on `SIGHUP`, and every `server.reload_interval`
+  (`BEACON_SERVER_RELOAD_INTERVAL`, off by default) when their contents
+  change. A reload replaces all of them or none, so a missing or invalid file
+  keeps the credentials already in use. New connections and every request
+  after a reload use the new files.
+- `beacon_credential_reloads_total{result}` metric counting reload attempts.
 
 ### Fixed
 

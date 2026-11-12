@@ -146,3 +146,37 @@ func TestNewRejectsUnusableTokensFile(test *testing.T) {
 		test.Errorf("expected a tokens file error, got %v", err)
 	}
 }
+
+func TestReloadedTokensApplyToTheRunningAPI(test *testing.T) {
+	settings := authSettings(test)
+	components := mustNew(test, settings, "v0.0.0-test")
+	handler := components.Server.Handler
+
+	if recorder := getWithToken(handler, "/api/v1/services", serviceToken); recorder.Code != http.StatusOK {
+		test.Fatalf("expected the service token before reloading, got %d", recorder.Code)
+	}
+
+	// Keep only the metrics token: the service token is revoked.
+	scrapeHash, err := auth.HashToken(scrapeToken)
+	if err != nil {
+		test.Fatalf("hash token: %v", err)
+	}
+
+	content := "[[tokens]]\nname = \"prometheus\"\nsha256 = \"" + scrapeHash + "\"\npermissions = [\"metrics\"]\n"
+	if err := os.WriteFile(settings.Auth.TokensFile, []byte(content), 0o600); err != nil {
+		test.Fatalf("rewrite tokens file: %v", err)
+	}
+
+	if err := components.Credentials.Reload(); err != nil {
+		test.Fatalf("reload: %v", err)
+	}
+
+	if recorder := getWithToken(handler, "/api/v1/services", serviceToken); recorder.Code != http.StatusUnauthorized {
+		test.Errorf("expected the revoked token to get 401, got %d", recorder.Code)
+	}
+
+	body := getWithToken(handler, "/metrics", scrapeToken).Body.String()
+	if !strings.Contains(body, `beacon_credential_reloads_total{result="ok"} 1`) {
+		test.Error("expected the reload to be counted in /metrics")
+	}
+}

@@ -32,7 +32,8 @@ type Metrics struct {
 	registryDuration   *prometheus.HistogramVec
 	expiredInstances   prometheus.Counter
 
-	authFailures *prometheus.CounterVec
+	authFailures      *prometheus.CounterVec
+	credentialReloads *prometheus.CounterVec
 }
 
 // New returns Metrics with the Go runtime and process collectors and a
@@ -74,6 +75,11 @@ func New(version string) *Metrics {
 			Name:      "auth_failures_total",
 			Help:      "Requests refused by authentication, by reason (missing, invalid or forbidden).",
 		}, []string{"reason"}),
+		credentialReloads: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "credential_reloads_total",
+			Help:      "Attempts to reload the TLS files and tokens file while running, by result (ok or error).",
+		}, []string{"result"}),
 	}
 
 	buildInfo := prometheus.NewGauge(prometheus.GaugeOpts{
@@ -94,6 +100,7 @@ func New(version string) *Metrics {
 		metrics.registryDuration,
 		metrics.expiredInstances,
 		metrics.authFailures,
+		metrics.credentialReloads,
 	)
 
 	return metrics
@@ -102,6 +109,11 @@ func New(version string) *Metrics {
 // AuthFailed counts one request refused by authentication for reason.
 func (metrics *Metrics) AuthFailed(reason string) {
 	metrics.authFailures.WithLabelValues(reason).Inc()
+}
+
+// CredentialsReloaded counts one attempt to reload credentials, by result.
+func (metrics *Metrics) CredentialsReloaded(result string) {
+	metrics.credentialReloads.WithLabelValues(result).Inc()
 }
 
 // Handler serves every metric in the Prometheus text format.
