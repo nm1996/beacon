@@ -11,6 +11,7 @@ import (
 	"net/http"
 
 	"github.com/nm1996/beacon/internal/api"
+	"github.com/nm1996/beacon/internal/auth"
 	"github.com/nm1996/beacon/internal/config"
 	"github.com/nm1996/beacon/internal/discovery"
 	"github.com/nm1996/beacon/internal/metrics"
@@ -32,14 +33,24 @@ type Components struct {
 // New builds the registry backend chosen by settings.Storage, with metrics
 // around it and the API when settings.Metrics is enabled, the discovery layer on top of it and the
 // HTTP server that serves it, configured by settings. When settings.TLS is
-// enabled it loads the certificate and key, so unreadable or mismatched files
-// fail here, before anything listens. Both the API and the
+// enabled it loads the certificate and key, and when settings.Auth is enabled
+// it loads the tokens file, so unusable files fail here, before anything
+// listens. With auth on, every route but /health, /metrics included, needs a
+// token with the matching permission. Both the API and the
 // server's own internal errors are reported to logger, and version is what
 // GET /health reports.
 func New(settings config.Config, logger *slog.Logger, version string) (*Components, error) {
 	tlsConfig, err := newTLSConfig(settings.TLS)
 	if err != nil {
 		return nil, err
+	}
+
+	var tokens *auth.Tokens
+	if settings.Auth.Enabled {
+		tokens, err = auth.LoadTokens(settings.Auth.TokensFile)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	registry, err := newRegistry(settings.Storage)
@@ -64,13 +75,24 @@ func New(settings config.Config, logger *slog.Logger, version string) (*Componen
 		return nil, fmt.Errorf("build discovery: %w", err)
 	}
 
+	var guard *api.Guard
+	if tokens != nil {
+		var failed func(reason string)
+		if observer != nil {
+			failed = observer.AuthFailed
+		}
+
+		guard = api.NewGuard(tokens, logger, failed)
+	}
+
 	handler := api.NewRouter(service, logger, api.Config{
 		MaxRequestBodyBytes: settings.Server.MaxRequestBodyBytes,
 		Version:             version,
+		Guard:               guard,
 	})
 
 	if observer != nil {
-		handler = withMetrics(handler, observer)
+		handler = withMetrics(handler, observer, guard)
 	}
 
 	return &Components{
@@ -118,12 +140,13 @@ func newRegistry(settings config.StorageConfig) (discovery.Registry, error) {
 }
 
 // withMetrics serves GET /metrics from observer and everything else from
-// api, which it counts and times. /metrics itself is left out of the HTTP
-// metrics so scrapes do not inflate them.
-func withMetrics(api http.Handler, observer *metrics.Metrics) http.Handler {
+// routes, which it counts and times. /metrics itself is left out of the HTTP
+// metrics so scrapes do not inflate them, and needs the metrics permission
+// when guard is not nil.
+func withMetrics(routes http.Handler, observer *metrics.Metrics, guard *api.Guard) http.Handler {
 	mux := http.NewServeMux()
-	mux.Handle("GET /metrics", observer.Handler())
-	mux.Handle("/", observer.InstrumentHTTP(api))
+	mux.Handle("GET /metrics", guard.Require(auth.PermissionMetrics, observer.Handler()))
+	mux.Handle("/", observer.InstrumentHTTP(routes))
 
 	return mux
 }

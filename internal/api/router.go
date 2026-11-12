@@ -7,6 +7,8 @@ package api
 import (
 	"log/slog"
 	"net/http"
+
+	"github.com/nm1996/beacon/internal/auth"
 )
 
 // servicesPath is the collection every versioned service route lives under.
@@ -22,16 +24,19 @@ const servicesPath = "/api/v1/services"
 //	GET    /health                          liveness check, not versioned
 //
 // Requests with an unsupported method get 405 and unknown paths get 404,
-// both in the JSON error format.
+// both in the JSON error format. With config.Guard set, listing needs the
+// discover permission, the other service routes need register, and
+// /health stays open so liveness checks need no token.
 func NewRouter(discovery Discovery, logger *slog.Logger, config Config) http.Handler {
 	handler := NewHandler(discovery, logger, config)
+	guard := config.Guard
 
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("POST "+servicesPath, handler.Register)
-	mux.HandleFunc("GET "+servicesPath, handler.GetServices)
-	mux.HandleFunc("POST "+servicesPath+"/{id}/heartbeat", handler.Heartbeat)
-	mux.HandleFunc("DELETE "+servicesPath+"/{id}", handler.Unregister)
+	mux.Handle("POST "+servicesPath, guard.Require(auth.PermissionRegister, http.HandlerFunc(handler.Register)))
+	mux.Handle("GET "+servicesPath, guard.Require(auth.PermissionDiscover, http.HandlerFunc(handler.GetServices)))
+	mux.Handle("POST "+servicesPath+"/{id}/heartbeat", guard.Require(auth.PermissionRegister, http.HandlerFunc(handler.Heartbeat)))
+	mux.Handle("DELETE "+servicesPath+"/{id}", guard.Require(auth.PermissionRegister, http.HandlerFunc(handler.Unregister)))
 	mux.HandleFunc("GET /health", handler.Health)
 
 	return handler.withJSONErrors(mux)

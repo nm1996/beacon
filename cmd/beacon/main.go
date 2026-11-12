@@ -34,14 +34,26 @@ var version string
 // failure. With --version it prints the build version instead, and with
 // --health-check it asks an already running Beacon for its health, which is
 // what the container health check uses since the image has no shell or curl.
+// With --hash-token it prints the hash of the token on standard input for a
+// tokens file.
 func main() {
 	configPath := flag.String("config", "", "path to a TOML configuration file; BEACON_* environment variables override it, and built-in defaults fill the rest")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	healthCheck := flag.Bool("health-check", false, "ask the Beacon configured by --config whether it is healthy, then exit 0 if it is and 1 if not")
+	hashTokenFlag := flag.Bool("hash-token", false, "read a bearer token from standard input and print its SHA-256 hash for the tokens file, then exit")
 	flag.Parse()
 
 	if *showVersion {
 		fmt.Println(buildVersion())
+		return
+	}
+
+	if *hashTokenFlag {
+		if err := hashToken(os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+
 		return
 	}
 
@@ -130,7 +142,7 @@ func run(settings config.Config, logger *slog.Logger) error {
 		serveErr <- serve(server, listener, servesTLS)
 	}()
 
-	logListening(logger, listener.Addr(), servesTLS, settings.Storage.Backend)
+	logListening(logger, listener.Addr(), servesTLS, settings.Auth.Enabled, settings.Storage.Backend)
 
 	select {
 	case err := <-serveErr:
@@ -169,20 +181,28 @@ func serve(server *http.Server, listener net.Listener, servesTLS bool) error {
 }
 
 // logListening reports that Beacon is serving on address, and warns when it
-// serves plain HTTP to anything beyond this host.
-func logListening(logger *slog.Logger, address net.Addr, servesTLS bool, storage string) {
+// serves plain HTTP to anything beyond this host, more urgently when
+// clients send bearer tokens over it.
+func logListening(logger *slog.Logger, address net.Addr, servesTLS, authEnabled bool, storage string) {
 	logger.Info("beacon listening",
 		slog.String("addr", address.String()),
 		slog.Bool("tls", servesTLS),
+		slog.Bool("auth", authEnabled),
 		slog.String("storage", storage),
 		slog.String("version", buildVersion()),
 	)
 
-	if !servesTLS && !isLoopback(address) {
-		logger.Warn("beacon serves plain HTTP on a non-loopback address; set tls.cert_file and tls.key_file to serve HTTPS",
-			slog.String("addr", address.String()),
-		)
+	if servesTLS || isLoopback(address) {
+		return
 	}
+
+	message := "beacon serves plain HTTP on a non-loopback address; set tls.cert_file and tls.key_file to serve HTTPS"
+	if authEnabled {
+		message = "beacon serves plain HTTP on a non-loopback address, so bearer tokens cross the network unencrypted; " +
+			"set tls.cert_file and tls.key_file to serve HTTPS, unless a TLS proxy sits in front of Beacon"
+	}
+
+	logger.Warn(message, slog.String("addr", address.String()))
 }
 
 // isLoopback reports whether address only accepts connections from this

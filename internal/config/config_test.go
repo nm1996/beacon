@@ -127,6 +127,8 @@ func TestLoadFailures(t *testing.T) {
 			content: "[tls]\nkey_file = \"key.pem\"",
 			wantErr: []string{"tls.cert_file and tls.key_file must be set together"},
 		},
+		{name: "auth without tokens file", content: "[auth]\nenabled = true", wantErr: []string{"auth.tokens_file must be set when auth.enabled is true"}},
+		{name: "auth flag is not a boolean", content: "[auth]\nenabled = \"yes\"", wantErr: []string{"read config"}},
 		{name: "unknown TLS key", content: "[tls]\nca_file = \"ca.pem\"", wantErr: []string{"unknown keys", "tls.ca_file"}},
 		{
 			name:    "several problems at once",

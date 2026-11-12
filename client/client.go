@@ -43,6 +43,7 @@ type Client struct {
 	baseURL    *url.URL
 	httpClient *http.Client
 	logger     *slog.Logger
+	token      string
 }
 
 // Option configures a Client.
@@ -63,6 +64,15 @@ func WithHTTPClient(httpClient *http.Client) Option {
 func WithLogger(logger *slog.Logger) Option {
 	return func(client *Client) {
 		client.logger = logger
+	}
+}
+
+// WithToken makes the client send token as a bearer token on every request,
+// for a Beacon that has authentication turned on. Use an https:// base URL
+// with it, or the token crosses the network in plain text.
+func WithToken(token string) Option {
+	return func(client *Client) {
+		client.token = token
 	}
 }
 
@@ -192,6 +202,10 @@ func (client *Client) do(ctx context.Context, method, path string, query url.Val
 
 	request.Header.Set("User-Agent", userAgent)
 	request.Header.Set("Accept", "application/json")
+
+	if client.token != "" {
+		request.Header.Set("Authorization", "Bearer "+client.token)
+	}
 
 	if body != nil {
 		request.Header.Set("Content-Type", "application/json")

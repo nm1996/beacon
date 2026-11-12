@@ -31,6 +31,8 @@ type Metrics struct {
 	registryOperations *prometheus.CounterVec
 	registryDuration   *prometheus.HistogramVec
 	expiredInstances   prometheus.Counter
+
+	authFailures *prometheus.CounterVec
 }
 
 // New returns Metrics with the Go runtime and process collectors and a
@@ -67,6 +69,11 @@ func New(version string) *Metrics {
 			Name:      "expired_instances_total",
 			Help:      "Instances removed by cleanup because they stopped sending heartbeats.",
 		}),
+		authFailures: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "auth_failures_total",
+			Help:      "Requests refused by authentication, by reason (missing, invalid or forbidden).",
+		}, []string{"reason"}),
 	}
 
 	buildInfo := prometheus.NewGauge(prometheus.GaugeOpts{
@@ -86,9 +93,15 @@ func New(version string) *Metrics {
 		metrics.registryOperations,
 		metrics.registryDuration,
 		metrics.expiredInstances,
+		metrics.authFailures,
 	)
 
 	return metrics
+}
+
+// AuthFailed counts one request refused by authentication for reason.
+func (metrics *Metrics) AuthFailed(reason string) {
+	metrics.authFailures.WithLabelValues(reason).Inc()
 }
 
 // Handler serves every metric in the Prometheus text format.
