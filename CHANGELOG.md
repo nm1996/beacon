@@ -29,6 +29,16 @@ Add an entry under **Unreleased** in the same pull request as the change.
 - `beacon_auth_failures_total{reason}` metric counting refused requests.
 - `client.WithToken`, and `client.ErrUnauthorized` and `client.ErrForbidden`
   for refused requests.
+- Client certificates (mTLS): `tls.client_ca_file`
+  (`BEACON_TLS_CLIENT_CA_FILE`) asks clients for a certificate and verifies
+  any they send against that CA bundle. `[[certificates]]` entries in the
+  tokens file name a certificate by a DNS or URI subject alternative name,
+  such as a SPIFFE ID, and give it the same permissions tokens get. Clients
+  without a certificate can still connect, use `/health` and send a bearer
+  token; a request with an `Authorization` header is judged by its token.
+  Requires TLS and `auth.enabled`.
+- Refused-request logs name the caller under `caller`, and an unlisted
+  certificate's names under `certificate_names`.
 
 ### Fixed
 

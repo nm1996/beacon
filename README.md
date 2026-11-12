@@ -66,6 +66,7 @@ Beacon covers the core of the problem and nothing more: one small binary, no ext
 | ✅ | Prometheus metrics at `/metrics` |
 | ✅ | Optional HTTPS (TLS 1.2+) |
 | ✅ | Optional bearer-token authentication with per-token permissions |
+| ✅ | Optional client certificates (mTLS), with the same permissions |
 
 ## Quick start
 
@@ -258,6 +259,7 @@ A file only needs the keys it changes, and no file is needed at all. [`configs/b
 | `server.max_request_body_bytes` | `BEACON_SERVER_MAX_REQUEST_BODY_BYTES` | `65536` | Largest accepted request body |
 | `tls.cert_file` | `BEACON_TLS_CERT_FILE` | `""` | PEM certificate chain to serve HTTPS with; see [TLS](#tls) |
 | `tls.key_file` | `BEACON_TLS_KEY_FILE` | `""` | PEM private key for `tls.cert_file` |
+| `tls.client_ca_file` | `BEACON_TLS_CLIENT_CA_FILE` | `""` | PEM bundle of CAs whose client certificates Beacon accepts; see [Client certificates (mTLS)](#client-certificates-mtls) |
 | `auth.enabled` | `BEACON_AUTH_ENABLED` | `false` | Require a bearer token on every endpoint except `/health`; see [Authentication](#authentication) |
 | `auth.tokens_file` | `BEACON_AUTH_TOKENS_FILE` | `""` | File listing the accepted tokens. Required when `auth.enabled` is `true` |
 | `registry.service_ttl` | `BEACON_REGISTRY_SERVICE_TTL` | `"30s"` | Time without a heartbeat before an instance is removed |
@@ -293,6 +295,7 @@ key_file = "/etc/beacon/tls/key.pem"
 - Set both or neither. Beacon refuses to start if only one is set, or if the files are missing, unreadable or do not belong together.
 - With TLS on, the API, `/health` and `/metrics` are served over HTTPS only, on the same port. HTTP/2 is offered. TLS 1.2 is the minimum version.
 - The files are read once at startup. Restart Beacon to pick up a renewed certificate.
+- To have clients prove who they are with certificates as well, see [Client certificates (mTLS)](#client-certificates-mtls).
 - Without TLS, Beacon logs a warning at startup if it listens on anything other than a loopback address.
 
 For local testing, make a self-signed certificate valid for `localhost`:
@@ -316,6 +319,8 @@ Beacon accepts every request unless you turn authentication on. With `auth.enabl
 ```http
 Authorization: Bearer <token>
 ```
+
+or, over [TLS](#tls) with `tls.client_ca_file` set, a [client certificate](#client-certificates-mtls). Both kinds of caller are listed in the same file, `auth.tokens_file`, and get the same permissions.
 
 Turn on [TLS](#tls) as well, unless a TLS proxy sits in front of Beacon: tokens sent over plain HTTP can be read by anyone on the network. Beacon logs a warning at startup when tokens would cross the network unencrypted.
 
@@ -364,17 +369,85 @@ tokens_file = "/etc/beacon/tokens.toml"
 | `discover` | `GET /api/v1/services` |
 | `metrics` | `GET /metrics` |
 
-- `name` identifies the token in logs and error messages. It is not secret, and must be unique.
+- `name` identifies the token in logs and error messages. It is not secret, and must be unique across tokens and certificates.
 - `sha256` is the hex hash printed by `beacon --hash-token`, in either case. Each token must be unique.
 - `permissions` is optional. Leave it out to allow everything; an empty list is rejected.
-- Beacon reads the file once at startup and refuses to start if it is missing, contains an unknown key or an invalid entry, or lists no tokens. Restart Beacon after changing it.
+- Beacon reads the file once at startup and refuses to start if it is missing, contains an unknown key or an invalid entry, or lists neither tokens nor certificates. Restart Beacon after changing it.
 - A file of hashes is not enough to call Beacon, but keep it readable only by Beacon anyway.
+
+### Client certificates (mTLS)
+
+Services that already have certificates from your own CA, for example from cert-manager, Vault or a service mesh, can use them instead of tokens. Set `tls.client_ca_file` to the CA bundle, and list each certificate in the tokens file by one of its subject alternative names:
+
+```toml
+# beacon.toml
+[tls]
+cert_file = "/etc/beacon/tls/cert.pem"
+key_file = "/etc/beacon/tls/key.pem"
+client_ca_file = "/etc/beacon/tls/clients-ca.pem"
+
+[auth]
+enabled = true
+tokens_file = "/etc/beacon/tokens.toml"
+```
+
+```toml
+# /etc/beacon/tokens.toml, next to any [[tokens]]
+[[certificates]]
+name = "orders"
+dns = "orders.internal"
+permissions = ["register", "discover"]
+
+[[certificates]]
+name = "payments"
+uri = "spiffe://example.org/ns/prod/sa/payments"
+permissions = ["discover"]
+```
+
+- `tls.client_ca_file` needs TLS (`tls.cert_file` and `tls.key_file`) and `auth.enabled`. Beacon refuses to start without them, or when the bundle holds no PEM certificate, or when the tokens file has no `[[certificates]]`. Entries without `tls.client_ca_file` are only warned about, since they can never match.
+- Each entry sets exactly one of `dns`, compared case-insensitively with the certificate's DNS names, or `uri`, compared exactly with its URI names, such as a SPIFFE ID. Wildcards are not matched, and the subject's common name is ignored. When several entries match one certificate, the first in the file wins.
+- Clients are asked for a certificate but not required to send one, so `/health` and bearer tokens keep working on the same port. A certificate that does not verify against the bundle, or is not issued for client authentication, fails the TLS handshake. One that verifies but no entry names gets `401`, and the log names it so you can add it.
+- A request with an `Authorization` header is judged by its token alone, even if it also presents a certificate.
+- Beacon does not check revocation lists or OCSP. Issue short-lived client certificates, and remove an entry and restart Beacon to lock one out.
+
+To try it locally, make a CA, then a server and a client certificate signed by it. This writes everything to `certs/`, which `.gitignore` already excludes:
+
+```bash
+mkdir -p certs
+
+# The CA
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 30 \
+  -subj "/CN=beacon test CA" -keyout certs/ca-key.pem -out certs/ca.pem
+
+# Beacon's server certificate
+printf 'subjectAltName=DNS:localhost,IP:127.0.0.1\nextendedKeyUsage=serverAuth\n' > certs/server.ext
+openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -subj "/CN=localhost" \
+  -keyout certs/key.pem -out certs/server.csr
+openssl x509 -req -in certs/server.csr -CA certs/ca.pem -CAkey certs/ca-key.pem -days 30 \
+  -extfile certs/server.ext -out certs/cert.pem
+
+# A client certificate for orders.internal
+printf 'subjectAltName=DNS:orders.internal\nextendedKeyUsage=clientAuth\n' > certs/orders.ext
+openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -subj "/CN=orders" \
+  -keyout certs/orders-key.pem -out certs/orders.csr
+openssl x509 -req -in certs/orders.csr -CA certs/ca.pem -CAkey certs/ca-key.pem -days 30 \
+  -extfile certs/orders.ext -out certs/orders.pem
+
+printf '[[certificates]]\nname = "orders"\ndns = "orders.internal"\n' > certs/tokens.toml
+
+BEACON_TLS_CERT_FILE=certs/cert.pem BEACON_TLS_KEY_FILE=certs/key.pem BEACON_TLS_CLIENT_CA_FILE=certs/ca.pem \
+  BEACON_AUTH_ENABLED=true BEACON_AUTH_TOKENS_FILE=certs/tokens.toml go run ./cmd/beacon
+
+curl --cacert certs/ca.pem --cert certs/orders.pem --key certs/orders-key.pem https://localhost:8080/api/v1/services
+```
+
+On Windows, the `curl` that ships with Git and Windows uses Schannel, which rejects certificates from a private CA unless you pass `--ssl-no-revoke`, and only takes client certificates as `.p12` files. `openssl s_client -connect localhost:8080 -CAfile certs/ca.pem -cert certs/orders.pem -key certs/orders-key.pem` works with the PEM files as they are.
 
 ### Responses
 
-A request without a token, with a malformed `Authorization` header or with a token Beacon does not accept gets `401` with the code `unauthorized` and a `WWW-Authenticate: Bearer realm="beacon"` header. A valid token without the needed permission gets `403` with the code `forbidden`. Unknown paths and wrong methods still answer `404` and `405`, token or not.
+A request without a token or verified client certificate, with a malformed `Authorization` header, with a token Beacon does not accept, or with a certificate no entry names gets `401` with the code `unauthorized` and a `WWW-Authenticate: Bearer realm="beacon"` header. A known caller without the needed permission gets `403` with the code `forbidden`. Unknown paths and wrong methods still answer `404` and `405`, credentials or not.
 
-Refused requests are logged at `warn` level, with the token's name when it is known, and at `debug` level when no token was sent at all. Tokens themselves are never logged. They are also counted in `beacon_auth_failures_total`; see [Metrics](#metrics).
+Refused requests are logged at `warn` level, with the caller's name when it is known (`caller`), or the certificate's names when no entry matched (`certificate_names`), and at `debug` level when no credentials were sent at all. Tokens themselves are never logged. Refusals are also counted in `beacon_auth_failures_total`; see [Metrics](#metrics).
 
 ## Running in Docker
 
@@ -500,6 +573,28 @@ beacon, err := client.New("https://beacon:8080", client.WithHTTPClient(&http.Cli
 
 `WithToken` and `WithHTTPClient` can be combined.
 
+To authenticate with a [client certificate](#client-certificates-mtls) instead of a token, load it into the same `tls.Config`:
+
+```go
+certificate, err := tls.LoadX509KeyPair("/etc/orders/tls/cert.pem", "/etc/orders/tls/key.pem")
+if err != nil {
+	return err
+}
+
+beacon, err := client.New("https://beacon:8080", client.WithHTTPClient(&http.Client{
+	Timeout: 10 * time.Second,
+	Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{
+			RootCAs:      roots,
+			Certificates: []tls.Certificate{certificate},
+			MinVersion:   tls.VersionTLS12,
+		},
+	},
+}))
+```
+
+A certificate Beacon does not trust fails during the TLS handshake, so the error is a connection error rather than a `*client.Error`.
+
 ## Metrics
 
 With `metrics.enabled` (the default), Beacon serves Prometheus metrics at `GET /metrics` on the API port. Point Prometheus at it:
@@ -538,7 +633,7 @@ sum(rate(beacon_http_requests_total{route="POST /api/v1/services/{id}/heartbeat"
   / sum(rate(beacon_http_requests_total{route="POST /api/v1/services/{id}/heartbeat"}[5m]))
 ```
 
-With [authentication](#authentication) on, `/metrics` needs a token with the `metrics` permission, like the API needs its own permissions. With [TLS](#tls) on, Prometheus must scrape it with `scheme: https`:
+With [authentication](#authentication) on, `/metrics` needs a token or client certificate with the `metrics` permission, like the API needs its own permissions. With [TLS](#tls) on, Prometheus must scrape it with `scheme: https`:
 
 ```yaml
 scrape_configs:
@@ -550,6 +645,8 @@ scrape_configs:
       - targets: ["beacon:8080"]
 ```
 
+To scrape with a [client certificate](#client-certificates-mtls) instead, replace `authorization` with `tls_config` holding `cert_file` and `key_file`.
+
 Without authentication, `/metrics` is open like the rest of the API. Disable it with `BEACON_METRICS_ENABLED=false` if it must not be reachable.
 
 ## Limitations
@@ -559,7 +656,8 @@ Beacon is deliberately small. Before you depend on it, know that:
 - **State lives in memory.** Restarting Beacon forgets every instance. Services find out on their next heartbeat (`404`) and should register again.
 - **It runs as a single node.** There is no clustering or replication.
 - **Authentication is off by default.** Until you turn on [authentication](#authentication), anyone who can reach the port can register, discover and remove instances. [TLS](#tls) encrypts the traffic but does not decide who may connect.
-- **A token with `register` can affect any instance.** Beacon does not record which token registered an instance, so any such token can send heartbeats for, or unregister, instances that other services registered.
+- **A caller with `register` can affect any instance.** Beacon does not record which token or certificate registered an instance, so any such caller can send heartbeats for, or unregister, instances that other services registered.
+- **Client certificates are not checked for revocation.** Use short-lived certificates.
 
 ## Development
 
@@ -594,14 +692,14 @@ Run `mise tasks` to list them all. CI runs the same tasks on every pull request.
 ├── client/                  # Go client for the HTTP API
 ├── cmd/beacon/              # Entry point: flags, config, logging, signals, cleanup worker and shutdown
 ├── internal/
-│   ├── api/                 # HTTP transport: routes, request decoding, JSON errors, bearer-token checks
-│   ├── auth/                # Tokens file, token hashes and permissions
+│   ├── api/                 # HTTP transport: routes, request decoding, JSON errors, token and client certificate checks
+│   ├── auth/                # Tokens file: token hashes, client certificate names and permissions
 │   ├── discovery/           # Business rules: validation, IDs, TTL, cleanup; the Registry interface
 │   ├── metrics/             # Prometheus metrics around the HTTP handler and any Registry backend
 │   ├── registry/
 │   │   ├── memory/          # In-memory Registry backend
 │   │   └── registrytest/    # Contract tests every Registry backend must pass
-│   ├── tlstest/             # Self-signed certificates for tests
+│   ├── tlstest/             # Test certificates: self-signed, and a small CA for mTLS
 │   ├── bootstrap/           # Builds the backend, discovery layer and HTTP server and connects them, and loads the TLS certificate
 │   └── config/              # Loads and validates the TOML configuration and environment overrides
 ├── deployments/
@@ -648,7 +746,7 @@ Transports only translate requests and errors; every rule lives in `discovery`, 
 
 - [x] TLS for the HTTP API
 - [x] Authentication with bearer tokens and per-token permissions
-- [ ] Client certificates (mTLS) as another way to authenticate
+- [x] Client certificates (mTLS) as another way to authenticate
 - [ ] Reload certificates and tokens without a restart
 - [ ] gRPC API alongside HTTP
 - [ ] Keep an instance's ID when it registers again, instead of issuing a new one

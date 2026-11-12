@@ -127,6 +127,16 @@ func TestLoadFailures(t *testing.T) {
 			content: "[tls]\nkey_file = \"key.pem\"",
 			wantErr: []string{"tls.cert_file and tls.key_file must be set together"},
 		},
+		{
+			name:    "client CA without TLS",
+			content: "[tls]\nclient_ca_file = \"clients.pem\"\n[auth]\nenabled = true\ntokens_file = \"tokens.toml\"",
+			wantErr: []string{"tls.client_ca_file needs tls.cert_file and tls.key_file"},
+		},
+		{
+			name:    "client CA without auth",
+			content: "[tls]\ncert_file = \"cert.pem\"\nkey_file = \"key.pem\"\nclient_ca_file = \"clients.pem\"",
+			wantErr: []string{"tls.client_ca_file needs auth.enabled = true"},
+		},
 		{name: "auth without tokens file", content: "[auth]\nenabled = true", wantErr: []string{"auth.tokens_file must be set when auth.enabled is true"}},
 		{name: "auth flag is not a boolean", content: "[auth]\nenabled = \"yes\"", wantErr: []string{"read config"}},
 		{name: "unknown TLS key", content: "[tls]\nca_file = \"ca.pem\"", wantErr: []string{"unknown keys", "tls.ca_file"}},
@@ -166,6 +176,20 @@ func TestLoadMissingFile(t *testing.T) {
 
 	if !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("expected a file-not-found error, got %v", err)
+	}
+}
+
+func TestClientCAWithTLSAndAuthIsAccepted(test *testing.T) {
+	path := writeConfig(test, "[tls]\ncert_file = \"cert.pem\"\nkey_file = \"key.pem\"\nclient_ca_file = \"clients.pem\"\n"+
+		"[auth]\nenabled = true\ntokens_file = \"tokens.toml\"")
+
+	config, err := Load(path)
+	if err != nil {
+		test.Fatalf("load: %v", err)
+	}
+
+	if config.TLS.ClientCAFile != "clients.pem" {
+		test.Errorf("expected client_ca_file to be read, got %q", config.TLS.ClientCAFile)
 	}
 }
 

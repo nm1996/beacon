@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"crypto/x509"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -11,7 +12,8 @@ import (
 	"github.com/nm1996/beacon/internal/auth"
 )
 
-// fakeTokens accepts the tokens it maps to identities.
+// fakeTokens accepts the tokens it maps to identities, and certificates
+// whose first DNS name it maps, prefixed with "cert:", to an identity.
 type fakeTokens map[string]auth.Identity
 
 func (tokens fakeTokens) Authenticate(token string) (auth.Identity, bool) {
@@ -19,10 +21,22 @@ func (tokens fakeTokens) Authenticate(token string) (auth.Identity, bool) {
 	return identity, ok
 }
 
+func (tokens fakeTokens) AuthenticateCertificate(certificate *x509.Certificate) (auth.Identity, bool) {
+	if len(certificate.DNSNames) == 0 {
+		return auth.Identity{}, false
+	}
+
+	identity, ok := tokens["cert:"+certificate.DNSNames[0]]
+
+	return identity, ok
+}
+
 var testTokens = fakeTokens{
-	"admin-token":   auth.NewIdentity("admin", auth.PermissionDiscover, auth.PermissionRegister, auth.PermissionMetrics),
-	"reader-token":  auth.NewIdentity("reader", auth.PermissionDiscover),
-	"scraper-token": auth.NewIdentity("scraper", auth.PermissionMetrics),
+	"admin-token":          auth.NewIdentity("admin", auth.PermissionDiscover, auth.PermissionRegister, auth.PermissionMetrics),
+	"reader-token":         auth.NewIdentity("reader", auth.PermissionDiscover),
+	"scraper-token":        auth.NewIdentity("scraper", auth.PermissionMetrics),
+	"cert:orders.internal": auth.NewIdentity("orders", auth.PermissionRegister, auth.PermissionDiscover),
+	"cert:reader.internal": auth.NewIdentity("reader-cert", auth.PermissionDiscover),
 }
 
 // guardedRouter returns a router protected by testTokens, the failure
@@ -139,15 +153,15 @@ func TestGuardForbiddenNamesTokenAndPermission(test *testing.T) {
 
 	detail := decodeError(test, recorder)
 	if !strings.Contains(detail.Message, `"reader"`) || !strings.Contains(detail.Message, "register") {
-		test.Errorf("expected the message to name the token and permission, got %q", detail.Message)
+		test.Errorf("expected the message to name the caller and permission, got %q", detail.Message)
 	}
 
 	if got := recorder.Header().Get("WWW-Authenticate"); !strings.Contains(got, `error="insufficient_scope", scope="register"`) {
 		test.Errorf("expected an insufficient_scope challenge, got %q", got)
 	}
 
-	if !strings.Contains(logs.String(), "level=WARN") || !strings.Contains(logs.String(), "token=reader") {
-		test.Errorf("expected a warning naming the token, logs:\n%s", logs.String())
+	if !strings.Contains(logs.String(), "level=WARN") || !strings.Contains(logs.String(), "caller=reader") {
+		test.Errorf("expected a warning naming the caller, logs:\n%s", logs.String())
 	}
 }
 

@@ -6,9 +6,11 @@ package bootstrap
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 
 	"github.com/nm1996/beacon/internal/api"
 	"github.com/nm1996/beacon/internal/auth"
@@ -33,10 +35,11 @@ type Components struct {
 // New builds the registry backend chosen by settings.Storage, with metrics
 // around it and the API when settings.Metrics is enabled, the discovery layer on top of it and the
 // HTTP server that serves it, configured by settings. When settings.TLS is
-// enabled it loads the certificate and key, and when settings.Auth is enabled
-// it loads the tokens file, so unusable files fail here, before anything
-// listens. With auth on, every route but /health, /metrics included, needs a
-// token with the matching permission. Both the API and the
+// enabled it loads the certificate, key and any client CA bundle, and when
+// settings.Auth is enabled it loads the tokens file, so unusable files fail
+// here, before anything listens. With auth on, every route but /health,
+// /metrics included, needs a token or verified client certificate with the
+// matching permission. Both the API and the
 // server's own internal errors are reported to logger, and version is what
 // GET /health reports.
 func New(settings config.Config, logger *slog.Logger, version string) (*Components, error) {
@@ -45,9 +48,9 @@ func New(settings config.Config, logger *slog.Logger, version string) (*Componen
 		return nil, err
 	}
 
-	var tokens *auth.Tokens
+	var identities *auth.Identities
 	if settings.Auth.Enabled {
-		tokens, err = auth.LoadTokens(settings.Auth.TokensFile)
+		identities, err = loadIdentities(settings, logger)
 		if err != nil {
 			return nil, err
 		}
@@ -76,13 +79,13 @@ func New(settings config.Config, logger *slog.Logger, version string) (*Componen
 	}
 
 	var guard *api.Guard
-	if tokens != nil {
+	if identities != nil {
 		var failed func(reason string)
 		if observer != nil {
 			failed = observer.AuthFailed
 		}
 
-		guard = api.NewGuard(tokens, logger, failed)
+		guard = api.NewGuard(identities, logger, failed)
 	}
 
 	handler := api.NewRouter(service, logger, api.Config{
@@ -111,7 +114,10 @@ func New(settings config.Config, logger *slog.Logger, version string) (*Componen
 }
 
 // newTLSConfig loads the certificate and key named by settings, or returns nil
-// when TLS is not enabled.
+// when TLS is not enabled. With a client CA bundle it also asks clients for
+// a certificate and verifies any they send against it. Clients that send
+// none can still connect, so /health stays reachable and bearer tokens keep
+// working; the API's guard decides per route whether a caller is known.
 func newTLSConfig(settings config.TLSConfig) (*tls.Config, error) {
 	if !settings.Enabled() {
 		return nil, nil
@@ -122,10 +128,59 @@ func newTLSConfig(settings config.TLSConfig) (*tls.Config, error) {
 		return nil, fmt.Errorf("load TLS certificate %s and key %s: %w", settings.CertFile, settings.KeyFile, err)
 	}
 
-	return &tls.Config{
+	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{certificate},
 		MinVersion:   tls.VersionTLS12,
-	}, nil
+	}
+
+	if settings.ClientCAFile != "" {
+		pool, err := loadCertificatePool(settings.ClientCAFile)
+		if err != nil {
+			return nil, err
+		}
+
+		tlsConfig.ClientCAs = pool
+		tlsConfig.ClientAuth = tls.VerifyClientCertIfGiven
+	}
+
+	return tlsConfig, nil
+}
+
+// loadCertificatePool reads a PEM bundle of CA certificates.
+func loadCertificatePool(path string) (*x509.CertPool, error) {
+	contents, err := os.ReadFile(path) //nolint:gosec // The path is the operator's own tls.client_ca_file setting.
+	if err != nil {
+		return nil, fmt.Errorf("load TLS client CA file: %w", err)
+	}
+
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(contents) {
+		return nil, fmt.Errorf("load TLS client CA file %s: no PEM certificates found", path)
+	}
+
+	return pool, nil
+}
+
+// loadIdentities loads the tokens file named by settings.Auth. A client CA
+// without any [[certificates]] entries is refused, since every certificate
+// would then be turned away. Entries without a client CA are only warned
+// about: they never match, but may be prepared ahead of turning mTLS on.
+func loadIdentities(settings config.Config, logger *slog.Logger) (*auth.Identities, error) {
+	identities, err := auth.Load(settings.Auth.TokensFile)
+	if err != nil {
+		return nil, err
+	}
+
+	switch {
+	case settings.TLS.ClientCAFile != "" && !identities.HasCertificates():
+		return nil, fmt.Errorf("tls.client_ca_file is set but tokens file %s has no [[certificates]] entries, so no client certificate could be used",
+			settings.Auth.TokensFile)
+	case settings.TLS.ClientCAFile == "" && identities.HasCertificates():
+		logger.Warn("tokens file lists [[certificates]] but tls.client_ca_file is not set, so client certificates are not accepted",
+			slog.String("tokens_file", settings.Auth.TokensFile))
+	}
+
+	return identities, nil
 }
 
 // newRegistry builds the registry backend named by settings.Backend. Adding a
