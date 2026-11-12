@@ -30,6 +30,14 @@ services:
     # environment:
     #   BEACON_TLS_CERT_FILE: /etc/beacon/tls/cert.pem
     #   BEACON_TLS_KEY_FILE: /etc/beacon/tls/key.pem
+    #
+    # To require bearer tokens, mount a tokens file and turn auth on (see
+    # "Authentication" in the README):
+    # volumes:
+    #   - ./tokens.toml:/etc/beacon/tokens.toml:ro
+    # environment:
+    #   BEACON_AUTH_ENABLED: "true"
+    #   BEACON_AUTH_TOKENS_FILE: /etc/beacon/tokens.toml
     read_only: true
     cap_drop:
       - ALL

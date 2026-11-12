@@ -26,6 +26,7 @@ Services register themselves, send heartbeats, and discover each other over a sm
 - [HTTP API](#http-api)
 - [Configuration](#configuration)
 - [TLS](#tls)
+- [Authentication](#authentication)
 - [Running in Docker](#running-in-docker)
 - [Go client](#go-client)
 - [Metrics](#metrics)
@@ -64,6 +65,7 @@ Beacon covers the core of the problem and nothing more: one small binary, no ext
 | ✅ | Container image (amd64, arm64) with a built-in health check, and a Compose example |
 | ✅ | Prometheus metrics at `/metrics` |
 | ✅ | Optional HTTPS (TLS 1.2+) |
+| ✅ | Optional bearer-token authentication with per-token permissions |
 
 ## Quick start
 
@@ -156,6 +158,8 @@ Every error response has the same shape:
 | `400` | `invalid_service` | A registration field breaks a rule, for example a port outside `1`–`65535` |
 | `404` | `service_not_found` | No instance is registered with the given ID |
 | `404` | `not_found` | No endpoint exists at the path |
+| `401` | `unauthorized` | [Authentication](#authentication) is on and the request has no bearer token, a malformed `Authorization` header or a token Beacon does not accept |
+| `403` | `forbidden` | The token is valid but lacks the permission this endpoint needs |
 | `405` | `method_not_allowed` | The endpoint exists but not for this method; the `Allow` header lists the supported one |
 | `500` | `internal_error` | Something unexpected went wrong on the server |
 
@@ -254,6 +258,8 @@ A file only needs the keys it changes, and no file is needed at all. [`configs/b
 | `server.max_request_body_bytes` | `BEACON_SERVER_MAX_REQUEST_BODY_BYTES` | `65536` | Largest accepted request body |
 | `tls.cert_file` | `BEACON_TLS_CERT_FILE` | `""` | PEM certificate chain to serve HTTPS with; see [TLS](#tls) |
 | `tls.key_file` | `BEACON_TLS_KEY_FILE` | `""` | PEM private key for `tls.cert_file` |
+| `auth.enabled` | `BEACON_AUTH_ENABLED` | `false` | Require a bearer token on every endpoint except `/health`; see [Authentication](#authentication) |
+| `auth.tokens_file` | `BEACON_AUTH_TOKENS_FILE` | `""` | File listing the accepted tokens. Required when `auth.enabled` is `true` |
 | `registry.service_ttl` | `BEACON_REGISTRY_SERVICE_TTL` | `"30s"` | Time without a heartbeat before an instance is removed |
 | `registry.cleanup_interval` | `BEACON_REGISTRY_CLEANUP_INTERVAL` | `"5s"` | How often stale instances are removed |
 | `storage.backend` | `BEACON_STORAGE_BACKEND` | `"memory"` | Where instances are kept. Only `memory` exists today |
@@ -303,6 +309,73 @@ curl --cacert certs/cert.pem https://localhost:8080/health
 
 In production, use a certificate from your own CA or a public one, issued for the name clients use to reach Beacon.
 
+## Authentication
+
+Beacon accepts every request unless you turn authentication on. With `auth.enabled`, every endpoint except `GET /health` needs a bearer token:
+
+```http
+Authorization: Bearer <token>
+```
+
+Turn on [TLS](#tls) as well, unless a TLS proxy sits in front of Beacon: tokens sent over plain HTTP can be read by anyone on the network. Beacon logs a warning at startup when tokens would cross the network unencrypted.
+
+### Creating tokens
+
+A token is any string of at least 16 printable ASCII characters without spaces. Generate a random one, then let Beacon hash it:
+
+```bash
+TOKEN=$(openssl rand -hex 32)
+printf '%s' "$TOKEN" | beacon --hash-token
+# 3f5c...e1a9
+```
+
+`beacon --hash-token` reads the token from standard input, so it stays out of your shell history and the process list, and prints its SHA-256 hash. Give the token to the service that will use it, and put only the hash in the tokens file.
+
+### The tokens file
+
+```toml
+# /etc/beacon/tokens.toml
+[[tokens]]
+name = "orders"
+sha256 = "3f5c...e1a9"
+permissions = ["register", "discover"]
+
+[[tokens]]
+name = "prometheus"
+sha256 = "9b20...47d0"
+permissions = ["metrics"]
+
+[[tokens]]
+name = "admin"
+sha256 = "c71e...0b3f"
+# No permissions line: this token may do everything.
+```
+
+```toml
+# beacon.toml
+[auth]
+enabled = true
+tokens_file = "/etc/beacon/tokens.toml"
+```
+
+| Permission | Allows |
+|---|---|
+| `register` | `POST /api/v1/services`, `POST /api/v1/services/{id}/heartbeat`, `DELETE /api/v1/services/{id}` |
+| `discover` | `GET /api/v1/services` |
+| `metrics` | `GET /metrics` |
+
+- `name` identifies the token in logs and error messages. It is not secret, and must be unique.
+- `sha256` is the hex hash printed by `beacon --hash-token`, in either case. Each token must be unique.
+- `permissions` is optional. Leave it out to allow everything; an empty list is rejected.
+- Beacon reads the file once at startup and refuses to start if it is missing, contains an unknown key or an invalid entry, or lists no tokens. Restart Beacon after changing it.
+- A file of hashes is not enough to call Beacon, but keep it readable only by Beacon anyway.
+
+### Responses
+
+A request without a token, with a malformed `Authorization` header or with a token Beacon does not accept gets `401` with the code `unauthorized` and a `WWW-Authenticate: Bearer realm="beacon"` header. A valid token without the needed permission gets `403` with the code `forbidden`. Unknown paths and wrong methods still answer `404` and `405`, token or not.
+
+Refused requests are logged at `warn` level, with the token's name when it is known, and at `debug` level when no token was sent at all. Tokens themselves are never logged. They are also counted in `beacon_auth_failures_total`; see [Metrics](#metrics).
+
 ## Running in Docker
 
 Release images are published to the GitHub Container Registry for `linux/amd64` and `linux/arm64`:
@@ -338,6 +411,18 @@ docker run --rm -p 8080:8080 \
   -e BEACON_TLS_KEY_FILE=/etc/beacon/tls/key.pem \
   ghcr.io/nm1996/beacon:0.1
 ```
+
+To turn on [authentication](#authentication), mount the tokens file the same way:
+
+```bash
+docker run --rm -p 8080:8080 \
+  -v "$PWD/tokens.toml:/etc/beacon/tokens.toml:ro" \
+  -e BEACON_AUTH_ENABLED=true \
+  -e BEACON_AUTH_TOKENS_FILE=/etc/beacon/tokens.toml \
+  ghcr.io/nm1996/beacon:0.1
+```
+
+The image's health check keeps working, since `/health` needs no token.
 
 To build and run locally with Compose, which also drops all capabilities and uses a read-only filesystem:
 
@@ -382,7 +467,15 @@ err = beacon.Heartbeat(ctx, registered.ID)
 err = beacon.Unregister(ctx, registered.ID)
 ```
 
-Errors from Beacon are `*client.Error` values carrying the status and Beacon's error code, and they match `client.ErrNotFound` and `client.ErrInvalid` with `errors.Is`. `client.WithHTTPClient` sets a custom `http.Client`; by default every request times out after 10 seconds.
+Errors from Beacon are `*client.Error` values carrying the status and Beacon's error code, and they match `client.ErrNotFound` and `client.ErrInvalid` with `errors.Is`. `client.WithHTTPClient` sets a custom `http.Client`; by default every request times out after 10 seconds. `Register` is never retried, because repeating it would create a second instance.
+
+When Beacon has [authentication](#authentication) on, give the client its token. Read it from a file or secret store rather than writing it into the code:
+
+```go
+beacon, err := client.New("https://beacon:8080", client.WithToken(os.Getenv("BEACON_TOKEN")))
+```
+
+The client then sends `Authorization: Bearer <token>` on every request. Errors for refused requests match `client.ErrUnauthorized` (`401`) and `client.ErrForbidden` (`403`) with `errors.Is`, including a `401` or `403` from a proxy in front of Beacon. A `Lease` whose heartbeats are refused keeps retrying with backoff and logs each failure; it never registers again because of them.
 
 For a Beacon served over [TLS](#tls), use an `https://` URL. If its certificate comes from a private CA, trust that CA through `WithHTTPClient`:
 
@@ -403,7 +496,9 @@ beacon, err := client.New("https://beacon:8080", client.WithHTTPClient(&http.Cli
 		TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12},
 	},
 }))
-``` `Register` is never retried, because repeating it would create a second instance.
+```
+
+`WithToken` and `WithHTTPClient` can be combined.
 
 ## Metrics
 
@@ -424,6 +519,7 @@ scrape_configs:
 | `beacon_expired_instances_total` | counter | | Instances removed because they stopped sending heartbeats |
 | `beacon_registry_operations_total` | counter | `operation`, `result` | Calls to the storage backend; `result` is `ok`, `not_found` or `error` |
 | `beacon_registry_operation_duration_seconds` | histogram | `operation` | Time spent in the storage backend |
+| `beacon_auth_failures_total` | counter | `reason` | Requests refused by [authentication](#authentication); `reason` is `missing`, `invalid` or `forbidden`. Only appears once a request has been refused |
 | `beacon_build_info` | gauge | `version`, `goversion` | Always `1`; describes the running build |
 
 The standard `go_*` and `process_*` metrics are included too. Labels never contain instance IDs or raw paths, so the number of series stays small however many instances register. Requests to `/metrics` itself are not counted.
@@ -442,7 +538,19 @@ sum(rate(beacon_http_requests_total{route="POST /api/v1/services/{id}/heartbeat"
   / sum(rate(beacon_http_requests_total{route="POST /api/v1/services/{id}/heartbeat"}[5m]))
 ```
 
-`/metrics` has no authentication, like the rest of the API. With [TLS](#tls) on, Prometheus must scrape it with `scheme: https`. Disable it with `BEACON_METRICS_ENABLED=false` if it must not be reachable.
+With [authentication](#authentication) on, `/metrics` needs a token with the `metrics` permission, like the API needs its own permissions. With [TLS](#tls) on, Prometheus must scrape it with `scheme: https`:
+
+```yaml
+scrape_configs:
+  - job_name: beacon
+    scheme: https
+    authorization:
+      credentials_file: /etc/prometheus/beacon-token
+    static_configs:
+      - targets: ["beacon:8080"]
+```
+
+Without authentication, `/metrics` is open like the rest of the API. Disable it with `BEACON_METRICS_ENABLED=false` if it must not be reachable.
 
 ## Limitations
 
@@ -450,7 +558,8 @@ Beacon is deliberately small. Before you depend on it, know that:
 
 - **State lives in memory.** Restarting Beacon forgets every instance. Services find out on their next heartbeat (`404`) and should register again.
 - **It runs as a single node.** There is no clustering or replication.
-- **There is no authentication.** Anyone who can reach the port can register, discover and remove instances. [TLS](#tls) encrypts the traffic but does not decide who may connect, so run Beacon on a trusted network only.
+- **Authentication is off by default.** Until you turn on [authentication](#authentication), anyone who can reach the port can register, discover and remove instances. [TLS](#tls) encrypts the traffic but does not decide who may connect.
+- **A token with `register` can affect any instance.** Beacon does not record which token registered an instance, so any such token can send heartbeats for, or unregister, instances that other services registered.
 
 ## Development
 
@@ -485,7 +594,8 @@ Run `mise tasks` to list them all. CI runs the same tasks on every pull request.
 ├── client/                  # Go client for the HTTP API
 ├── cmd/beacon/              # Entry point: flags, config, logging, signals, cleanup worker and shutdown
 ├── internal/
-│   ├── api/                 # HTTP transport: routes, request decoding, JSON errors
+│   ├── api/                 # HTTP transport: routes, request decoding, JSON errors, bearer-token checks
+│   ├── auth/                # Tokens file, token hashes and permissions
 │   ├── discovery/           # Business rules: validation, IDs, TTL, cleanup; the Registry interface
 │   ├── metrics/             # Prometheus metrics around the HTTP handler and any Registry backend
 │   ├── registry/
@@ -537,7 +647,9 @@ Transports only translate requests and errors; every rule lives in `discovery`, 
 **After v0.1.0**
 
 - [x] TLS for the HTTP API
-- [ ] Authentication with bearer tokens, and optionally client certificates (mTLS)
+- [x] Authentication with bearer tokens and per-token permissions
+- [ ] Client certificates (mTLS) as another way to authenticate
+- [ ] Reload certificates and tokens without a restart
 - [ ] gRPC API alongside HTTP
 - [ ] Keep an instance's ID when it registers again, instead of issuing a new one
 - [ ] Client-side caching and load balancing in the Go client

@@ -27,6 +27,8 @@ func environmentVariables(config *Config) []environmentVariable {
 		{name: "BEACON_SERVER_MAX_REQUEST_BODY_BYTES", apply: setInt64(&config.Server.MaxRequestBodyBytes)},
 		{name: "BEACON_TLS_CERT_FILE", apply: setString(&config.TLS.CertFile)},
 		{name: "BEACON_TLS_KEY_FILE", apply: setString(&config.TLS.KeyFile)},
+		{name: "BEACON_AUTH_ENABLED", apply: setBool(&config.Auth.Enabled)},
+		{name: "BEACON_AUTH_TOKENS_FILE", apply: setString(&config.Auth.TokensFile)},
 		{name: "BEACON_REGISTRY_SERVICE_TTL", apply: setDuration(&config.Registry.ServiceTTL)},
 		{name: "BEACON_REGISTRY_CLEANUP_INTERVAL", apply: setDuration(&config.Registry.CleanupInterval)},
 		{name: "BEACON_STORAGE_BACKEND", apply: setString(&config.Storage.Backend)},

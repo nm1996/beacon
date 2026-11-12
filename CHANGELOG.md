@@ -17,6 +17,23 @@ Add an entry under **Unreleased** in the same pull request as the change.
   set or the files cannot be loaded. Plain HTTP stays the default.
 - `beacon --health-check` uses HTTPS when TLS is configured.
 - A startup warning when Beacon serves plain HTTP on a non-loopback address.
+- Bearer-token authentication: with `auth.enabled` and `auth.tokens_file`
+  (`BEACON_AUTH_ENABLED`, `BEACON_AUTH_TOKENS_FILE`), every endpoint except
+  `GET /health` needs `Authorization: Bearer <token>`. The tokens file lists
+  each token's name, SHA-256 hash and optional permissions (`register`,
+  `discover`, `metrics`); a token without a permission list may do
+  everything. Refused requests get `401 unauthorized` or `403 forbidden`.
+  Authentication is off by default.
+- `beacon --hash-token`, which reads a token from standard input and prints
+  the hash for the tokens file.
+- `beacon_auth_failures_total{reason}` metric counting refused requests.
+- `client.WithToken`, and `client.ErrUnauthorized` and `client.ErrForbidden`
+  for refused requests.
+
+### Fixed
+
+- A sentence in the README's Go client section that rendered after a code
+  block's closing fence.
 
 ## [0.1.0] - 2026-11-11
 

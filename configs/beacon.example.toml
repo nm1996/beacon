@@ -45,6 +45,17 @@ max_request_body_bytes = 65536
 cert_file = ""
 key_file = ""
 
+[auth]
+# Require a bearer token on every endpoint except /health. Clients send it as
+# "Authorization: Bearer <token>". Turn on TLS as well, or tokens cross the
+# network in plain text.
+enabled = false
+
+# File listing the accepted tokens by their SHA-256 hash, and what each token
+# may do. Required when enabled is true. See "Authentication" in the README
+# for its format and for "beacon --hash-token", which computes the hashes.
+tokens_file = ""
+
 [registry]
 # A service instance is considered stale after this period without a heartbeat.
 service_ttl = "30s"

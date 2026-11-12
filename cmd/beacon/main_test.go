@@ -143,16 +143,21 @@ func TestServeUsesPlainHTTPByDefault(test *testing.T) {
 
 func TestLogListeningWarnsAboutPlainHTTPBeyondLoopback(test *testing.T) {
 	cases := []struct {
-		name      string
-		address   string
-		servesTLS bool
-		wantWarn  bool
+		name            string
+		address         string
+		servesTLS       bool
+		authEnabled     bool
+		wantWarn        bool
+		wantTokenNotice bool
 	}{
 		{name: "plain on all IPv4 interfaces", address: "0.0.0.0", wantWarn: true},
 		{name: "plain on all IPv6 interfaces", address: "::", wantWarn: true},
 		{name: "plain on a private address", address: "10.0.0.5", wantWarn: true},
 		{name: "plain on loopback", address: "127.0.0.1"},
 		{name: "TLS on all interfaces", address: "0.0.0.0", servesTLS: true},
+		{name: "plain with auth on all interfaces", address: "0.0.0.0", authEnabled: true, wantWarn: true, wantTokenNotice: true},
+		{name: "TLS with auth on all interfaces", address: "0.0.0.0", servesTLS: true, authEnabled: true},
+		{name: "plain with auth on loopback", address: "127.0.0.1", authEnabled: true},
 	}
 
 	for _, testCase := range cases {
@@ -161,7 +166,7 @@ func TestLogListeningWarnsAboutPlainHTTPBeyondLoopback(test *testing.T) {
 			logger := slog.New(slog.NewTextHandler(&logs, nil))
 			address := &net.TCPAddr{IP: net.ParseIP(testCase.address), Port: 8080}
 
-			logListening(logger, address, testCase.servesTLS, config.StorageMemory)
+			logListening(logger, address, testCase.servesTLS, testCase.authEnabled, config.StorageMemory)
 
 			if !strings.Contains(logs.String(), "beacon listening") {
 				test.Errorf("expected the listening message, logs:\n%s", logs.String())
@@ -169,6 +174,10 @@ func TestLogListeningWarnsAboutPlainHTTPBeyondLoopback(test *testing.T) {
 
 			if warned := strings.Contains(logs.String(), "level=WARN"); warned != testCase.wantWarn {
 				test.Errorf("expected warning %t, got %t, logs:\n%s", testCase.wantWarn, warned, logs.String())
+			}
+
+			if notice := strings.Contains(logs.String(), "bearer tokens cross the network unencrypted"); notice != testCase.wantTokenNotice {
+				test.Errorf("expected the token warning %t, got %t, logs:\n%s", testCase.wantTokenNotice, notice, logs.String())
 			}
 		})
 	}

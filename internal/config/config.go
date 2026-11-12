@@ -24,6 +24,7 @@ import (
 type Config struct {
 	Server   ServerConfig   `toml:"server"`
 	TLS      TLSConfig      `toml:"tls"`
+	Auth     AuthConfig     `toml:"auth"`
 	Registry RegistryConfig `toml:"registry"`
 	Storage  StorageConfig  `toml:"storage"`
 	Metrics  MetricsConfig  `toml:"metrics"`
@@ -61,6 +62,16 @@ type TLSConfig struct {
 // files are set whenever either one is.
 func (tls TLSConfig) Enabled() bool {
 	return tls.CertFile != "" && tls.KeyFile != ""
+}
+
+// AuthConfig controls bearer-token authentication.
+type AuthConfig struct {
+	// Enabled requires a valid bearer token on every endpoint except
+	// /health.
+	Enabled bool `toml:"enabled"`
+	// TokensFile lists the accepted tokens, by SHA-256 hash, and what each
+	// may do. It is required when Enabled is set.
+	TokensFile string `toml:"tokens_file"`
 }
 
 // RegistryConfig controls how long instances live without heartbeats.
@@ -197,6 +208,9 @@ func (config Config) Validate() error {
 	tls := config.TLS
 	check((tls.CertFile == "") == (tls.KeyFile == ""),
 		"tls.cert_file and tls.key_file must be set together, got cert_file %q and key_file %q", tls.CertFile, tls.KeyFile)
+
+	check(!config.Auth.Enabled || config.Auth.TokensFile != "",
+		"auth.tokens_file must be set when auth.enabled is true")
 
 	registry := config.Registry
 	// Clients are told the TTL in whole seconds when they register.

@@ -28,6 +28,9 @@ type Config struct {
 	MaxRequestBodyBytes int64
 	// Version is the running build's version, reported by GET /health.
 	Version string
+	// Guard protects every route except GET /health. Nil turns
+	// authentication off.
+	Guard *Guard
 }
 
 // Handler serves the registry API endpoints. Every method is an
@@ -122,12 +125,18 @@ func (handler *Handler) Health(writer http.ResponseWriter, _ *http.Request) {
 
 // writeJSON sends data as a JSON body with the given status code.
 func (handler *Handler) writeJSON(writer http.ResponseWriter, status int, data any) {
+	writeJSON(handler.logger, writer, status, data)
+}
+
+// writeJSON sends data as a JSON body with the given status code, logging
+// to logger if encoding fails.
+func writeJSON(logger *slog.Logger, writer http.ResponseWriter, status int, data any) {
 	writer.Header().Set("Content-Type", "application/json")
 	writeStatus(writer, status)
 
 	// The status line is already sent, so an encoding failure can only be logged.
 	if err := json.NewEncoder(writer).Encode(data); err != nil {
-		handler.logger.Error("write JSON response", slog.Any("error", err))
+		logger.Error("write JSON response", slog.Any("error", err))
 	}
 }
 

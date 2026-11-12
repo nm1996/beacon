@@ -3,6 +3,7 @@ package client
 import (
 	"errors"
 	"fmt"
+	"net/http"
 )
 
 var (
@@ -13,6 +14,14 @@ var (
 	// ErrInvalid matches errors for a request Beacon rejected as invalid,
 	// such as a registration with a port out of range.
 	ErrInvalid = errors.New("beacon: invalid request")
+
+	// ErrUnauthorized matches errors for a request Beacon refused because it
+	// carried no bearer token or one Beacon does not accept. See WithToken.
+	ErrUnauthorized = errors.New("beacon: unauthorized")
+
+	// ErrForbidden matches errors for a request whose token Beacon accepted
+	// but which lacks the permission the request needs.
+	ErrForbidden = errors.New("beacon: forbidden")
 )
 
 // Error is a response Beacon answered with an unexpected status. Code holds
@@ -34,13 +43,18 @@ func (apiError *Error) Error() string {
 }
 
 // Is lets errors.Is match an *Error against ErrNotFound and ErrInvalid by
-// its error code.
+// its error code, and against ErrUnauthorized and ErrForbidden by its status
+// code, so a 401 or 403 from a proxy in front of Beacon matches too.
 func (apiError *Error) Is(target error) bool {
 	switch target {
 	case ErrNotFound:
 		return apiError.Code == "service_not_found"
 	case ErrInvalid:
 		return apiError.Code == "invalid_service" || apiError.Code == "invalid_request_body"
+	case ErrUnauthorized:
+		return apiError.StatusCode == http.StatusUnauthorized
+	case ErrForbidden:
+		return apiError.StatusCode == http.StatusForbidden
 	default:
 		return false
 	}
