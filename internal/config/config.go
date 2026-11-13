@@ -245,8 +245,11 @@ func (config Config) Validate() error {
 		"auth.tokens_file must be set when auth.enabled is true")
 
 	registry := config.Registry
-	// Clients are told the TTL in whole seconds when they register.
+	// Clients are told the TTL as ttl_seconds when they register, so it must
+	// be a whole number of seconds for that to be exact.
 	check(registry.ServiceTTL >= time.Second, "registry.service_ttl must be at least 1s, got %s", registry.ServiceTTL)
+	check(registry.ServiceTTL%time.Second == 0,
+		"registry.service_ttl must be a whole number of seconds, such as \"30s\" or \"1m\", got %s", registry.ServiceTTL)
 	check(registry.CleanupInterval > 0, "registry.cleanup_interval must be positive, got %s", registry.CleanupInterval)
 	check(registry.MaxInstances > 0, "registry.max_instances must be positive, got %d", registry.MaxInstances)
 	// A stale instance stays visible for up to TTL plus one interval, so an

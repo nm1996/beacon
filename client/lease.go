@@ -37,8 +37,11 @@ type Lease struct {
 	stop context.CancelFunc
 	done chan struct{}
 
-	closeOnce sync.Once
-	closeErr  error
+	// closeMu serializes the unregister step of concurrent Close calls.
+	closeMu sync.Mutex
+	// unregistered is set once Close has removed the instance, or found it
+	// already gone, so later calls do not send another request.
+	unregistered bool
 }
 
 // Announce registers registration and returns a Lease that keeps it alive
@@ -79,29 +82,40 @@ func (lease *Lease) ID() string {
 }
 
 // Close stops the heartbeats, waits for the background goroutine to exit
-// and unregisters the instance. Once the goroutine has exited, nothing is
-// sent in the background any more. Close returns ctx's error if ctx ends
-// first, in which case the instance is left to expire.
+// and unregisters the instance. The first call stops the heartbeats for
+// good; once the goroutine has exited, nothing is sent in the background
+// any more.
 //
-// Calling Close again returns the first call's result.
+// Close returns ctx's error if ctx ends before the goroutine has exited,
+// and the unregister error if Beacon cannot be reached. Either way Close
+// may be called again, with a new ctx, to finish the job; if it never is,
+// the instance expires after its TTL. Once the instance is unregistered,
+// further calls return nil without sending anything.
 func (lease *Lease) Close(ctx context.Context) error {
-	lease.closeOnce.Do(func() {
-		lease.stop()
+	// Cancelling is idempotent, so every call may do it.
+	lease.stop()
 
-		select {
-		case <-lease.done:
-		case <-ctx.Done():
-			lease.closeErr = ctx.Err()
-			return
-		}
+	select {
+	case <-lease.done:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 
-		err := lease.client.Unregister(ctx, lease.ID())
-		if err != nil && !errors.Is(err, ErrNotFound) {
-			lease.closeErr = err
-		}
-	})
+	lease.closeMu.Lock()
+	defer lease.closeMu.Unlock()
 
-	return lease.closeErr
+	if lease.unregistered {
+		return nil
+	}
+
+	err := lease.client.Unregister(ctx, lease.ID())
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+
+	lease.unregistered = true
+
+	return nil
 }
 
 // run sends heartbeats until ctx is cancelled.

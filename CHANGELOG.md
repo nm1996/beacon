@@ -80,6 +80,14 @@ Add an entry under **Unreleased** in the same pull request as the change.
   instance are counted as `result="not_owned"` in
   `beacon_registry_operations_total`.
 
+- `registry.service_ttl` must now be a whole number of seconds. Clients are
+  told it as `ttl_seconds`, so a TTL such as `1.5s` used to reach them as
+  `1`.
+- `Lease.Close` can be retried. A call whose context ended, or that could not
+  reach Beacon, used to be final; now the heartbeats stop on the first call
+  and a later call with a new context finishes unregistering. Once
+  unregistered, further calls return `nil`.
+
 ### Fixed
 
 - `beacon_instances` carried a `service` label taken from client-chosen
