@@ -111,7 +111,7 @@ At minimum, run the checks relevant to your change. Common Go checks include:
 mise run check
 ```
 
-This formats the code and runs `go vet`, `golangci-lint`, the tests with the race detector and `govulncheck`. CI runs the same checks on every pull request.
+This checks formatting and runs `go vet`, `golangci-lint`, the tests with the race detector and `govulncheck`. It never changes files; run `mise run fmt` to fix formatting. CI runs the same checks on every pull request.
 
 Do not report checks as passing unless they were actually executed. If a check cannot be run, explain why.
 

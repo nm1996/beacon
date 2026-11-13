@@ -102,8 +102,8 @@ type identitiesFile struct {
 }
 
 // tokenEntry is one [[tokens]] table. Permissions is a pointer so that a
-// missing list, meaning every permission, can be told apart from an empty
-// one, which is rejected.
+// missing list, meaning defaultPermissions (everything except manage), can
+// be told apart from an empty one, which is rejected.
 type tokenEntry struct {
 	Name        string    `toml:"name"`
 	SHA256      string    `toml:"sha256"`
