@@ -23,6 +23,10 @@ type Config struct {
 	// MaxAddressLength is the longest address Register accepts, at most
 	// MaxLengthLimit. Zero means DefaultMaxAddressLength.
 	MaxAddressLength int
+	// MaxInstances is the most instances the registry may hold at once.
+	// Registrations beyond it get ErrRegistryFull. It bounds memory use,
+	// response sizes and metric work however clients behave.
+	MaxInstances int
 }
 
 // validate reports the first setting that is out of range.
@@ -41,6 +45,10 @@ func (config Config) validate() error {
 
 	if config.MaxAddressLength < 0 || config.MaxAddressLength > MaxLengthLimit {
 		return fmt.Errorf("max address length must be between 1 and %d, or 0 for the default", MaxLengthLimit)
+	}
+
+	if config.MaxInstances <= 0 {
+		return errors.New("maximum number of instances must be positive")
 	}
 
 	return nil
@@ -108,7 +116,7 @@ func (service *Service) Register(ctx context.Context, registration Registration,
 		LastHeartbeat: now,
 	}
 
-	if err := service.registry.Create(ctx, instance); err != nil {
+	if err := service.registry.Create(ctx, instance, service.config.MaxInstances); err != nil {
 		return Instance{}, fmt.Errorf("store instance: %w", err)
 	}
 

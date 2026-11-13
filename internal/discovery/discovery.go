@@ -25,6 +25,11 @@ var (
 	// ErrInstanceNotOwned reports that the caller may not change an instance
 	// another caller registered.
 	ErrInstanceNotOwned = errors.New("instance registered by another caller")
+
+	// ErrRegistryFull reports that a registration was refused because the
+	// registry already holds the configured maximum number of instances.
+	// Registry implementations return it, unwrapped or wrapped, from Create.
+	ErrRegistryFull = errors.New("registry is full")
 )
 
 // Caller is who asks to change an instance. Transports build it from
@@ -82,9 +87,12 @@ type Instance struct {
 // and expiry policy are decided by Service, so every backend behaves the
 // same. Implementations must be safe for concurrent use.
 type Registry interface {
-	// Create stores instance under instance.ID. It fails if an instance with
-	// that ID already exists.
-	Create(ctx context.Context, instance Instance) error
+	// Create stores instance under instance.ID unless the registry already
+	// holds limit instances, in which case it returns ErrRegistryFull. The
+	// check and the insert are one operation, so concurrent calls can never
+	// take the registry past limit. It fails if an instance with that ID
+	// already exists.
+	Create(ctx context.Context, instance Instance, limit int) error
 	// Get returns a copy of the instance with id. It returns
 	// ErrInstanceNotFound if there is none.
 	Get(ctx context.Context, id string) (Instance, error)

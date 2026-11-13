@@ -24,6 +24,7 @@ func TestLoadAppliesEveryEnvironmentVariable(test *testing.T) {
 	test.Setenv("BEACON_REGISTRY_CLEANUP_INTERVAL", "500ms")
 	test.Setenv("BEACON_REGISTRY_MAX_NAME_LENGTH", "100")
 	test.Setenv("BEACON_REGISTRY_MAX_ADDRESS_LENGTH", "120")
+	test.Setenv("BEACON_REGISTRY_MAX_INSTANCES", "250")
 	test.Setenv("BEACON_STORAGE_BACKEND", "memory")
 	test.Setenv("BEACON_METRICS_ENABLED", "false")
 	test.Setenv("BEACON_LOGGING_LEVEL", "debug")
@@ -59,6 +60,7 @@ func TestLoadAppliesEveryEnvironmentVariable(test *testing.T) {
 			CleanupInterval:  500 * time.Millisecond,
 			MaxNameLength:    100,
 			MaxAddressLength: 120,
+			MaxInstances:     250,
 		},
 		Storage: StorageConfig{
 			Backend: StorageMemory,
@@ -127,6 +129,11 @@ func TestLoadEnvironmentFailures(test *testing.T) {
 			name:      "empty port",
 			variables: map[string]string{"BEACON_SERVER_PORT": ""},
 			wantErr:   []string{"BEACON_SERVER_PORT must be an integer"},
+		},
+		{
+			name:      "max instances is not an integer",
+			variables: map[string]string{"BEACON_REGISTRY_MAX_INSTANCES": "lots"},
+			wantErr:   []string{"BEACON_REGISTRY_MAX_INSTANCES must be an integer"},
 		},
 		{
 			name:      "body limit is not an integer",

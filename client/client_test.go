@@ -279,3 +279,32 @@ func TestNilOptionsKeepDefaults(t *testing.T) {
 		t.Fatalf("health: %v", err)
 	}
 }
+
+func TestRegisterOnFullRegistryMatchesErrQuotaExceeded(t *testing.T) {
+	settings := config.Default()
+	settings.Registry.MaxInstances = 1
+
+	components, err := bootstrap.New(settings, slog.New(slog.DiscardHandler), "v9.9.9")
+	if err != nil {
+		t.Fatalf("build server: %v", err)
+	}
+
+	server := httptest.NewServer(components.Server.Handler)
+	defer server.Close()
+
+	beacon := mustNew(t, server.URL)
+
+	if _, err := beacon.Register(t.Context(), orders); err != nil {
+		t.Fatalf("first register: %v", err)
+	}
+
+	_, err = beacon.Register(t.Context(), orders)
+
+	if !errors.Is(err, client.ErrQuotaExceeded) {
+		t.Fatalf("expected ErrQuotaExceeded, got %v", err)
+	}
+
+	if errors.Is(err, client.ErrInvalid) || errors.Is(err, client.ErrNotFound) {
+		t.Error("a full registry must not look like a bad request or a missing instance")
+	}
+}

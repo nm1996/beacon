@@ -32,7 +32,7 @@ var discard = slog.New(slog.DiscardHandler)
 func newDiscovery(t *testing.T, ttl time.Duration) *discovery.Service {
 	t.Helper()
 
-	service, err := discovery.New(memory.New(), discovery.Config{TTL: ttl, CleanupInterval: time.Second}, discard)
+	service, err := discovery.New(memory.New(), discovery.Config{TTL: ttl, CleanupInterval: time.Second, MaxInstances: 1 << 20}, discard)
 	if err != nil {
 		t.Fatalf("new discovery: %v", err)
 	}

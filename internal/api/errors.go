@@ -16,6 +16,7 @@ const (
 	codeInvalidService     = "invalid_service"
 	codeServiceNotFound    = "service_not_found"
 	codeInstanceNotOwned   = "instance_not_owned"
+	codeQuotaExceeded      = "quota_exceeded"
 	codeNotFound           = "not_found"
 	codeMethodNotAllowed   = "method_not_allowed"
 	codeInternalError      = "internal_error"
@@ -57,6 +58,10 @@ func (handler *Handler) writeDiscoveryError(writer http.ResponseWriter, request 
 		)
 		handler.writeError(writer, http.StatusForbidden, codeInstanceNotOwned,
 			"This instance was registered by another caller; only it, or a caller with the manage permission, may change it")
+	case errors.Is(err, discovery.ErrRegistryFull):
+		handler.logger.WarnContext(request.Context(), "registration refused: registry is full")
+		handler.writeError(writer, http.StatusTooManyRequests, codeQuotaExceeded,
+			"Beacon already holds the maximum number of instances; retry after others unregister or expire")
 	default:
 		handler.logger.ErrorContext(request.Context(), "discovery operation failed", slog.Any("error", err))
 		handler.writeError(writer, http.StatusInternalServerError, codeInternalError, "Internal server error")

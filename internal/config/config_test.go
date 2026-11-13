@@ -108,6 +108,7 @@ func TestLoadFailures(t *testing.T) {
 		{name: "unknown section", content: "[tracing]\nenabled = true", wantErr: []string{"unknown keys", "tracing"}},
 		{name: "port out of range", content: "[server]\nport = 70000", wantErr: []string{"server.port"}},
 		{name: "zero timeout", content: "[server]\nwrite_timeout = \"0s\"", wantErr: []string{"server.write_timeout"}},
+		{name: "zero max instances", content: "[registry]\nmax_instances = 0", wantErr: []string{"registry.max_instances must be positive"}},
 		{name: "negative TTL", content: "[registry]\nservice_ttl = \"-5s\"", wantErr: []string{"registry.service_ttl"}},
 		{name: "sub-second TTL", content: "[registry]\nservice_ttl = \"500ms\"\ncleanup_interval = \"100ms\"", wantErr: []string{"registry.service_ttl must be at least 1s"}},
 		{name: "zero name length", content: "[registry]\nmax_name_length = 0", wantErr: []string{"registry.max_name_length must be between 1 and 253, got 0"}},

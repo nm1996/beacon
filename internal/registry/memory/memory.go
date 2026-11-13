@@ -29,13 +29,19 @@ func New() *MemoryRegistry {
 	return &MemoryRegistry{instances: make(map[string]discovery.Instance)}
 }
 
-// Create stores instance under its ID and fails if the ID is taken.
-func (registry *MemoryRegistry) Create(_ context.Context, instance discovery.Instance) error {
+// Create stores instance under its ID unless limit instances are already
+// stored, and fails if the ID is taken. The count is checked under the same
+// lock as the insert.
+func (registry *MemoryRegistry) Create(_ context.Context, instance discovery.Instance, limit int) error {
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
 
 	if _, exists := registry.instances[instance.ID]; exists {
 		return fmt.Errorf("instance %s already exists", instance.ID)
+	}
+
+	if len(registry.instances) >= limit {
+		return discovery.ErrRegistryFull
 	}
 
 	registry.instances[instance.ID] = instance

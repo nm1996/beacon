@@ -97,6 +97,9 @@ type RegistryConfig struct {
 	// MaxAddressLength is the longest host name accepted as an address. IP
 	// addresses are not held to it.
 	MaxAddressLength int `toml:"max_address_length"`
+	// MaxInstances is the most instances Beacon holds at once; registrations
+	// beyond it are refused until others leave or expire.
+	MaxInstances int `toml:"max_instances"`
 }
 
 // StorageMemory selects the in-memory registry backend, which keeps
@@ -145,6 +148,7 @@ func Default() Config {
 			CleanupInterval:  5 * time.Second,
 			MaxNameLength:    discovery.DefaultMaxNameLength,
 			MaxAddressLength: discovery.DefaultMaxAddressLength,
+			MaxInstances:     10000,
 		},
 		Storage: StorageConfig{
 			Backend: StorageMemory,
@@ -244,6 +248,7 @@ func (config Config) Validate() error {
 	// Clients are told the TTL in whole seconds when they register.
 	check(registry.ServiceTTL >= time.Second, "registry.service_ttl must be at least 1s, got %s", registry.ServiceTTL)
 	check(registry.CleanupInterval > 0, "registry.cleanup_interval must be positive, got %s", registry.CleanupInterval)
+	check(registry.MaxInstances > 0, "registry.max_instances must be positive, got %d", registry.MaxInstances)
 	// A stale instance stays visible for up to TTL plus one interval, so an
 	// interval longer than the TTL would more than double that window.
 	check(registry.CleanupInterval <= registry.ServiceTTL,

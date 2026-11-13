@@ -160,6 +160,7 @@ Every error response has the same shape:
 | `400` | `invalid_request_body` | The body is not a single JSON object within the size limit with only the documented fields |
 | `400` | `invalid_service` | A registration field breaks a rule, for example a port outside `1`–`65535` |
 | `403` | `instance_not_owned` | [Authentication](#authentication) is on and another caller registered this instance; see [Instance ownership](#instance-ownership) |
+| `429` | `quota_exceeded` | Beacon already holds `registry.max_instances` instances; retry after some unregister or expire |
 | `404` | `service_not_found` | No instance is registered with the given ID |
 | `404` | `not_found` | No endpoint exists at the path |
 | `401` | `unauthorized` | [Authentication](#authentication) is on and the request has no bearer token, a malformed `Authorization` header or a token Beacon does not accept |
@@ -272,6 +273,7 @@ A file only needs the keys it changes, and no file is needed at all. [`configs/b
 | `registry.cleanup_interval` | `BEACON_REGISTRY_CLEANUP_INTERVAL` | `"5s"` | How often stale instances are removed |
 | `registry.max_name_length` | `BEACON_REGISTRY_MAX_NAME_LENGTH` | `63` | Longest accepted service name, 1–253. The default fits a DNS label |
 | `registry.max_address_length` | `BEACON_REGISTRY_MAX_ADDRESS_LENGTH` | `253` | Longest accepted host name as an address, 1–253. IP addresses are not held to it |
+| `registry.max_instances` | `BEACON_REGISTRY_MAX_INSTANCES` | `10000` | The most instances Beacon holds at once; further registrations get `429 quota_exceeded`. Bounds memory use and the size of discovery responses |
 | `storage.backend` | `BEACON_STORAGE_BACKEND` | `"memory"` | Where instances are kept. Only `memory` exists today |
 | `metrics.enabled` | `BEACON_METRICS_ENABLED` | `true` | Serve Prometheus metrics at `GET /metrics` |
 | `logging.level` | `BEACON_LOGGING_LEVEL` | `"info"` | `debug`, `info`, `warn` or `error` |
@@ -584,7 +586,7 @@ When Beacon has [authentication](#authentication) on, give the client its token.
 beacon, err := client.New("https://beacon:8080", client.WithToken(os.Getenv("BEACON_TOKEN")))
 ```
 
-The client then sends `Authorization: Bearer <token>` on every request. Errors for refused requests match `client.ErrUnauthorized` (`401`) and `client.ErrForbidden` (`403`) with `errors.Is`, including a `401` or `403` from a proxy in front of Beacon. A heartbeat or unregister of an instance another caller registered also matches `client.ErrNotOwned`; see [Instance ownership](#instance-ownership). A `Lease` whose heartbeats are refused keeps retrying with backoff and logs each failure; it never registers again because of them, though once its instance expires it gets `404` and registers again as usual.
+The client then sends `Authorization: Bearer <token>` on every request. Errors for refused requests match `client.ErrUnauthorized` (`401`) and `client.ErrForbidden` (`403`) with `errors.Is`, including a `401` or `403` from a proxy in front of Beacon. A heartbeat or unregister of an instance another caller registered also matches `client.ErrNotOwned`; see [Instance ownership](#instance-ownership). A registration refused because Beacon is full matches `client.ErrQuotaExceeded`; a `Lease` that has to register again keeps retrying with backoff until there is room. A `Lease` whose heartbeats are refused keeps retrying with backoff and logs each failure; it never registers again because of them, though once its instance expires it gets `404` and registers again as usual.
 
 For a Beacon served over [TLS](#tls), use an `https://` URL. If its certificate comes from a private CA, trust that CA through `WithHTTPClient`:
 
@@ -648,7 +650,7 @@ scrape_configs:
 | `beacon_http_request_duration_seconds` | histogram | `method`, `route` | Time spent serving requests |
 | `beacon_instances` | gauge | `service` | Registered instances per service name |
 | `beacon_expired_instances_total` | counter | | Instances removed because they stopped sending heartbeats |
-| `beacon_registry_operations_total` | counter | `operation`, `result` | Calls to the storage backend; `result` is `ok`, `not_found` or `error` |
+| `beacon_registry_operations_total` | counter | `operation`, `result` | Calls to the storage backend; `result` is `ok`, `not_found`, `full` (refused by `registry.max_instances`) or `error` |
 | `beacon_registry_operation_duration_seconds` | histogram | `operation` | Time spent in the storage backend |
 | `beacon_auth_failures_total` | counter | `reason` | Requests refused by [authentication](#authentication); `reason` is `missing`, `invalid` or `forbidden`. Only appears once a request has been refused |
 | `beacon_credential_reloads_total` | counter | `result` | Attempts to [reload](#reloading-certificates-and-tokens) the TLS files and tokens file while running; `result` is `ok` or `error`. Only appears after the first attempt |

@@ -28,7 +28,7 @@ func startCleanup(ctx context.Context, service *discovery.Service) <-chan error 
 func newCleanupService(t *testing.T, registry discovery.Registry) *discovery.Service {
 	t.Helper()
 
-	service, err := discovery.New(registry, discovery.Config{TTL: 3 * time.Second, CleanupInterval: time.Second}, discard)
+	service, err := discovery.New(registry, discovery.Config{TTL: 3 * time.Second, CleanupInterval: time.Second, MaxInstances: 1 << 20}, discard)
 	if err != nil {
 		t.Fatalf("new service: %v", err)
 	}
