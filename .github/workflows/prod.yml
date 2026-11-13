@@ -1,0 +1,58 @@
+name: Production release
+
+# Every push to prod, normally a merge from stage, releases the version at the
+# top of CHANGELOG.md, but only if it is exactly what its newest release
+# candidate was.
+on:
+  push:
+    branches: [prod]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-prod
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: Tag the release
+    # Creating the branch is not a release.
+    if: ${{ !github.event.created }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - id: tag
+        name: Tag the release
+        run: |
+          version="$(scripts/release-version.sh version)"
+          candidate="$(scripts/release-version.sh latest-rc)"
+
+          if [[ "$(git rev-parse "$candidate^{tree}")" != "$(git rev-parse "HEAD^{tree}")" ]]; then
+            echo "::error::prod differs from $candidate; only stage may be merged into prod, and only once its newest candidate is tagged"
+            exit 1
+          fi
+
+          tag="v$version"
+          git -c user.name="github-actions[bot]" \
+            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            tag -a "$tag" -m "$tag" "$GITHUB_SHA"
+          git push origin "refs/tags/$tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  release:
+    name: Release
+    needs: tag
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.tag.outputs.tag }}
+    permissions:
+      contents: write
+      packages: write

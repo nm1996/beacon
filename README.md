@@ -903,7 +903,7 @@ Transports only translate requests and errors; every rule lives in `discovery`, 
 
 ## Versioning
 
-Beacon follows [Semantic Versioning](https://semver.org/). Releases are git tags such as `v0.1.0` on `main`, and every change is listed in [CHANGELOG.md](CHANGELOG.md).
+Beacon follows [Semantic Versioning](https://semver.org/). Releases are git tags such as `v0.1.0` on the `prod` branch, and every change is listed in [CHANGELOG.md](CHANGELOG.md).
 
 | What | How it is versioned | What counts as breaking |
 |---|---|---|
@@ -913,17 +913,28 @@ Beacon follows [Semantic Versioning](https://semver.org/). Releases are git tags
 
 Commit messages follow Conventional Commits, which map onto these rules: `feat!` or `BREAKING CHANGE` is breaking, `feat` adds functionality, and `fix` is a patch.
 
-### Releasing
+### Branches and releases
 
-1. Move the **Unreleased** entries in `CHANGELOG.md` under a new version heading and merge that change.
-2. Tag the merge commit on `main` and push the tag:
+Changes move through three long-lived branches:
 
-   ```bash
-   git tag -a v0.1.0 -m "v0.1.0"
-   git push origin v0.1.0
-   ```
+| Branch | Takes pull requests from | On every push |
+|---|---|---|
+| `main` (default) | Feature branches such as `feat/...` and `fix/...`, merged by the maintainer once reviewed | CI |
+| `stage` | `main` only | CI, then the next release candidate is tagged and published |
+| `prod` | `stage` only | CI, then the release is tagged and published |
 
-3. The [release workflow](.github/workflows/release.yml) runs the checks, builds archives for Linux, macOS and Windows on amd64 and arm64, and publishes a GitHub release with checksums. Tags with a suffix, such as `v0.1.0-rc.1`, become pre-releases.
+A required `Promotion source` check refuses pull requests to `stage` or `prod` from any other branch. Both take merge commits only, so each holds exactly the commits of the branch before it and the next promotion merges cleanly.
+
+To release:
+
+1. On a branch from `main`, move the **Unreleased** entries in `CHANGELOG.md` under a new heading such as `## [0.2.0] - 2026-11-20`, and merge it.
+2. Run `mise run promote-stage`. It opens the pull request from `main` to `stage`, named after the candidate it will produce, and stops if the version has already been released, which means step 1 was missed. Once it is merged, the [stage workflow](.github/workflows/stage.yml) tags the next candidate, such as `v0.2.0-rc.1`, and publishes it as a pre-release.
+3. Try the candidate. To fix something, merge the fix into `main` and promote again; each merge into `stage` tags the next candidate, `v0.2.0-rc.2` and so on.
+4. Run `mise run promote-prod`. It opens the pull request from `stage` to `prod`, after checking that `stage` is exactly the newest candidate. Once it is merged, the [production release workflow](.github/workflows/prod.yml) checks the same again, tags `v0.2.0`, and publishes the release.
+
+Both commands print the open pull request instead if there already is one. They run the GitHub CLI, which mise installs for them, as you, so pull requests they open run CI like any other; log in once with `gh auth login`.
+
+Publishing is done by the [release workflow](.github/workflows/release.yml): it runs the checks, builds archives for Linux, macOS and Windows on amd64 and arm64, publishes a GitHub release with checksums, and pushes the container image. Candidates become pre-releases and never move the image's `latest` tag. Pushing a `v*` tag by hand still runs it, for emergencies.
 
 Tags are never moved or deleted once pushed.
 

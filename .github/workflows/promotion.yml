@@ -1,0 +1,34 @@
+name: Promotion
+
+# Changes reach stage only from main, and prod only from stage. Branch
+# rulesets require this check on pull requests to those two.
+on:
+  pull_request:
+    branches: [stage, prod]
+
+permissions:
+  contents: read
+
+jobs:
+  source:
+    name: Promotion source
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the source branch
+        env:
+          BASE: ${{ github.base_ref }}
+          HEAD: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          case "$BASE" in
+          stage) want=main ;;
+          prod) want=stage ;;
+          esac
+
+          if [[ "$HEAD_REPO" != "$REPO" || "$HEAD" != "$want" ]]; then
+            echo "::error::$BASE only takes pull requests from $want in this repository, not $HEAD_REPO:$HEAD"
+            exit 1
+          fi
+
+          echo "$HEAD -> $BASE"
