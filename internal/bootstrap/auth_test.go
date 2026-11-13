@@ -200,3 +200,56 @@ func TestNewAppliesMaxInstancesPerOwner(test *testing.T) {
 		}
 	}
 }
+
+func TestNewLimitsFailedAuthenticationAndCountsIt(test *testing.T) {
+	settings := authSettings(test)
+	settings.RateLimit.AuthFailuresPerSecond = 0.001
+	settings.RateLimit.AuthFailureBurst = 1
+
+	handler := mustNew(test, settings, "v0.0.0-test").Server.Handler
+
+	if recorder := getWithToken(handler, "/api/v1/services", "wrong-token"); recorder.Code != http.StatusUnauthorized {
+		test.Fatalf("expected the first failure to get 401, got %d", recorder.Code)
+	}
+
+	if recorder := getWithToken(handler, "/api/v1/services", serviceToken); recorder.Code != http.StatusTooManyRequests {
+		test.Fatalf("expected the network to be limited after its failure, got %d", recorder.Code)
+	}
+
+	// /metrics sits behind the same Guard, and so the same limit; scrape it
+	// from another network.
+	request := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	request.RemoteAddr = "10.9.9.9:1000"
+	request.Header.Set("Authorization", "Bearer "+scrapeToken)
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	if want := `beacon_rate_limited_total{limit="auth_failures"} 1`; !strings.Contains(recorder.Body.String(), want) {
+		test.Errorf("expected the scrape to contain %q", want)
+	}
+}
+
+func TestNewLimitsRegistrations(test *testing.T) {
+	settings := config.Default()
+	settings.RateLimit.RegistrationsPerSecond = 0.001
+	settings.RateLimit.RegistrationBurst = 2
+
+	handler := mustNew(test, settings, "v0.0.0-test").Server.Handler
+
+	for attempt, want := range []int{http.StatusCreated, http.StatusCreated, http.StatusTooManyRequests} {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/v1/services", strings.NewReader(`{"name":"orders","address":"10.0.0.1","port":8081}`)))
+
+		if recorder.Code != want {
+			test.Errorf("registration %d: expected %d, got %d", attempt+1, want, recorder.Code)
+		}
+	}
+
+	scrape := httptest.NewRecorder()
+	handler.ServeHTTP(scrape, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+
+	if want := `beacon_rate_limited_total{limit="registrations"} 1`; !strings.Contains(scrape.Body.String(), want) {
+		test.Errorf("expected the scrape to contain %q", want)
+	}
+}

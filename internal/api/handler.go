@@ -10,6 +10,7 @@ import (
 
 	"github.com/nm1996/beacon/internal/auth"
 	"github.com/nm1996/beacon/internal/discovery"
+	"github.com/nm1996/beacon/internal/ratelimit"
 )
 
 // Discovery is the business layer the API needs. It is declared here, where
@@ -32,6 +33,20 @@ type Config struct {
 	// Guard protects every route except GET /health. Nil turns
 	// authentication off.
 	Guard *Guard
+	// RegistrationLimit limits how often each caller may register, keyed
+	// by the authenticated name, or by client network without
+	// authentication. Nil turns the limit off.
+	RegistrationLimit *ratelimit.Limiter
+	// RateLimited, if not nil, is called with LimitRegistrations for every
+	// registration RegistrationLimit refuses.
+	RateLimited func(limit string)
+}
+
+// rateLimited reports a refusal by limit to RateLimited, if set.
+func (config Config) rateLimited(limit string) {
+	if config.RateLimited != nil {
+		config.RateLimited(limit)
+	}
 }
 
 // Handler serves the registry API endpoints. Every method is an

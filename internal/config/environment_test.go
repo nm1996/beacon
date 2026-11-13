@@ -27,6 +27,10 @@ func TestLoadAppliesEveryEnvironmentVariable(test *testing.T) {
 	test.Setenv("BEACON_REGISTRY_MAX_INSTANCES", "250")
 	test.Setenv("BEACON_REGISTRY_MAX_INSTANCES_PER_OWNER", "25")
 	test.Setenv("BEACON_STORAGE_BACKEND", "memory")
+	test.Setenv("BEACON_RATE_LIMIT_REGISTRATIONS_PER_SECOND", "2.5")
+	test.Setenv("BEACON_RATE_LIMIT_REGISTRATION_BURST", "7")
+	test.Setenv("BEACON_RATE_LIMIT_AUTH_FAILURES_PER_SECOND", "0.5")
+	test.Setenv("BEACON_RATE_LIMIT_AUTH_FAILURE_BURST", "3")
 	test.Setenv("BEACON_METRICS_ENABLED", "false")
 	test.Setenv("BEACON_LOGGING_LEVEL", "debug")
 	test.Setenv("BEACON_LOGGING_FORMAT", "text")
@@ -66,6 +70,12 @@ func TestLoadAppliesEveryEnvironmentVariable(test *testing.T) {
 		},
 		Storage: StorageConfig{
 			Backend: StorageMemory,
+		},
+		RateLimit: RateLimitConfig{
+			RegistrationsPerSecond: 2.5,
+			RegistrationBurst:      7,
+			AuthFailuresPerSecond:  0.5,
+			AuthFailureBurst:       3,
 		},
 		Metrics: MetricsConfig{
 			Enabled: false,
@@ -136,6 +146,16 @@ func TestLoadEnvironmentFailures(test *testing.T) {
 			name:      "max instances is not an integer",
 			variables: map[string]string{"BEACON_REGISTRY_MAX_INSTANCES": "lots"},
 			wantErr:   []string{"BEACON_REGISTRY_MAX_INSTANCES must be an integer"},
+		},
+		{
+			name:      "rate is not a number",
+			variables: map[string]string{"BEACON_RATE_LIMIT_REGISTRATIONS_PER_SECOND": "fast"},
+			wantErr:   []string{"BEACON_RATE_LIMIT_REGISTRATIONS_PER_SECOND must be a number"},
+		},
+		{
+			name:      "negative rate from the environment",
+			variables: map[string]string{"BEACON_RATE_LIMIT_AUTH_FAILURES_PER_SECOND": "-1"},
+			wantErr:   []string{"invalid config", "rate_limit.auth_failures_per_second"},
 		},
 		{
 			name:      "body limit is not an integer",
