@@ -612,7 +612,7 @@ defer lease.Close(context.Background())
 instances, err := beacon.Discover(ctx, "payments")
 ```
 
-A `Lease` sends a heartbeat every third of the TTL Beacon reported, with a little jitter. If a heartbeat fails it retries after 1s, 2s, 4s and so on, never waiting longer than the normal interval, and keeps trying until `Close`.; with a TTL of 3s or less that cap is reached at once, so retries come at a steady third of the TTL. If Beacon no longer knows the instance, because it restarted or the instance expired, the lease registers again; the instance then has a new ID, which `lease.ID()` always returns. `Close` stops the background goroutine, waits for it and unregisters the instance. If its context ends first, or Beacon cannot be reached, `Close` returns the error and can simply be called again with a new context; the heartbeats stay stopped either way, and once the instance is unregistered further calls return `nil`. With `client.WithLogger`, retries and re-registrations are logged.
+A `Lease` sends a heartbeat every third of the TTL Beacon reported, with a little jitter. If a heartbeat fails it retries after 1s, 2s, 4s and so on, never waiting longer than the normal interval, and keeps trying until `Close`. Each heartbeat or registration the lease sends gives up after a sixth of the TTL, so one stuck on a dead connection leaves time to retry on a new one before the instance expires, whatever timeout the `http.Client` has; with a TTL of 3s or less that cap is reached at once, so retries come at a steady third of the TTL. If Beacon no longer knows the instance, because it restarted or the instance expired, the lease registers again; the instance then has a new ID, which `lease.ID()` always returns. `Close` stops the background goroutine, waits for it and unregisters the instance. If its context ends first, or Beacon cannot be reached, `Close` returns the error and can simply be called again with a new context; the heartbeats stay stopped either way, and once the instance is unregistered further calls return `nil`. With `client.WithLogger`, retries and re-registrations are logged.
 
 For full control, call the API directly:
 
@@ -762,6 +762,7 @@ Beacon is deliberately small. Before you depend on it, know that:
 - **Ownership is by name, not by service.** Every instance registered with the same token or certificate belongs to the same caller, so two services sharing one token can change each other's instances. Give each service its own token or certificate.
 - **The owner is the name in the tokens file.** Ownership and `registry.max_instances_per_owner` are keyed by the entry's `name`, which is also what logs show, so renaming an entry changes the owner; see [Instance ownership](#instance-ownership). A stable owner ID, kept apart from the name shown in logs, is planned.
 - **Client certificates are not checked for revocation.** Use short-lived certificates.
+- **A paused Beacon expires everything at once.** If the process is stopped for longer than `registry.service_ttl`, for example with `SIGSTOP` or a paused virtual machine, no heartbeats arrive meanwhile, and every instance expires when it resumes; their leases then register again. A suspended laptop does not count, since Beacon measures time with a clock that stops during suspend.
 
 ## Development
 
