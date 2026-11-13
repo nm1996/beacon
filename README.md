@@ -778,6 +778,7 @@ mise run check # check formatting, vet, lint and run tests with the race detecto
 | `mise run lint` | Run `golangci-lint` |
 | `mise run test` | Run tests |
 | `mise run test-race` | Run tests with the race detector |
+| `mise run bench` | Run the benchmarks; see [Benchmarks](#benchmarks) |
 | `mise run vuln` | Scan for known vulnerabilities with `govulncheck` |
 | `mise run build` | Build `bin/beacon` |
 | `mise run docker-build` | Build the `beacon:dev` container image |
@@ -786,6 +787,25 @@ mise run check # check formatting, vet, lint and run tests with the race detecto
 | `mise run check` | Check formatting, vet, lint, race tests and vulnerability scan; never changes files |
 
 Run `mise tasks` to list them all. CI runs the same tasks on every pull request.
+
+### Benchmarks
+
+`mise run bench` measures the in-memory backend at 100 to 100000 instances, the business rules, and the HTTP handlers. One run on a laptop (AMD Ryzen 3 5300U, 8 threads, Go 1.27), at the default `registry.max_instances` of 10000:
+
+| Operation | Time | Allocations |
+|---|---|---|
+| Heartbeat in the backend (`Touch`) | 93 ns | 0 |
+| Register and remove in the backend | 451 ns | 2 |
+| Cleanup scan with nothing expired (`DeleteStale`) | 0.18 ms | 0 |
+| Look up one service of 100 (`List` by name) | 0.73 ms | 1 |
+| A page of 500, or every instance (`List`) | 4.7 ms | 1 |
+| `POST /api/v1/services` through the router, with validation and JSON | 14 µs | 42 |
+| `GET /api/v1/services?limit=500` through the router | 5.4 ms | 48 |
+
+- Heartbeats and registrations cost the same at any size; they are what clients send most.
+- `List` scans, copies and sorts every match on each call, so a page of 500 costs as much as the whole registry, and grows with it: 82 ms for one page at 100000. The default limit keeps it in the low milliseconds; a backend with an index by ID, or by name, would make a page cost what it returns.
+- Every operation shares one lock, so a slow `List` holds up heartbeats for as long as it copies. `BenchmarkMixedParallel` measures 90% heartbeats, 9% lookups and 1% registrations from all threads at once.
+- On this machine reading the clock takes about 2.4 µs, because the kernel uses the HPET clock source, which shows up in `BenchmarkServiceHeartbeat` and every HTTP benchmark. Most servers read the TSC in tens of nanoseconds.
 
 ## Project layout
 
