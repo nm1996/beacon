@@ -13,7 +13,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -41,6 +40,11 @@ const (
 
 	// discoverPageSize is how many instances Discover asks for per request.
 	discoverPageSize = 500
+
+	// maxDiscoverPages bounds how many pages one Discover call follows, so a
+	// faulty server or proxy that keeps handing out new cursors cannot keep
+	// it busy forever. At discoverPageSize it allows five million instances.
+	maxDiscoverPages = 10_000
 )
 
 // Client calls a Beacon server. It is safe for concurrent use.
@@ -153,6 +157,13 @@ func (client *Client) Heartbeat(ctx context.Context, id string) error {
 // It fetches them discoverPageSize at a time, following the server's next
 // page links, so a large registry never has to fit in one response. A
 // server without paging returns everything at once, which also works.
+//
+// Pages are a live view, not a snapshot: an instance registered or removed
+// while Discover runs may or may not be included.
+//
+// Discover fails rather than return a partial list when the paging goes
+// wrong: a next link without a cursor, a cursor seen before, or more than
+// maxDiscoverPages pages.
 func (client *Client) Discover(ctx context.Context, name string) ([]Instance, error) {
 	query := url.Values{"limit": {strconv.Itoa(discoverPageSize)}}
 	if name != "" {
@@ -161,7 +172,9 @@ func (client *Client) Discover(ctx context.Context, name string) ([]Instance, er
 
 	var instances []Instance
 
-	for {
+	seen := make(map[string]struct{})
+
+	for pages := 1; ; pages++ {
 		var page []instanceResponse
 
 		header, err := client.send(ctx, http.MethodGet, servicesPath, query, nil, http.StatusOK, &page)
@@ -173,15 +186,24 @@ func (client *Client) Discover(ctx context.Context, name string) ([]Instance, er
 			instances = append(instances, Instance(item))
 		}
 
-		cursor := nextCursor(header)
-		if cursor == "" {
+		cursor, more, err := nextCursor(header)
+		if err != nil {
+			return nil, err
+		}
+
+		if !more {
 			break
 		}
 
-		if cursor == query.Get("cursor") {
-			return nil, errors.New("beacon: server returned the same page cursor twice")
+		if _, repeated := seen[cursor]; repeated {
+			return nil, fmt.Errorf("beacon: server returned page cursor %q twice", cursor)
 		}
 
+		if pages == maxDiscoverPages {
+			return nil, fmt.Errorf("beacon: discovery did not finish within %d pages", maxDiscoverPages)
+		}
+
+		seen[cursor] = struct{}{}
 		query.Set("cursor", cursor)
 	}
 
@@ -192,10 +214,12 @@ func (client *Client) Discover(ctx context.Context, name string) ([]Instance, er
 	return instances, nil
 }
 
-// nextCursor returns the cursor of the rel="next" Link in header, or "" if
-// there is none. Only the cursor is taken from the link: its path is the
-// server's own and would miss any prefix in front of it, such as a proxy's.
-func nextCursor(header http.Header) string {
+// nextCursor returns the cursor of the rel="next" Link in header, and
+// whether there is such a link. A next link without a usable cursor is an
+// error, so a broken response is never mistaken for the last page. Only the
+// cursor is taken from the link: its path is the server's own and would miss
+// any prefix in front of it, such as a proxy's.
+func nextCursor(header http.Header) (cursor string, more bool, err error) {
 	for _, value := range header.Values("Link") {
 		for link := range strings.SplitSeq(value, ",") {
 			target, params, found := strings.Cut(strings.TrimSpace(link), ";")
@@ -205,14 +229,19 @@ func nextCursor(header http.Header) string {
 
 			parsed, err := url.Parse(strings.Trim(strings.TrimSpace(target), "<>"))
 			if err != nil {
-				continue
+				return "", false, fmt.Errorf("beacon: unreadable next page link %q: %w", target, err)
 			}
 
-			return parsed.Query().Get("cursor")
+			cursor := parsed.Query().Get("cursor")
+			if cursor == "" {
+				return "", false, fmt.Errorf("beacon: next page link %q has no cursor", target)
+			}
+
+			return cursor, true, nil
 		}
 	}
 
-	return ""
+	return "", false, nil
 }
 
 // Unregister removes the instance with id. It returns an error matching

@@ -60,7 +60,10 @@ Add an entry under **Unreleased** in the same pull request as the change.
   requests without `limit` return everything as before, so existing clients
   keep working. Invalid parameters get `400 invalid_query`.
 - `client.Discover` fetches 500 instances at a time and follows the page
-  links, so it no longer fails when a registry outgrows one response.
+  links, so it no longer fails when a registry outgrows one response. It
+  returns an error instead of a partial or endless result when a server or
+  proxy breaks the paging: a next link without a cursor, a cursor seen
+  before, or more than 10000 pages.
 - A limit on registered instances: `registry.max_instances`
   (`BEACON_REGISTRY_MAX_INSTANCES`, default 10000). Registrations beyond it
   get `429 quota_exceeded` until instances unregister or expire, which bounds

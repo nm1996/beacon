@@ -3,6 +3,7 @@ package client_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -407,5 +408,99 @@ func TestDiscoverEmptyIsAnEmptySlice(t *testing.T) {
 	instances, err := newServer(t).Discover(t.Context(), "nothing")
 	if err != nil || instances == nil || len(instances) != 0 {
 		t.Errorf("expected an empty, non-nil slice, got %#v, %v", instances, err)
+	}
+}
+
+// pagingServer answers every discovery request with one instance and the
+// Link header that link returns for the request's cursor.
+func pagingServer(t *testing.T, link func(cursor string) string) *client.Client {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if value := link(request.URL.Query().Get("cursor")); value != "" {
+			writer.Header().Set("Link", value)
+		}
+
+		_, _ = io.WriteString(writer, `[{"id":"a","name":"orders","address":"10.0.0.1","port":1}]`)
+	}))
+	t.Cleanup(server.Close)
+
+	return mustNew(t, server.URL)
+}
+
+func TestDiscoverStopsOnACursorCycle(t *testing.T) {
+	// "" -> A -> B -> A -> B ... never repeats the cursor it was just sent.
+	next := map[string]string{"": "QQ", "QQ": "Qg", "Qg": "QQ"}
+
+	beacon := pagingServer(t, func(cursor string) string {
+		return `</api/v1/services?cursor=` + next[cursor] + `>; rel="next"`
+	})
+
+	if _, err := beacon.Discover(t.Context(), "orders"); err == nil || !strings.Contains(err.Error(), "twice") {
+		t.Errorf("expected an error for a cursor cycle, got %v", err)
+	}
+}
+
+func TestDiscoverFailsOnANextLinkWithoutACursor(t *testing.T) {
+	for _, link := range []string{
+		`</api/v1/services?limit=500>; rel="next"`,
+		`</api/v1/services?cursor=>; rel="next"`,
+		`<http://[::1>; rel="next"`,
+	} {
+		t.Run(link, func(t *testing.T) {
+			beacon := pagingServer(t, func(string) string { return link })
+
+			// Stopping quietly would return a partial list as if it were all.
+			if instances, err := beacon.Discover(t.Context(), "orders"); err == nil {
+				t.Errorf("expected an error, got %d instances", len(instances))
+			}
+		})
+	}
+}
+
+func TestDiscoverIgnoresOtherLinks(t *testing.T) {
+	beacon := pagingServer(t, func(string) string { return `</docs>; rel="help"` })
+
+	if instances, err := beacon.Discover(t.Context(), "orders"); err != nil || len(instances) != 1 {
+		t.Errorf("expected one page and no error, got %d, %v", len(instances), err)
+	}
+}
+
+// roundTripFunc is an http.RoundTripper made from a function.
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+// RoundTrip calls the function.
+func (function roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return function(request)
+}
+
+func TestDiscoverGivesUpAfterTooManyPages(t *testing.T) {
+	// A server that hands out a new cursor on every page, forever. A
+	// RoundTripper instead of a real server keeps ten thousand pages fast.
+	var requests atomic.Int64
+
+	transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		page := requests.Add(1)
+
+		header := http.Header{}
+		header.Set("Link", fmt.Sprintf(`</api/v1/services?cursor=c%d>; rel="next"`, page))
+
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     header,
+			Body:       io.NopCloser(strings.NewReader(`[]`)),
+			Request:    request,
+		}, nil
+	})
+
+	beacon := mustNew(t, "http://beacon.test", client.WithHTTPClient(&http.Client{Transport: transport}))
+
+	_, err := beacon.Discover(t.Context(), "orders")
+	if err == nil || !strings.Contains(err.Error(), "pages") {
+		t.Fatalf("expected Discover to give up, got %v", err)
+	}
+
+	if got := requests.Load(); got != 10_000 {
+		t.Errorf("expected exactly 10000 page requests, got %d", got)
 	}
 }

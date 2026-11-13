@@ -595,7 +595,7 @@ err = beacon.Heartbeat(ctx, registered.ID)
 err = beacon.Unregister(ctx, registered.ID)
 ```
 
-Errors from Beacon are `*client.Error` values carrying the status and Beacon's error code, and they match `client.ErrNotFound` and `client.ErrInvalid` with `errors.Is`. `client.WithHTTPClient` sets a custom `http.Client`; by default every request times out after 10 seconds. `Register` is never retried, because repeating it would create a second instance. `Discover` fetches instances 500 at a time and follows the page links, so a large registry never has to fit in one response; it works against servers without paging too.
+Errors from Beacon are `*client.Error` values carrying the status and Beacon's error code, and they match `client.ErrNotFound` and `client.ErrInvalid` with `errors.Is`. `client.WithHTTPClient` sets a custom `http.Client`; by default every request times out after 10 seconds. `Register` is never retried, because repeating it would create a second instance. `Discover` fetches instances 500 at a time and follows the page links, so a large registry never has to fit in one response; it works against servers without paging too. The result is a live view rather than a snapshot, as described under [`GET /api/v1/services`](#get-apiv1services). If the paging breaks, for example a proxy drops the cursor from the next link or sends the client round in a loop, `Discover` returns an error rather than a partial list.
 
 When Beacon has [authentication](#authentication) on, give the client its token. Read it from a file or secret store rather than writing it into the code:
 
