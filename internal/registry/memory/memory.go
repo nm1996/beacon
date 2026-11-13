@@ -109,7 +109,14 @@ func (registry *MemoryRegistry) Touch(_ context.Context, id string, at time.Time
 // registry.max_instances allows; a backend with an index can do better.
 func (registry *MemoryRegistry) List(_ context.Context, query discovery.ListQuery) ([]discovery.Instance, error) {
 	registry.mu.RLock()
-	result := make([]discovery.Instance, 0, len(registry.instances))
+
+	// Room for every instance only when every instance may match. Reserving
+	// it for a lookup by name allocated, and cleared under the lock, a slice
+	// as large as the registry for every one of them.
+	var result []discovery.Instance
+	if query.Name == "" && query.After == "" {
+		result = make([]discovery.Instance, 0, len(registry.instances))
+	}
 
 	for _, instance := range registry.instances {
 		if (query.Name == "" || instance.Name == query.Name) && instance.ID > query.After {
