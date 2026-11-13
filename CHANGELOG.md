@@ -72,6 +72,11 @@ Add an entry under **Unreleased** in the same pull request as the change.
 
 ### Changed
 
+- Beacon listens on `127.0.0.1` by default instead of `0.0.0.0`, so a fresh
+  install without TLS or authentication is not reachable from the network.
+  Set `server.host` to `"0.0.0.0"` to accept remote connections. The
+  container image sets `BEACON_SERVER_HOST=0.0.0.0`, so containers behave as
+  before. The README has a new section on exposing Beacon safely.
 - Stricter registration rules. A service name must be 1–63 lowercase
   letters, digits, `.`, `_` or `-`, starting and ending with a letter or
   digit, so `orders`, `Orders` and `orders ` can no longer become three

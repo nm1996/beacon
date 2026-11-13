@@ -35,7 +35,9 @@ type Config struct {
 
 // ServerConfig controls the HTTP server.
 type ServerConfig struct {
-	// Host is the interface to listen on. Empty or "0.0.0.0" means all.
+	// Host is the interface to listen on. The default, 127.0.0.1, only
+	// accepts connections from the same machine; "0.0.0.0" or empty means
+	// every interface.
 	Host string `toml:"host"`
 	// Port is the TCP port to listen on.
 	Port int `toml:"port"`
@@ -135,7 +137,7 @@ type LoggingConfig struct {
 func Default() Config {
 	return Config{
 		Server: ServerConfig{
-			Host:                "0.0.0.0",
+			Host:                "127.0.0.1",
 			Port:                8080,
 			ReadTimeout:         5 * time.Second,
 			WriteTimeout:        10 * time.Second,

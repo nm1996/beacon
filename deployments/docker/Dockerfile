@@ -34,6 +34,12 @@ COPY --from=build /out/beacon /usr/local/bin/beacon
 COPY configs/beacon.example.toml /etc/beacon/beacon.toml
 
 USER nonroot:nonroot
+
+# Listen on every interface: inside a container, loopback would only be
+# reachable from the container itself. Published ports decide who can reach
+# it. The variable wins over the config file; override it with -e if needed.
+ENV BEACON_SERVER_HOST=0.0.0.0
+
 EXPOSE 8080
 
 # The image has no curl, so the binary checks itself. It reads the same
