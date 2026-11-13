@@ -78,6 +78,13 @@ Add an entry under **Unreleased** in the same pull request as the change.
 
 ### Fixed
 
+- `beacon_instances` carried a `service` label taken from client-chosen
+  service names, so a client registering many names could create any number
+  of time series. It is now one series counting every instance, and the new
+  `beacon_services` gauge counts distinct names. Per-service counts come from
+  the API. The README no longer claims series stay bounded when they did not.
+- The `method` label of the HTTP metrics took any method a client sent; methods
+  outside the standard set are now counted as `other`.
 - `mise run check` no longer rewrites unformatted files; it fails instead.
   The release workflow runs it, so a release is now always built from the
   tagged source.
