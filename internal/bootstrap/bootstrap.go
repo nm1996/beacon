@@ -70,11 +70,12 @@ func New(settings config.Config, logger *slog.Logger, version string) (*Componen
 	}
 
 	service, err := discovery.New(registry, discovery.Config{
-		TTL:              settings.Registry.ServiceTTL,
-		CleanupInterval:  settings.Registry.CleanupInterval,
-		MaxNameLength:    settings.Registry.MaxNameLength,
-		MaxAddressLength: settings.Registry.MaxAddressLength,
-		MaxInstances:     settings.Registry.MaxInstances,
+		TTL:                  settings.Registry.ServiceTTL,
+		CleanupInterval:      settings.Registry.CleanupInterval,
+		MaxNameLength:        settings.Registry.MaxNameLength,
+		MaxAddressLength:     settings.Registry.MaxAddressLength,
+		MaxInstances:         settings.Registry.MaxInstances,
+		MaxInstancesPerOwner: settings.Registry.MaxInstancesPerOwner,
 	}, logger)
 	if err != nil {
 		return nil, fmt.Errorf("build discovery: %w", err)

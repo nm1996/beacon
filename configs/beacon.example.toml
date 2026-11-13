@@ -92,6 +92,11 @@ max_address_length = 253
 # and the size of discovery responses.
 max_instances = 10000
 
+# The most instances one token or certificate may hold at once, so a single
+# caller cannot take every place above. 0 means no limit per owner. It only
+# applies with authentication on, since callers are not told apart without it.
+max_instances_per_owner = 0
+
 [storage]
 # Where registered instances are kept. Only "memory" exists today: fast, and
 # everything is forgotten on restart, so clients register again.

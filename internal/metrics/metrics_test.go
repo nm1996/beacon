@@ -99,7 +99,7 @@ func TestInstrumentRegistryCountsOperationsAndResults(t *testing.T) {
 	old := time.Now().Add(-time.Hour)
 
 	for _, id := range []string{"a", "b", "c"} {
-		if err := registry.Create(ctx, discovery.Instance{ID: id, Name: "orders", LastHeartbeat: old}, 100); err != nil {
+		if err := registry.Create(ctx, discovery.Instance{ID: id, Name: "orders", LastHeartbeat: old}, discovery.Limits{Total: 100}); err != nil {
 			t.Fatalf("create: %v", err)
 		}
 	}
@@ -131,7 +131,7 @@ func TestInstrumentRegistryCountsOperationsAndResults(t *testing.T) {
 		}
 	}
 
-	if err := registry.Create(ctx, discovery.Instance{ID: "over", Name: "orders"}, 1); !errors.Is(err, discovery.ErrRegistryFull) {
+	if err := registry.Create(ctx, discovery.Instance{ID: "over", Name: "orders"}, discovery.Limits{Total: 1}); !errors.Is(err, discovery.ErrRegistryFull) {
 		t.Fatalf("expected ErrRegistryFull, got %v", err)
 	}
 
@@ -173,7 +173,7 @@ func TestWatchInstancesCountsByService(t *testing.T) {
 	m.WatchInstances(registry.List)
 
 	for id, name := range map[string]string{"a": "orders", "b": "orders", "c": "payments"} {
-		if err := registry.Create(t.Context(), discovery.Instance{ID: id, Name: name}, 1000); err != nil {
+		if err := registry.Create(t.Context(), discovery.Instance{ID: id, Name: name}, discovery.Limits{Total: 1000}); err != nil {
 			t.Fatalf("create: %v", err)
 		}
 	}
@@ -196,7 +196,7 @@ func TestInstanceMetricsDoNotGrowWithServiceNames(t *testing.T) {
 	// might.
 	for index := range 500 {
 		id := fmt.Sprintf("id-%d", index)
-		if err := registry.Create(t.Context(), discovery.Instance{ID: id, Name: fmt.Sprintf("service-%06d", index)}, 1000); err != nil {
+		if err := registry.Create(t.Context(), discovery.Instance{ID: id, Name: fmt.Sprintf("service-%06d", index)}, discovery.Limits{Total: 1000}); err != nil {
 			t.Fatalf("create: %v", err)
 		}
 	}

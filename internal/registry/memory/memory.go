@@ -22,19 +22,26 @@ import (
 type MemoryRegistry struct { //nolint:revive // stutter accepted for clarity, see above
 	mu        sync.RWMutex
 	instances map[string]discovery.Instance
+	// owned counts the instances of each non-empty owner, so Create checks
+	// the per-owner limit without a scan. Every insert and removal updates
+	// it under mu.
+	owned map[string]int
 }
 
 var _ discovery.Registry = (*MemoryRegistry)(nil)
 
 // New returns an empty registry.
 func New() *MemoryRegistry {
-	return &MemoryRegistry{instances: make(map[string]discovery.Instance)}
+	return &MemoryRegistry{
+		instances: make(map[string]discovery.Instance),
+		owned:     make(map[string]int),
+	}
 }
 
-// Create stores instance under its ID unless limit instances are already
-// stored, and fails if the ID is taken. The count is checked under the same
-// lock as the insert.
-func (registry *MemoryRegistry) Create(_ context.Context, instance discovery.Instance, limit int) error {
+// Create stores instance under its ID unless that would break limits, and
+// fails if the ID is taken. The counts are checked under the same lock as
+// the insert.
+func (registry *MemoryRegistry) Create(_ context.Context, instance discovery.Instance, limits discovery.Limits) error {
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
 
@@ -42,13 +49,38 @@ func (registry *MemoryRegistry) Create(_ context.Context, instance discovery.Ins
 		return fmt.Errorf("instance %s already exists", instance.ID)
 	}
 
-	if len(registry.instances) >= limit {
+	if len(registry.instances) >= limits.Total {
 		return discovery.ErrRegistryFull
+	}
+
+	if instance.Owner != "" && limits.PerOwner > 0 && registry.owned[instance.Owner] >= limits.PerOwner {
+		return discovery.ErrOwnerQuotaExceeded
 	}
 
 	registry.instances[instance.ID] = instance
 
+	if instance.Owner != "" {
+		registry.owned[instance.Owner]++
+	}
+
 	return nil
+}
+
+// remove deletes the instance with id and its share of the owner counts.
+// The caller holds mu for writing.
+func (registry *MemoryRegistry) remove(id string, instance discovery.Instance) {
+	delete(registry.instances, id)
+
+	if instance.Owner == "" {
+		return
+	}
+
+	if registry.owned[instance.Owner] <= 1 {
+		delete(registry.owned, instance.Owner)
+		return
+	}
+
+	registry.owned[instance.Owner]--
 }
 
 // Touch sets the LastHeartbeat of the instance with id, if check allows it.
@@ -125,7 +157,7 @@ func (registry *MemoryRegistry) Delete(_ context.Context, id string, check disco
 		return discovery.ErrInstanceNotOwned
 	}
 
-	delete(registry.instances, id)
+	registry.remove(id, instance)
 
 	return nil
 }
@@ -139,7 +171,7 @@ func (registry *MemoryRegistry) DeleteStale(_ context.Context, cutoff time.Time)
 
 	for id, instance := range registry.instances {
 		if instance.LastHeartbeat.Before(cutoff) {
-			delete(registry.instances, id)
+			registry.remove(id, instance)
 			removed++
 		}
 	}
