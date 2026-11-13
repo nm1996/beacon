@@ -37,15 +37,16 @@ const (
 
 // Store holds the TLS configuration and identities currently in use. It is
 // safe for concurrent use: handshakes and requests read it while Run
-// reloads it.
+// reloads it. Both are published together as one snapshot, so a reader
+// never pairs the TLS configuration of one reload with the identities of
+// another.
 type Store struct {
 	tlsSettings  config.TLSConfig
 	authSettings config.AuthConfig
 	logger       *slog.Logger
 	reloaded     func(result string)
 
-	handshake  atomic.Pointer[tls.Config]
-	identities atomic.Pointer[auth.Identities]
+	current atomic.Pointer[snapshot]
 
 	// mu serializes reloads and guards the fields below.
 	mu sync.Mutex
@@ -100,7 +101,7 @@ func (store *Store) ServerTLSConfig() *tls.Config {
 	return &tls.Config{
 		MinVersion: tls.VersionTLS12,
 		GetConfigForClient: func(*tls.ClientHelloInfo) (*tls.Config, error) {
-			return store.handshake.Load(), nil
+			return store.current.Load().handshake, nil
 		},
 	}
 }
@@ -108,14 +109,14 @@ func (store *Store) ServerTLSConfig() *tls.Config {
 // Authenticate returns the identity token belongs to, using the tokens file
 // in use. It must only be called when authentication is enabled.
 func (store *Store) Authenticate(token string) (auth.Identity, bool) {
-	return store.identities.Load().Authenticate(token)
+	return store.current.Load().identities.Authenticate(token)
 }
 
 // AuthenticateCertificate returns the identity certificate belongs to,
 // using the tokens file in use. It must only be called when authentication
 // is enabled.
 func (store *Store) AuthenticateCertificate(certificate *x509.Certificate) (auth.Identity, bool) {
-	return store.identities.Load().AuthenticateCertificate(certificate)
+	return store.current.Load().identities.AuthenticateCertificate(certificate)
 }
 
 // Reload reads every file again and starts using them if all of them are
@@ -203,7 +204,10 @@ func (store *Store) reload(trigger string, files *fileSet, readErr error) error 
 	store.failedRead = ""
 	store.failedFingerprint = [sha256.Size]byte{}
 	store.reloaded(ReloadOK)
-	store.logger.Info("credentials reloaded", slog.String("trigger", trigger))
+	store.logger.Info("credentials reloaded",
+		slog.String("trigger", trigger),
+		slog.Uint64("generation", store.current.Load().generation),
+	)
 
 	return nil
 }
@@ -354,13 +358,31 @@ func (store *Store) buildTLS(files fileSet) (*tls.Config, error) {
 // use makes result the credentials in use. store.mu must be held, except
 // in New, before the Store is shared.
 func (store *Store) use(result loaded) {
-	if result.handshake != nil {
-		store.handshake.Store(result.handshake)
+	var generation uint64
+	if previous := store.current.Load(); previous != nil {
+		generation = previous.generation + 1
 	}
 
-	if result.identities != nil {
-		store.identities.Store(result.identities)
-	}
+	// One Store publishes the TLS configuration and the identities that
+	// were built from the same files, in a single step.
+	store.current.Store(&snapshot{
+		handshake:  result.handshake,
+		identities: result.identities,
+		generation: generation,
+	})
 
 	store.fingerprint = result.fingerprint
+}
+
+// snapshot is one generation of credentials: the TLS configuration and the
+// identities built from one read of the files. It is never changed after it
+// is published; a reload publishes a new one.
+type snapshot struct {
+	// handshake is nil when TLS is not enabled.
+	handshake *tls.Config
+	// identities is nil when authentication is not enabled.
+	identities *auth.Identities
+	// generation counts successful loads, starting at 0, so tests and logs
+	// can tell snapshots apart.
+	generation uint64
 }

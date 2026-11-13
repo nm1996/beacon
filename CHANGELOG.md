@@ -60,6 +60,10 @@ Add an entry under **Unreleased** in the same pull request as the change.
 - `mise run check` no longer rewrites unformatted files; it fails instead.
   The release workflow runs it, so a release is now always built from the
   tagged source.
+- A credential reload published the new TLS configuration and the new
+  identities in two steps, so a request could briefly pair one with the
+  other. Both are now published as one snapshot, and the reload log line
+  reports its `generation`.
 - `client.WithHTTPClient(nil)` and `client.WithLogger(nil)` no longer cause a
   panic; they keep the defaults.
 - A sentence in the README's Go client section that rendered after a code
