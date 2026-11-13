@@ -30,7 +30,10 @@ type fakeBeacon struct {
 
 	down       atomic.Bool
 	heartbeats atomic.Int32
-	succeeded  atomic.Int32
+	// hang is how many of the next heartbeats get no answer at all, as on
+	// a connection that died without being closed.
+	hang      atomic.Int32
+	succeeded atomic.Int32
 }
 
 // newFakeBeacon returns a running fake with an empty registry and the
@@ -83,6 +86,11 @@ func (beacon *fakeBeacon) ServeHTTP(writer http.ResponseWriter, request *http.Re
 		return
 	}
 
+	if isHeartbeat && beacon.hang.Add(-1) >= 0 {
+		<-request.Context().Done()
+		return
+	}
+
 	beacon.mu.Lock()
 	handler := beacon.handler
 	beacon.mu.Unlock()
@@ -116,6 +124,12 @@ func (transport handlerTransport) RoundTrip(request *http.Request) (*http.Respon
 
 	recorder := httptest.NewRecorder()
 	transport.handler.ServeHTTP(recorder, request)
+
+	// A request given up on while it was served gets the context's error,
+	// as from a real transport.
+	if err := request.Context().Err(); err != nil {
+		return nil, err
+	}
 
 	return recorder.Result(), nil
 }
@@ -271,6 +285,34 @@ func TestLeaseRetriesWhileBeaconIsDown(t *testing.T) {
 
 		if lease.ID() != id {
 			t.Error("expected the same ID, since Beacon never forgot the instance")
+		}
+	})
+}
+
+func TestLeaseGivesUpOnAHungHeartbeatInTime(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		fake := newFakeBeacon(t)
+
+		// The client has no timeout of its own, so only the Lease can end a
+		// request that never gets an answer.
+		lease := mustAnnounce(t, clientFor(t, fake))
+		defer lease.Close(context.Background())
+
+		id := lease.ID()
+		fake.hang.Store(2)
+
+		// The first heartbeat is due after about 10s; two hang for 5s each,
+		// with a 1s retry delay between them, and the third gets through,
+		// all well within the 30s TTL, jitter included.
+		time.Sleep(28 * time.Second)
+		synctest.Wait()
+
+		if fake.succeeded.Load() == 0 {
+			t.Fatalf("expected a heartbeat to get through after the hung ones, %d attempts", fake.heartbeats.Load())
+		}
+
+		if lease.ID() != id {
+			t.Error("expected the instance never to expire, keeping its ID")
 		}
 	})
 }

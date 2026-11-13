@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"reflect"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/nm1996/beacon/internal/discovery"
@@ -393,4 +394,41 @@ func TestOwnerLimitDoesNotApplyWithoutAuthentication(t *testing.T) {
 			t.Fatalf("register %d: %v", index, err)
 		}
 	}
+}
+
+func TestDiscoverLeavesOutExpiredInstancesBeforeCleanup(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		service := newService(t)
+		gone := mustRegister(t, service, "orders")
+
+		time.Sleep(testConfig.TTL / 2)
+
+		live := mustRegister(t, service, "orders")
+
+		// gone is past its TTL; no cleanup has run, so it is still stored.
+		time.Sleep(testConfig.TTL/2 + time.Nanosecond)
+
+		instances, err := service.Discover(t.Context(), "orders")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if len(instances) != 1 || instances[0].ID != live.ID {
+			t.Errorf("expected only %s, got %+v", live.ID, instances)
+		}
+
+		if err := service.Heartbeat(t.Context(), gone.ID, discovery.Caller{AnyInstance: true}); err != nil {
+			t.Fatalf("expected the expired instance to still be stored until cleanup, got %v", err)
+		}
+
+		// A heartbeat that arrives before cleanup brings it back.
+		instances, err = service.Discover(t.Context(), "orders")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if len(instances) != 2 {
+			t.Errorf("expected both instances after the late heartbeat, got %d", len(instances))
+		}
+	})
 }

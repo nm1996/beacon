@@ -145,11 +145,15 @@ func (lease *Lease) run(ctx context.Context) {
 
 // renew sends a heartbeat, or registers again if Beacon no longer knows the
 // instance. It reports whether the instance is known to Beacon afterwards.
+// Each request gets at most attemptTimeout.
 func (lease *Lease) renew(ctx context.Context) bool {
 	logger := lease.client.logger
 	id := lease.ID()
 
-	err := lease.client.Heartbeat(ctx, id)
+	attemptCtx, cancel := lease.attempt(ctx)
+	err := lease.client.Heartbeat(attemptCtx, id)
+	cancel()
+
 	if err == nil {
 		return true
 	}
@@ -163,7 +167,10 @@ func (lease *Lease) renew(ctx context.Context) bool {
 		return false
 	}
 
-	registered, err := lease.client.Register(ctx, lease.registration)
+	attemptCtx, cancel = lease.attempt(ctx)
+	registered, err := lease.client.Register(attemptCtx, lease.registration)
+	cancel()
+
 	if err != nil {
 		if ctx.Err() == nil {
 			logger.WarnContext(ctx, "beacon registration failed", slog.String("name", lease.registration.Name), slog.Any("error", err))
@@ -184,6 +191,19 @@ func (lease *Lease) renew(ctx context.Context) bool {
 	)
 
 	return true
+}
+
+// attempt returns a context for one request of the background loop, which
+// ends after a sixth of the TTL, half the normal heartbeat interval. A
+// request stuck on a dead connection then fails in time for retries on a
+// new one before the instance expires, even with an http.Client that has
+// no timeout of its own.
+func (lease *Lease) attempt(ctx context.Context) (context.Context, context.CancelFunc) {
+	lease.mu.Lock()
+	timeout := lease.ttl / 6
+	lease.mu.Unlock()
+
+	return context.WithTimeout(ctx, timeout)
 }
 
 // nextDelay is how long to wait before the next heartbeat: a third of the

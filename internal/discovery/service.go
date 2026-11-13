@@ -159,15 +159,19 @@ func (service *Service) Heartbeat(ctx context.Context, id string, caller Caller)
 	return nil
 }
 
-// Discover returns the instances named name, or every instance when name is
-// empty, sorted by ID.
+// Discover returns the live instances named name, or every live instance
+// when name is empty, sorted by ID.
 func (service *Service) Discover(ctx context.Context, name string) ([]Instance, error) {
 	return service.List(ctx, ListQuery{Name: name})
 }
 
 // List returns the instances query selects, sorted by ID. Transports use
-// it to serve one page at a time.
+// it to serve one page at a time. It leaves out instances whose last
+// heartbeat is more than TTL ago, which cleanup has yet to remove; clients
+// should not be sent to instances Beacon already considers gone.
 func (service *Service) List(ctx context.Context, query ListQuery) ([]Instance, error) {
+	query.HeartbeatSince = time.Now().Add(-service.config.TTL)
+
 	instances, err := service.registry.List(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("list instances: %w", err)
