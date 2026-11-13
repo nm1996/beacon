@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/nm1996/beacon/internal/discovery"
 )
 
 // Config holds every setting Beacon reads at startup.
@@ -82,13 +84,19 @@ type AuthConfig struct {
 	TokensFile string `toml:"tokens_file"`
 }
 
-// RegistryConfig controls how long instances live without heartbeats.
+// RegistryConfig controls how long instances live without heartbeats and
+// what a registration may contain.
 type RegistryConfig struct {
 	// ServiceTTL is how long an instance may go without a heartbeat before
 	// it is removed.
 	ServiceTTL time.Duration `toml:"service_ttl"`
 	// CleanupInterval is how often stale instances are looked for.
 	CleanupInterval time.Duration `toml:"cleanup_interval"`
+	// MaxNameLength is the longest service name accepted.
+	MaxNameLength int `toml:"max_name_length"`
+	// MaxAddressLength is the longest host name accepted as an address. IP
+	// addresses are not held to it.
+	MaxAddressLength int `toml:"max_address_length"`
 }
 
 // StorageMemory selects the in-memory registry backend, which keeps
@@ -133,8 +141,10 @@ func Default() Config {
 			MaxRequestBodyBytes: 64 << 10,
 		},
 		Registry: RegistryConfig{
-			ServiceTTL:      30 * time.Second,
-			CleanupInterval: 5 * time.Second,
+			ServiceTTL:       30 * time.Second,
+			CleanupInterval:  5 * time.Second,
+			MaxNameLength:    discovery.DefaultMaxNameLength,
+			MaxAddressLength: discovery.DefaultMaxAddressLength,
 		},
 		Storage: StorageConfig{
 			Backend: StorageMemory,
@@ -239,6 +249,10 @@ func (config Config) Validate() error {
 	check(registry.CleanupInterval <= registry.ServiceTTL,
 		"registry.cleanup_interval (%s) must not be longer than registry.service_ttl (%s)",
 		registry.CleanupInterval, registry.ServiceTTL)
+	check(registry.MaxNameLength >= 1 && registry.MaxNameLength <= discovery.MaxLengthLimit,
+		"registry.max_name_length must be between 1 and %d, got %d", discovery.MaxLengthLimit, registry.MaxNameLength)
+	check(registry.MaxAddressLength >= 1 && registry.MaxAddressLength <= discovery.MaxLengthLimit,
+		"registry.max_address_length must be between 1 and %d, got %d", discovery.MaxLengthLimit, registry.MaxAddressLength)
 
 	check(slices.Contains(storageBackends, config.Storage.Backend),
 		"storage.backend must be one of %s, got %q", strings.Join(storageBackends, ", "), config.Storage.Backend)

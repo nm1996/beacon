@@ -76,6 +76,12 @@ service_ttl = "30s"
 # How often Beacon checks for stale service instances.
 cleanup_interval = "5s"
 
+# The longest service name and the longest host name a registration may use,
+# each between 1 and 253. The name default fits a DNS label; the address
+# default is the longest DNS name. IP addresses are not held to the limit.
+max_name_length = 63
+max_address_length = 253
+
 [storage]
 # Where registered instances are kept. Only "memory" exists today: fast, and
 # everything is forgotten on restart, so clients register again.

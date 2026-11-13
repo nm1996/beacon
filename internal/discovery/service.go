@@ -10,16 +10,22 @@ import (
 	"github.com/google/uuid"
 )
 
-// Config holds the expiry settings Service enforces.
+// Config holds the settings Service enforces.
 type Config struct {
 	// TTL is how long an instance may go without a heartbeat before it is
 	// considered stale.
 	TTL time.Duration
 	// CleanupInterval is how often RunCleanup removes stale instances.
 	CleanupInterval time.Duration
+	// MaxNameLength is the longest service name Register accepts, at most
+	// MaxLengthLimit. Zero means DefaultMaxNameLength.
+	MaxNameLength int
+	// MaxAddressLength is the longest address Register accepts, at most
+	// MaxLengthLimit. Zero means DefaultMaxAddressLength.
+	MaxAddressLength int
 }
 
-// validate reports the first setting that is not positive.
+// validate reports the first setting that is out of range.
 func (config Config) validate() error {
 	if config.TTL <= 0 {
 		return errors.New("TTL must be positive")
@@ -29,7 +35,33 @@ func (config Config) validate() error {
 		return errors.New("cleanup interval must be positive")
 	}
 
+	if config.MaxNameLength < 0 || config.MaxNameLength > MaxLengthLimit {
+		return fmt.Errorf("max name length must be between 1 and %d, or 0 for the default", MaxLengthLimit)
+	}
+
+	if config.MaxAddressLength < 0 || config.MaxAddressLength > MaxLengthLimit {
+		return fmt.Errorf("max address length must be between 1 and %d, or 0 for the default", MaxLengthLimit)
+	}
+
 	return nil
+}
+
+// maxNameLength is MaxNameLength, or its default when unset.
+func (config Config) maxNameLength() int {
+	if config.MaxNameLength == 0 {
+		return DefaultMaxNameLength
+	}
+
+	return config.MaxNameLength
+}
+
+// maxAddressLength is MaxAddressLength, or its default when unset.
+func (config Config) maxAddressLength() int {
+	if config.MaxAddressLength == 0 {
+		return DefaultMaxAddressLength
+	}
+
+	return config.MaxAddressLength
 }
 
 // Service applies Beacon's rules on top of a Registry. Every transport, the
@@ -61,7 +93,7 @@ func (service *Service) TTL() time.Duration {
 // generated ID, owned by caller. It returns an error wrapping
 // ErrInvalidRegistration when validation fails.
 func (service *Service) Register(ctx context.Context, registration Registration, caller Caller) (Instance, error) {
-	if err := registration.validate(); err != nil {
+	if err := registration.validate(service.config); err != nil {
 		return Instance{}, err
 	}
 
