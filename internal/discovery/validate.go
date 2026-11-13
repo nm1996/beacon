@@ -34,11 +34,13 @@ const (
 	maxHostLabelLength = 63
 )
 
-// namePattern is what a service name may look like: lowercase letters,
-// digits, '.', '_' and '-', starting and ending with a letter or digit.
-// Names are compared exactly, so the rule keeps "orders", "Orders" and
-// "orders " from becoming three different services.
-var namePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$`)
+// namePattern is what a service name may look like: runs of lowercase
+// letters and digits joined by single '.', '_' or '-' separators, so it
+// starts and ends with a letter or digit and never has two separators in a
+// row, as in "orders..v2" or "orders._v2". Names are compared exactly, so the
+// rule keeps "orders", "Orders" and "orders " from becoming three different
+// services.
+var namePattern = regexp.MustCompile(`^[a-z0-9]+(?:[._-][a-z0-9]+)*$`)
 
 // hostLabelPattern is one label of a host name: letters, digits and '-',
 // not starting or ending with '-'.
@@ -71,7 +73,8 @@ func validateName(name string, maxLength int) error {
 
 	if len(name) > maxLength || !namePattern.MatchString(name) {
 		return fmt.Errorf("%w: name must be at most %d characters of lowercase letters, digits, '.', '_' or '-', "+
-			"starting and ending with a letter or digit", ErrInvalidRegistration, maxLength)
+			"starting and ending with a letter or digit, with no two of '.', '_' and '-' in a row",
+			ErrInvalidRegistration, maxLength)
 	}
 
 	return nil
