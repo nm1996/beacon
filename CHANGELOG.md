@@ -76,6 +76,10 @@ Add an entry under **Unreleased** in the same pull request as the change.
   (`BEACON_REGISTRY_MAX_NAME_LENGTH`, `BEACON_REGISTRY_MAX_ADDRESS_LENGTH`);
   IP addresses are not held to the address limit.
 
+- Heartbeats and unregistrations refused because another caller owns the
+  instance are counted as `result="not_owned"` in
+  `beacon_registry_operations_total`.
+
 ### Fixed
 
 - `beacon_instances` carried a `service` label taken from client-chosen

@@ -243,7 +243,7 @@ func (registry failingRegistry) Get(context.Context, string) (discovery.Instance
 }
 
 // Touch always fails.
-func (registry failingRegistry) Touch(context.Context, string, time.Time) error {
+func (registry failingRegistry) Touch(context.Context, string, time.Time, discovery.OwnerCheck) error {
 	return registry.err
 }
 
@@ -253,7 +253,7 @@ func (registry failingRegistry) List(context.Context, string) ([]discovery.Insta
 }
 
 // Delete always fails.
-func (registry failingRegistry) Delete(context.Context, string) error {
+func (registry failingRegistry) Delete(context.Context, string, discovery.OwnerCheck) error {
 	return registry.err
 }
 

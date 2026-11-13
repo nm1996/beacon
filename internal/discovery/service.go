@@ -139,33 +139,8 @@ func (service *Service) Register(ctx context.Context, registration Registration,
 // ErrInstanceNotFound if there is none, for example because it expired, and
 // ErrInstanceNotOwned if caller may not change it.
 func (service *Service) Heartbeat(ctx context.Context, id string, caller Caller) error {
-	if err := service.authorize(ctx, id, caller); err != nil {
+	if err := service.registry.Touch(ctx, id, time.Now(), caller.check()); err != nil {
 		return fmt.Errorf("heartbeat %s: %w", id, err)
-	}
-
-	if err := service.registry.Touch(ctx, id, time.Now()); err != nil {
-		return fmt.Errorf("heartbeat %s: %w", id, err)
-	}
-
-	return nil
-}
-
-// authorize returns ErrInstanceNotFound if no instance has id, and
-// ErrInstanceNotOwned if caller may not change it. An instance's owner
-// never changes and IDs are never reused, so the instance cannot become
-// someone else's between this check and the change that follows.
-func (service *Service) authorize(ctx context.Context, id string, caller Caller) error {
-	if caller.AnyInstance {
-		return nil
-	}
-
-	instance, err := service.registry.Get(ctx, id)
-	if err != nil {
-		return err
-	}
-
-	if !caller.mayChange(instance) {
-		return ErrInstanceNotOwned
 	}
 
 	return nil
@@ -185,11 +160,7 @@ func (service *Service) Discover(ctx context.Context, name string) ([]Instance, 
 // Unregister removes the instance with id. It returns ErrInstanceNotFound if
 // there is none, and ErrInstanceNotOwned if caller may not change it.
 func (service *Service) Unregister(ctx context.Context, id string, caller Caller) error {
-	if err := service.authorize(ctx, id, caller); err != nil {
-		return fmt.Errorf("unregister %s: %w", id, err)
-	}
-
-	if err := service.registry.Delete(ctx, id); err != nil {
+	if err := service.registry.Delete(ctx, id, caller.check()); err != nil {
 		return fmt.Errorf("unregister %s: %w", id, err)
 	}
 
