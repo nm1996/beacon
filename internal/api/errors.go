@@ -17,6 +17,7 @@ const (
 	codeServiceNotFound    = "service_not_found"
 	codeInstanceNotOwned   = "instance_not_owned"
 	codeQuotaExceeded      = "quota_exceeded"
+	codeInvalidQuery       = "invalid_query"
 	codeNotFound           = "not_found"
 	codeMethodNotAllowed   = "method_not_allowed"
 	codeInternalError      = "internal_error"

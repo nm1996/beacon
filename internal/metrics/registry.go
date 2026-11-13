@@ -70,9 +70,9 @@ func (registry *instrumentedRegistry) Touch(ctx context.Context, id string, at t
 }
 
 // List records and forwards the call.
-func (registry *instrumentedRegistry) List(ctx context.Context, name string) ([]discovery.Instance, error) {
+func (registry *instrumentedRegistry) List(ctx context.Context, query discovery.ListQuery) ([]discovery.Instance, error) {
 	started := time.Now()
-	instances, err := registry.next.List(ctx, name)
+	instances, err := registry.next.List(ctx, query)
 	registry.observe("list", started, err)
 
 	return instances, err

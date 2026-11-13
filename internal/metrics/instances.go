@@ -14,9 +14,9 @@ import (
 // hanging it.
 const instancesTimeout = 5 * time.Second
 
-// ListFunc lists instances; discovery.Service.Discover and
+// ListFunc lists instances; discovery.Service.List and
 // discovery.Registry.List both fit.
-type ListFunc func(ctx context.Context, name string) ([]discovery.Instance, error)
+type ListFunc func(ctx context.Context, query discovery.ListQuery) ([]discovery.Instance, error)
 
 // WatchInstances reports beacon_instances, the number of registered
 // instances, and beacon_services, the number of distinct service names, by
@@ -65,7 +65,7 @@ func (collector *instancesCollector) Collect(metrics chan<- prometheus.Metric) {
 	ctx, cancel := context.WithTimeout(context.Background(), instancesTimeout)
 	defer cancel()
 
-	instances, err := collector.list(ctx, "")
+	instances, err := collector.list(ctx, discovery.ListQuery{})
 	if err != nil {
 		metrics <- prometheus.NewInvalidMetric(instancesDesc, err)
 		metrics <- prometheus.NewInvalidMetric(servicesDesc, err)

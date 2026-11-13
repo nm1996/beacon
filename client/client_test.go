@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -306,5 +307,105 @@ func TestRegisterOnFullRegistryMatchesErrQuotaExceeded(t *testing.T) {
 
 	if errors.Is(err, client.ErrInvalid) || errors.Is(err, client.ErrNotFound) {
 		t.Error("a full registry must not look like a bad request or a missing instance")
+	}
+}
+
+// countingHandler counts the requests it forwards to next.
+type countingHandler struct {
+	next     http.Handler
+	requests atomic.Int32
+}
+
+// ServeHTTP counts and forwards.
+func (handler *countingHandler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+	handler.requests.Add(1)
+	handler.next.ServeHTTP(writer, request)
+}
+
+func TestDiscoverFollowsPages(t *testing.T) {
+	components, err := bootstrap.New(config.Default(), slog.New(slog.DiscardHandler), "v9.9.9")
+	if err != nil {
+		t.Fatalf("build server: %v", err)
+	}
+
+	counter := &countingHandler{next: components.Server.Handler}
+
+	// Behind a proxy prefix, to prove only the cursor is taken from the
+	// server's Link header, not its path.
+	mux := http.NewServeMux()
+	mux.Handle("/beacon/", http.StripPrefix("/beacon", counter))
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	beacon := mustNew(t, server.URL+"/beacon")
+
+	const total = 1203 // three pages of 500
+	for range total {
+		if _, err := beacon.Register(t.Context(), orders); err != nil {
+			t.Fatalf("register: %v", err)
+		}
+	}
+
+	counter.requests.Store(0)
+
+	instances, err := beacon.Discover(t.Context(), "orders")
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+
+	if got := counter.requests.Load(); got != 3 {
+		t.Errorf("expected 3 page requests, got %d", got)
+	}
+
+	if len(instances) != total {
+		t.Fatalf("expected %d instances, got %d", total, len(instances))
+	}
+
+	seen := make(map[string]bool, total)
+	for index, instance := range instances {
+		if seen[instance.ID] {
+			t.Fatalf("instance %s returned twice", instance.ID)
+		}
+
+		seen[instance.ID] = true
+
+		if index > 0 && instances[index-1].ID >= instance.ID {
+			t.Fatalf("expected instances sorted by ID, %s came before %s", instances[index-1].ID, instance.ID)
+		}
+	}
+}
+
+func TestDiscoverWorksWithServersWithoutPaging(t *testing.T) {
+	// Beacon v0.1.0 ignores limit and returns everything, without a Link.
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(writer, `[{"id":"a","name":"orders","address":"10.0.0.1","port":1},{"id":"b","name":"orders","address":"10.0.0.2","port":1}]`)
+	}))
+	defer server.Close()
+
+	instances, err := mustNew(t, server.URL).Discover(t.Context(), "orders")
+	if err != nil || len(instances) != 2 {
+		t.Errorf("expected both instances from a server without paging, got %d, %v", len(instances), err)
+	}
+}
+
+func TestDiscoverStopsOnARepeatedCursor(t *testing.T) {
+	// A broken server that always links to the same page must not make the
+	// client loop forever.
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Link", `</api/v1/services?limit=500&cursor=c2FtZQ>; rel="next"`)
+		_, _ = io.WriteString(writer, `[{"id":"a","name":"orders","address":"10.0.0.1","port":1}]`)
+	}))
+	defer server.Close()
+
+	if _, err := mustNew(t, server.URL).Discover(t.Context(), "orders"); err == nil {
+		t.Error("expected an error for a repeated cursor")
+	}
+}
+
+func TestDiscoverEmptyIsAnEmptySlice(t *testing.T) {
+	instances, err := newServer(t).Discover(t.Context(), "nothing")
+	if err != nil || instances == nil || len(instances) != 0 {
+		t.Errorf("expected an empty, non-nil slice, got %#v, %v", instances, err)
 	}
 }

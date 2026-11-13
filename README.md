@@ -159,6 +159,7 @@ Every error response has the same shape:
 |---|---|---|
 | `400` | `invalid_request_body` | The body is not a single JSON object within the size limit with only the documented fields |
 | `400` | `invalid_service` | A registration field breaks a rule, for example a port outside `1`–`65535` |
+| `400` | `invalid_query` | A query parameter is invalid, such as `limit=0` or a `cursor` Beacon did not issue |
 | `403` | `instance_not_owned` | [Authentication](#authentication) is on and another caller registered this instance; see [Instance ownership](#instance-ownership) |
 | `429` | `quota_exceeded` | Beacon already holds `registry.max_instances` instances; retry after some unregister or expire |
 | `404` | `service_not_found` | No instance is registered with the given ID |
@@ -196,8 +197,10 @@ Every error response has the same shape:
 | Query parameter | Meaning |
 |---|---|
 | `name` | Optional. Only return instances with this name |
+| `limit` | Optional. Return at most this many instances, from `1` to `1000`, and link to the next page |
+| `cursor` | Only with `limit`. Where the next page starts; take it from the `Link` header, never build it |
 
-Always returns `200 OK` with a JSON array, which is empty when nothing matches:
+Returns `200 OK` with a JSON array sorted by ID, which is empty when nothing matches:
 
 ```json
 [
@@ -206,7 +209,20 @@ Always returns `200 OK` with a JSON array, which is empty when nothing matches:
 ]
 ```
 
-`last_heartbeat` is in UTC, in RFC 3339 format. The order of instances is not defined.
+`last_heartbeat` is in UTC, in RFC 3339 format.
+
+Without `limit`, every matching instance comes back in one response, as it always has; `registry.max_instances` bounds how large that can get. With `limit`, the response holds at most that many and, when more follow, a `Link` header points at the next page:
+
+```http
+Link: </api/v1/services?cursor=Y2FmZS0xMjM&limit=100&name=orders>; rel="next"
+```
+
+Request that URL to get the next page, until a response has no `Link` header. The response body stays a plain array either way, so clients that ignore paging keep working. Pages are taken in ID order, so an instance registered or removed while you page may or may not show up, but none is returned twice.
+
+| Status | Meaning |
+|---|---|
+| `200 OK` | The instances, possibly with a `Link` header |
+| `400 Bad Request` | `limit` or `cursor` is invalid; code `invalid_query` |
 
 ### `POST /api/v1/services/{id}/heartbeat`
 
@@ -578,7 +594,7 @@ err = beacon.Heartbeat(ctx, registered.ID)
 err = beacon.Unregister(ctx, registered.ID)
 ```
 
-Errors from Beacon are `*client.Error` values carrying the status and Beacon's error code, and they match `client.ErrNotFound` and `client.ErrInvalid` with `errors.Is`. `client.WithHTTPClient` sets a custom `http.Client`; by default every request times out after 10 seconds. `Register` is never retried, because repeating it would create a second instance.
+Errors from Beacon are `*client.Error` values carrying the status and Beacon's error code, and they match `client.ErrNotFound` and `client.ErrInvalid` with `errors.Is`. `client.WithHTTPClient` sets a custom `http.Client`; by default every request times out after 10 seconds. `Register` is never retried, because repeating it would create a second instance. `Discover` fetches instances 500 at a time and follows the page links, so a large registry never has to fit in one response; it works against servers without paging too.
 
 When Beacon has [authentication](#authentication) on, give the client its token. Read it from a file or secret store rather than writing it into the code:
 

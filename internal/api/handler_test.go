@@ -311,8 +311,8 @@ func (fake failingDiscovery) Heartbeat(context.Context, string, discovery.Caller
 	return fake.err
 }
 
-// Discover always fails.
-func (fake failingDiscovery) Discover(context.Context, string) ([]discovery.Instance, error) {
+// List always fails.
+func (fake failingDiscovery) List(context.Context, discovery.ListQuery) ([]discovery.Instance, error) {
 	return nil, fake.err
 }
 
