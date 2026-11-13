@@ -35,6 +35,7 @@ func environmentVariables(config *Config) []environmentVariable {
 		{name: "BEACON_REGISTRY_CLEANUP_INTERVAL", apply: setDuration(&config.Registry.CleanupInterval)},
 		{name: "BEACON_REGISTRY_MAX_NAME_LENGTH", apply: setInt(&config.Registry.MaxNameLength)},
 		{name: "BEACON_REGISTRY_MAX_ADDRESS_LENGTH", apply: setInt(&config.Registry.MaxAddressLength)},
+		{name: "BEACON_REGISTRY_MAX_INSTANCES", apply: setInt(&config.Registry.MaxInstances)},
 		{name: "BEACON_STORAGE_BACKEND", apply: setString(&config.Storage.Backend)},
 		{name: "BEACON_METRICS_ENABLED", apply: setBool(&config.Metrics.Enabled)},
 		{name: "BEACON_LOGGING_LEVEL", apply: setString(&config.Logging.Level)},

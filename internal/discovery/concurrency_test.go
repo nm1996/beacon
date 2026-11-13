@@ -71,7 +71,7 @@ func TestConcurrentRegisterGivesUniqueIDs(t *testing.T) {
 }
 
 func TestServiceUnderLoadWithCleanupRunning(t *testing.T) {
-	service, err := discovery.New(memory.New(), discovery.Config{TTL: time.Hour, CleanupInterval: time.Millisecond}, discard)
+	service, err := discovery.New(memory.New(), discovery.Config{TTL: time.Hour, CleanupInterval: time.Millisecond, MaxInstances: 1 << 20}, discard)
 	if err != nil {
 		t.Fatalf("new service: %v", err)
 	}

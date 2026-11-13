@@ -28,6 +28,12 @@ var (
 	// another caller registered. Only that caller, or one with the manage
 	// permission, may change it.
 	ErrNotOwned = errors.New("beacon: instance registered by another caller")
+
+	// ErrQuotaExceeded matches errors for a registration Beacon refused
+	// because it already holds its maximum number of instances. Retrying
+	// later can succeed once other instances unregister or expire; a Lease
+	// keeps retrying on its own.
+	ErrQuotaExceeded = errors.New("beacon: registry is full")
 )
 
 // Error is a response Beacon answered with an unexpected status. Code holds
@@ -48,8 +54,8 @@ func (apiError *Error) Error() string {
 	return fmt.Sprintf("beacon: %s: %s (%d)", apiError.Code, apiError.Message, apiError.StatusCode)
 }
 
-// Is lets errors.Is match an *Error against ErrNotFound, ErrInvalid and
-// ErrNotOwned by its error code, and against ErrUnauthorized and
+// Is lets errors.Is match an *Error against ErrNotFound, ErrInvalid,
+// ErrNotOwned and ErrQuotaExceeded by its error code, and against ErrUnauthorized and
 // ErrForbidden by its status code, so a 401 or 403 from a proxy in front of
 // Beacon matches too.
 func (apiError *Error) Is(target error) bool {
@@ -64,6 +70,8 @@ func (apiError *Error) Is(target error) bool {
 		return apiError.StatusCode == http.StatusForbidden
 	case ErrNotOwned:
 		return apiError.Code == "instance_not_owned"
+	case ErrQuotaExceeded:
+		return apiError.Code == "quota_exceeded"
 	default:
 		return false
 	}

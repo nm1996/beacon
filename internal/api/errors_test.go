@@ -7,6 +7,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/nm1996/beacon/internal/discovery"
+	"github.com/nm1996/beacon/internal/registry/memory"
 )
 
 // decodeError checks that rec holds a JSON error response and returns its
@@ -112,5 +116,29 @@ func TestInternalErrorUsesJSONFormat(t *testing.T) {
 
 	if strings.Contains(detail.Message, "disk on fire") {
 		t.Error("expected internal error details not to leak to the client")
+	}
+}
+
+func TestFullRegistryAnswersQuotaExceeded(t *testing.T) {
+	service, err := discovery.New(memory.New(), discovery.Config{TTL: testTTL, CleanupInterval: time.Second, MaxInstances: 1}, discard)
+	if err != nil {
+		t.Fatalf("new discovery: %v", err)
+	}
+
+	router := NewRouter(service, discard, testConfig)
+	body := `{"name":"orders","address":"10.0.0.1","port":8081}`
+
+	if rec := serve(router, http.MethodPost, "/api/v1/services", body); rec.Code != http.StatusCreated {
+		t.Fatalf("expected the first registration to succeed, got %d", rec.Code)
+	}
+
+	rec := serve(router, http.MethodPost, "/api/v1/services", body)
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected status %d, got %d", http.StatusTooManyRequests, rec.Code)
+	}
+
+	if detail := decodeError(t, rec); detail.Code != codeQuotaExceeded {
+		t.Errorf("expected code %q, got %q", codeQuotaExceeded, detail.Code)
 	}
 }

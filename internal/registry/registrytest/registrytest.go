@@ -9,13 +9,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/nm1996/beacon/internal/discovery"
 )
+
+// noLimit is a Create limit no case reaches.
+const noLimit = math.MaxInt
 
 // base is a fixed point in time the cases build their timestamps from.
 var base = time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC)
@@ -41,6 +46,8 @@ func Run(test *testing.T, newRegistry func(test *testing.T) discovery.Registry) 
 		{name: "DeleteUnknownID", run: deleteUnknownID},
 		{name: "DeleteStaleUsesCutoff", run: deleteStaleUsesCutoff},
 		{name: "ConcurrentUse", run: concurrentUse},
+		{name: "CreateRespectsLimit", run: createRespectsLimit},
+		{name: "ConcurrentCreateNeverExceedsLimit", run: concurrentCreateNeverExceedsLimit},
 	}
 
 	for _, tc := range cases {
@@ -68,7 +75,7 @@ func mustCreate(test *testing.T, registry discovery.Registry, instances ...disco
 	test.Helper()
 
 	for _, item := range instances {
-		if err := registry.Create(test.Context(), item); err != nil {
+		if err := registry.Create(test.Context(), item, noLimit); err != nil {
 			test.Fatalf("create %s: %v", item.ID, err)
 		}
 	}
@@ -126,7 +133,7 @@ func createThenList(test *testing.T, registry discovery.Registry) {
 func createRejectsDuplicateID(test *testing.T, registry discovery.Registry) {
 	mustCreate(test, registry, instance("a", "orders", base))
 
-	if err := registry.Create(test.Context(), instance("a", "payments", base)); err == nil {
+	if err := registry.Create(test.Context(), instance("a", "payments", base), noLimit); err == nil {
 		test.Fatal("expected creating a second instance with the same ID to fail")
 	}
 
@@ -321,7 +328,7 @@ func concurrentUse(test *testing.T, registry discovery.Registry) {
 
 				// Every worker leaves one fresh instance per op and creates
 				// and deletes a stale one, while sweeps and reads run.
-				if err := registry.Create(ctx, instance(id, fmt.Sprintf("service-%d", worker), base)); err != nil {
+				if err := registry.Create(ctx, instance(id, fmt.Sprintf("service-%d", worker), base), noLimit); err != nil {
 					test.Errorf("create %s: %v", id, err)
 					return
 				}
@@ -330,7 +337,7 @@ func concurrentUse(test *testing.T, registry discovery.Registry) {
 					test.Errorf("touch %s: %v", id, err)
 				}
 
-				if err := registry.Create(ctx, instance(id+"-stale", "stale", stale)); err != nil {
+				if err := registry.Create(ctx, instance(id+"-stale", "stale", stale), noLimit); err != nil {
 					test.Errorf("create %s-stale: %v", id, err)
 				}
 
@@ -358,5 +365,81 @@ func concurrentUse(test *testing.T, registry discovery.Registry) {
 
 	if got := mustList(test, registry, "stale"); len(got) != 0 {
 		test.Errorf("expected every stale instance to be swept, %d remain", len(got))
+	}
+}
+
+func createRespectsLimit(test *testing.T, registry discovery.Registry) {
+	ctx := test.Context()
+
+	for _, id := range []string{"a", "b"} {
+		if err := registry.Create(ctx, instance(id, "orders", base), 2); err != nil {
+			test.Fatalf("create %s within the limit: %v", id, err)
+		}
+	}
+
+	if err := registry.Create(ctx, instance("c", "orders", base), 2); !errors.Is(err, discovery.ErrRegistryFull) {
+		test.Fatalf("expected ErrRegistryFull at the limit, got %v", err)
+	}
+
+	if got := mustList(test, registry, ""); !sameIDs(got, "a", "b") {
+		test.Errorf("expected the refused instance not to be stored, got %v", ids(got))
+	}
+
+	// Leaving frees a place.
+	if err := registry.Delete(ctx, "a"); err != nil {
+		test.Fatalf("delete: %v", err)
+	}
+
+	if err := registry.Create(ctx, instance("c", "orders", base), 2); err != nil {
+		test.Errorf("expected a place after one instance left, got %v", err)
+	}
+}
+
+// concurrentCreateNeverExceedsLimit races more creates than the limit
+// allows. Exactly limit of them may succeed; the rest must get
+// ErrRegistryFull, never a silent overshoot.
+func concurrentCreateNeverExceedsLimit(test *testing.T, registry discovery.Registry) {
+	const (
+		limit     = 50
+		workers   = 16
+		perWorker = 10
+	)
+
+	var (
+		group   sync.WaitGroup
+		created atomic.Int64
+		refused atomic.Int64
+		start   = make(chan struct{})
+		ctx     = context.Background()
+	)
+
+	for worker := range workers {
+		group.Go(func() {
+			<-start
+
+			for op := range perWorker {
+				err := registry.Create(ctx, instance(fmt.Sprintf("w%d-%d", worker, op), "orders", base), limit)
+
+				switch {
+				case err == nil:
+					created.Add(1)
+				case errors.Is(err, discovery.ErrRegistryFull):
+					refused.Add(1)
+				default:
+					test.Errorf("create: %v", err)
+				}
+			}
+		})
+	}
+
+	close(start)
+	group.Wait()
+
+	if created.Load() != limit || refused.Load() != workers*perWorker-limit {
+		test.Errorf("expected %d created and %d refused, got %d and %d", limit, workers*perWorker-limit, created.Load(), refused.Load())
+	}
+
+	if got := len(mustList(test, registry, "")); got != limit {
+		test.Errorf("expected exactly %d stored instances, got %d", limit, got)
 	}
 }

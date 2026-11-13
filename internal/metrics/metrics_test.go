@@ -98,7 +98,7 @@ func TestInstrumentRegistryCountsOperationsAndResults(t *testing.T) {
 	old := time.Now().Add(-time.Hour)
 
 	for _, id := range []string{"a", "b", "c"} {
-		if err := registry.Create(ctx, discovery.Instance{ID: id, Name: "orders", LastHeartbeat: old}); err != nil {
+		if err := registry.Create(ctx, discovery.Instance{ID: id, Name: "orders", LastHeartbeat: old}, 100); err != nil {
 			t.Fatalf("create: %v", err)
 		}
 	}
@@ -128,6 +128,14 @@ func TestInstrumentRegistryCountsOperationsAndResults(t *testing.T) {
 		if got := testutil.ToFloat64(m.registryOperations.WithLabelValues(tt.operation, tt.result)); got != tt.want {
 			t.Errorf("%s/%s: expected %v, got %v", tt.operation, tt.result, tt.want, got)
 		}
+	}
+
+	if err := registry.Create(ctx, discovery.Instance{ID: "over", Name: "orders"}, 1); !errors.Is(err, discovery.ErrRegistryFull) {
+		t.Fatalf("expected ErrRegistryFull, got %v", err)
+	}
+
+	if got := testutil.ToFloat64(m.registryOperations.WithLabelValues("create", "full")); got != 1 {
+		t.Errorf("expected 1 refused create counted as full, got %v", got)
 	}
 
 	if got := testutil.ToFloat64(m.expiredInstances); got != 2 {
@@ -164,7 +172,7 @@ func TestWatchInstancesCountsByService(t *testing.T) {
 	m.WatchInstances(registry.List)
 
 	for id, name := range map[string]string{"a": "orders", "b": "orders", "c": "payments"} {
-		if err := registry.Create(t.Context(), discovery.Instance{ID: id, Name: name}); err != nil {
+		if err := registry.Create(t.Context(), discovery.Instance{ID: id, Name: name}, 100); err != nil {
 			t.Fatalf("create: %v", err)
 		}
 	}

@@ -54,6 +54,14 @@ Add an entry under **Unreleased** in the same pull request as the change.
   removing a stuck instance. Owners are logged, not shown by the API.
   Without authentication nothing changes.
 - `client.ErrNotOwned`, which matches `instance_not_owned` errors.
+- A limit on registered instances: `registry.max_instances`
+  (`BEACON_REGISTRY_MAX_INSTANCES`, default 10000). Registrations beyond it
+  get `429 quota_exceeded` until instances unregister or expire, which bounds
+  memory use and the size of discovery responses. The limit is checked in the
+  same step as the insert, so concurrent registrations cannot overshoot it.
+  Refused creates are counted as `result="full"` in
+  `beacon_registry_operations_total`. `client.ErrQuotaExceeded` matches the
+  error.
 
 ### Changed
 

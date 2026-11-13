@@ -82,6 +82,11 @@ cleanup_interval = "5s"
 max_name_length = 63
 max_address_length = 253
 
+# The most instances Beacon holds at once. Further registrations get 429
+# quota_exceeded until instances unregister or expire. This bounds memory use
+# and the size of discovery responses.
+max_instances = 10000
+
 [storage]
 # Where registered instances are kept. Only "memory" exists today: fast, and
 # everything is forgotten on restart, so clients register again.

@@ -23,7 +23,7 @@ func TestConcurrentTrafficWithBackgroundCleanup(t *testing.T) {
 	const clients = 16
 	const heartbeatsPerClient = 50
 
-	store, err := discovery.New(memory.New(), discovery.Config{TTL: time.Hour, CleanupInterval: time.Millisecond}, discard)
+	store, err := discovery.New(memory.New(), discovery.Config{TTL: time.Hour, CleanupInterval: time.Millisecond, MaxInstances: 1 << 20}, discard)
 	if err != nil {
 		t.Fatalf("new discovery: %v", err)
 	}

@@ -14,7 +14,7 @@ import (
 
 // testConfig is a valid configuration with a TTL long enough that nothing
 // expires unless a test moves time on.
-var testConfig = discovery.Config{TTL: 30 * time.Second, CleanupInterval: 5 * time.Second}
+var testConfig = discovery.Config{TTL: 30 * time.Second, CleanupInterval: 5 * time.Second, MaxInstances: 1 << 20}
 
 // discard is a logger that drops everything.
 var discard = slog.New(slog.DiscardHandler)
@@ -68,7 +68,8 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 		{name: "zero TTL", config: discovery.Config{CleanupInterval: time.Second}},
 		{name: "negative TTL", config: discovery.Config{TTL: -time.Second, CleanupInterval: time.Second}},
 		{name: "zero interval", config: discovery.Config{TTL: time.Second}},
-		{name: "negative interval", config: discovery.Config{TTL: time.Second, CleanupInterval: -time.Second}},
+		{name: "negative interval", config: discovery.Config{TTL: time.Second, CleanupInterval: -time.Second, MaxInstances: 1}},
+		{name: "zero max instances", config: discovery.Config{TTL: time.Second, CleanupInterval: time.Second}},
 	}
 
 	for _, tt := range tests {
@@ -232,7 +233,7 @@ type failingRegistry struct {
 }
 
 // Create always fails.
-func (registry failingRegistry) Create(context.Context, discovery.Instance) error {
+func (registry failingRegistry) Create(context.Context, discovery.Instance, int) error {
 	return registry.err
 }
 
@@ -302,5 +303,30 @@ func TestInstanceHasNoSharedReferenceFields(t *testing.T) {
 		case reflect.Slice, reflect.Map, reflect.Pointer, reflect.Chan, reflect.Func, reflect.Interface:
 			t.Errorf("Instance.%s is a %s; copies would share it", field.Name, field.Type.Kind())
 		}
+	}
+}
+
+func TestRegisterRefusesBeyondMaxInstances(t *testing.T) {
+	config := testConfig
+	config.MaxInstances = 2
+
+	service, err := discovery.New(memory.New(), config, discard)
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	first := mustRegister(t, service, "orders")
+	mustRegister(t, service, "orders")
+
+	if _, err := service.Register(t.Context(), registration("orders"), anyone); !errors.Is(err, discovery.ErrRegistryFull) {
+		t.Fatalf("expected ErrRegistryFull beyond the limit, got %v", err)
+	}
+
+	if err := service.Unregister(t.Context(), first.ID, anyone); err != nil {
+		t.Fatalf("unregister: %v", err)
+	}
+
+	if _, err := service.Register(t.Context(), registration("orders"), anyone); err != nil {
+		t.Errorf("expected a place once an instance left, got %v", err)
 	}
 }

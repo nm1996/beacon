@@ -74,6 +74,7 @@ func New(settings config.Config, logger *slog.Logger, version string) (*Componen
 		CleanupInterval:  settings.Registry.CleanupInterval,
 		MaxNameLength:    settings.Registry.MaxNameLength,
 		MaxAddressLength: settings.Registry.MaxAddressLength,
+		MaxInstances:     settings.Registry.MaxInstances,
 	}, logger)
 	if err != nil {
 		return nil, fmt.Errorf("build discovery: %w", err)

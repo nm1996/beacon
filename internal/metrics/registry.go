@@ -30,6 +30,8 @@ func (registry *instrumentedRegistry) observe(operation string, started time.Tim
 	switch {
 	case errors.Is(err, discovery.ErrInstanceNotFound):
 		result = "not_found"
+	case errors.Is(err, discovery.ErrRegistryFull):
+		result = "full"
 	case err != nil:
 		result = "error"
 	}
@@ -39,9 +41,9 @@ func (registry *instrumentedRegistry) observe(operation string, started time.Tim
 }
 
 // Create records and forwards the call.
-func (registry *instrumentedRegistry) Create(ctx context.Context, instance discovery.Instance) error {
+func (registry *instrumentedRegistry) Create(ctx context.Context, instance discovery.Instance, limit int) error {
 	started := time.Now()
-	err := registry.next.Create(ctx, instance)
+	err := registry.next.Create(ctx, instance, limit)
 	registry.observe("create", started, err)
 
 	return err
