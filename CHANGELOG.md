@@ -55,6 +55,16 @@ Add an entry under **Unreleased** in the same pull request as the change.
   Without authentication nothing changes.
 - `client.ErrNotOwned`, which matches `instance_not_owned` errors.
 
+### Changed
+
+- Stricter registration rules. A service name must be 1–63 lowercase
+  letters, digits, `.`, `_` or `-`, starting and ending with a letter or
+  digit, so `orders`, `Orders` and `orders ` can no longer become three
+  different services. An address must be an IP address or a valid host name
+  of at most 253 characters, without a scheme, port or path. Registrations
+  that break either rule get `400 invalid_service`; names are not changed to
+  fit.
+
 ### Fixed
 
 - `mise run check` no longer rewrites unformatted files; it fails instead.

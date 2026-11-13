@@ -175,8 +175,8 @@ Every error response has the same shape:
 
 | Field | Rule |
 |---|---|
-| `name` | Required, not blank |
-| `address` | Required, not blank. Host name or IP address |
+| `name` | Required. 1–63 lowercase letters, digits, `.`, `_` or `-`, starting and ending with a letter or digit, such as `orders` or `payment-service.v2`. Uppercase and spaces are rejected, not changed |
+| `address` | Required. An IPv4 or IPv6 address, or a host name such as `orders.internal`, up to 253 characters. No scheme, port or path |
 | `port` | Required, between `1` and `65535` |
 
 | Status | Meaning |
