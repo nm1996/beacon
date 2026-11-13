@@ -128,7 +128,7 @@ Each running copy of a service is an **instance**. Its life in Beacon looks like
 1. **Register.** The instance sends its name, address and port, and gets back a unique ID.
 2. **Heartbeat.** The instance sends its ID regularly to show it is still running.
 3. **Discover.** Other services ask for instances by name and connect to one of them.
-4. **Expire.** Every 5 seconds Beacon removes instances that have not sent a heartbeat for more than 30 seconds.
+4. **Expire.** An instance that has not sent a heartbeat for more than 30 seconds is no longer returned by lookups, and within 5 seconds Beacon removes it.
 5. **Unregister.** An instance that shuts down cleanly removes itself straight away.
 
 Instances of the same service share a name. Registering again creates a new instance with a new ID; it does not update an existing one.
@@ -204,7 +204,7 @@ Every error response has the same shape:
 | `limit` | Optional. Return at most this many instances, from `1` to `1000`, and link to the next page |
 | `cursor` | Only with `limit`. Where the next page starts; take it from the `Link` header, never build it |
 
-Returns `200 OK` with a JSON array sorted by ID, which is empty when nothing matches:
+Returns `200 OK` with a JSON array sorted by ID, which is empty when nothing matches. Instances whose last heartbeat is more than `registry.service_ttl` ago are left out, even before cleanup removes them:
 
 ```json
 [
@@ -612,7 +612,7 @@ defer lease.Close(context.Background())
 instances, err := beacon.Discover(ctx, "payments")
 ```
 
-A `Lease` sends a heartbeat every third of the TTL Beacon reported, with a little jitter. If a heartbeat fails it retries after 1s, 2s, 4s and so on, never waiting longer than the normal interval, and keeps trying until `Close`; with a TTL of 3s or less that cap is reached at once, so retries come at a steady third of the TTL. If Beacon no longer knows the instance, because it restarted or the instance expired, the lease registers again; the instance then has a new ID, which `lease.ID()` always returns. `Close` stops the background goroutine, waits for it and unregisters the instance. If its context ends first, or Beacon cannot be reached, `Close` returns the error and can simply be called again with a new context; the heartbeats stay stopped either way, and once the instance is unregistered further calls return `nil`. With `client.WithLogger`, retries and re-registrations are logged.
+A `Lease` sends a heartbeat every third of the TTL Beacon reported, with a little jitter. If a heartbeat fails it retries after 1s, 2s, 4s and so on, never waiting longer than the normal interval, and keeps trying until `Close`.; with a TTL of 3s or less that cap is reached at once, so retries come at a steady third of the TTL. If Beacon no longer knows the instance, because it restarted or the instance expired, the lease registers again; the instance then has a new ID, which `lease.ID()` always returns. `Close` stops the background goroutine, waits for it and unregisters the instance. If its context ends first, or Beacon cannot be reached, `Close` returns the error and can simply be called again with a new context; the heartbeats stay stopped either way, and once the instance is unregistered further calls return `nil`. With `client.WithLogger`, retries and re-registrations are logged.
 
 For full control, call the API directly:
 

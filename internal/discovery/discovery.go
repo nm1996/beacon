@@ -74,6 +74,10 @@ type ListQuery struct {
 	After string
 	// Limit is the most instances to return. Zero means no limit.
 	Limit int
+	// HeartbeatSince keeps only instances whose LastHeartbeat is at or after
+	// it, so instances past their TTL are left out even before cleanup
+	// removes them. The zero time keeps every instance.
+	HeartbeatSince time.Time
 }
 
 // OwnerCheck limits Touch and Delete to instances a caller may change.

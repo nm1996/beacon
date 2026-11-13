@@ -138,6 +138,10 @@ Add an entry under **Unreleased** in the same pull request as the change.
 
 ### Fixed
 
+- Lookups returned instances whose TTL had passed until the next cleanup
+  removed them, up to `registry.cleanup_interval` later. They are now left
+  out as soon as their TTL passes; a heartbeat before cleanup still brings
+  an instance back.
 - Looking a service up by name scanned the whole registry and reserved
   room for every instance, holding the lock heartbeats need. With 10000
   instances, four clients looking up in a loop held heartbeats to about 400

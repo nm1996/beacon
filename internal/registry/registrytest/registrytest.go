@@ -39,6 +39,7 @@ func Run(test *testing.T, newRegistry func(test *testing.T) discovery.Registry) 
 		{name: "CreateRejectsDuplicateID", run: createRejectsDuplicateID},
 		{name: "ListFiltersByName", run: listFiltersByName},
 		{name: "ListByNameFollowsRemovals", run: listByNameFollowsRemovals},
+		{name: "ListSkipsInstancesBeforeHeartbeatSince", run: listSkipsInstancesBeforeHeartbeatSince},
 		{name: "ListOnEmptyRegistry", run: listOnEmptyRegistry},
 		{name: "ListReturnsCopies", run: listReturnsCopies},
 		{name: "GetReturnsStoredInstance", run: getReturnsStoredInstance},
@@ -212,6 +213,26 @@ func listByNameFollowsRemovals(test *testing.T, registry discovery.Registry) {
 
 	if got := page(test, registry, discovery.ListQuery{Name: "orders", After: "d"}); len(got) != 0 {
 		test.Errorf("expected nothing after the last orders ID, got %v", ids(got))
+	}
+}
+
+func listSkipsInstancesBeforeHeartbeatSince(test *testing.T, registry discovery.Registry) {
+	mustCreate(test, registry,
+		instance("before", "orders", base.Add(-time.Second)),
+		instance("at", "orders", base),
+		instance("after", "payments", base.Add(time.Second)),
+	)
+
+	if got := page(test, registry, discovery.ListQuery{HeartbeatSince: base}); !sameIDs(got, "at", "after") {
+		test.Errorf("expected instances at or after the cutoff, got %v", ids(got))
+	}
+
+	if got := page(test, registry, discovery.ListQuery{Name: "orders", HeartbeatSince: base}); !sameIDs(got, "at") {
+		test.Errorf("expected the cutoff to apply within a name, got %v", ids(got))
+	}
+
+	if got := page(test, registry, discovery.ListQuery{}); !sameIDs(got, "before", "at", "after") {
+		test.Errorf("expected no cutoff to keep every instance, got %v", ids(got))
 	}
 }
 

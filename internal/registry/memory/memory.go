@@ -138,8 +138,8 @@ func (registry *MemoryRegistry) List(_ context.Context, query discovery.ListQuer
 		result = make([]discovery.Instance, 0, len(ids))
 
 		for id := range ids {
-			if id > query.After {
-				result = append(result, registry.instances[id])
+			if instance := registry.instances[id]; id > query.After && !instance.LastHeartbeat.Before(query.HeartbeatSince) {
+				result = append(result, instance)
 			}
 		}
 	} else {
@@ -149,7 +149,7 @@ func (registry *MemoryRegistry) List(_ context.Context, query discovery.ListQuer
 		}
 
 		for _, instance := range registry.instances {
-			if instance.ID > query.After {
+			if instance.ID > query.After && !instance.LastHeartbeat.Before(query.HeartbeatSince) {
 				result = append(result, instance)
 			}
 		}
