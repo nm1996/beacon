@@ -19,6 +19,9 @@ import (
 	"github.com/nm1996/beacon/internal/discovery"
 )
 
+// anyOwner lets a Touch or Delete change any instance.
+var anyOwner = discovery.OwnerCheck{Any: true}
+
 // noLimit is a Create limit no case reaches.
 const noLimit = math.MaxInt
 
@@ -47,6 +50,8 @@ func Run(test *testing.T, newRegistry func(test *testing.T) discovery.Registry) 
 		{name: "DeleteStaleUsesCutoff", run: deleteStaleUsesCutoff},
 		{name: "ConcurrentUse", run: concurrentUse},
 		{name: "CreateRespectsLimit", run: createRespectsLimit},
+		{name: "TouchChecksOwner", run: touchChecksOwner},
+		{name: "DeleteChecksOwner", run: deleteChecksOwner},
 		{name: "ConcurrentCreateNeverExceedsLimit", run: concurrentCreateNeverExceedsLimit},
 	}
 
@@ -189,7 +194,7 @@ func touchUpdatesLastHeartbeat(test *testing.T, registry discovery.Registry) {
 	mustCreate(test, registry, instance("a", "orders", base))
 
 	later := base.Add(time.Minute)
-	if err := registry.Touch(test.Context(), "a", later); err != nil {
+	if err := registry.Touch(test.Context(), "a", later, anyOwner); err != nil {
 		test.Fatalf("touch: %v", err)
 	}
 
@@ -248,7 +253,7 @@ func getReturnsCopy(test *testing.T, registry discovery.Registry) {
 }
 
 func touchUnknownID(test *testing.T, registry discovery.Registry) {
-	err := registry.Touch(test.Context(), "missing", base)
+	err := registry.Touch(test.Context(), "missing", base, anyOwner)
 
 	if !errors.Is(err, discovery.ErrInstanceNotFound) {
 		test.Errorf("expected ErrInstanceNotFound, got %v", err)
@@ -258,7 +263,7 @@ func touchUnknownID(test *testing.T, registry discovery.Registry) {
 func deleteRemovesInstance(test *testing.T, registry discovery.Registry) {
 	mustCreate(test, registry, instance("a", "orders", base), instance("b", "orders", base))
 
-	if err := registry.Delete(test.Context(), "a"); err != nil {
+	if err := registry.Delete(test.Context(), "a", anyOwner); err != nil {
 		test.Fatalf("delete: %v", err)
 	}
 
@@ -266,13 +271,13 @@ func deleteRemovesInstance(test *testing.T, registry discovery.Registry) {
 		test.Errorf("expected only b to remain, got %v", ids(got))
 	}
 
-	if err := registry.Delete(test.Context(), "a"); !errors.Is(err, discovery.ErrInstanceNotFound) {
+	if err := registry.Delete(test.Context(), "a", anyOwner); !errors.Is(err, discovery.ErrInstanceNotFound) {
 		test.Errorf("expected deleting twice to give ErrInstanceNotFound, got %v", err)
 	}
 }
 
 func deleteUnknownID(test *testing.T, registry discovery.Registry) {
-	err := registry.Delete(test.Context(), "missing")
+	err := registry.Delete(test.Context(), "missing", anyOwner)
 
 	if !errors.Is(err, discovery.ErrInstanceNotFound) {
 		test.Errorf("expected ErrInstanceNotFound, got %v", err)
@@ -333,7 +338,7 @@ func concurrentUse(test *testing.T, registry discovery.Registry) {
 					return
 				}
 
-				if err := registry.Touch(ctx, id, base.Add(time.Second)); err != nil {
+				if err := registry.Touch(ctx, id, base.Add(time.Second), anyOwner); err != nil {
 					test.Errorf("touch %s: %v", id, err)
 				}
 
@@ -386,7 +391,7 @@ func createRespectsLimit(test *testing.T, registry discovery.Registry) {
 	}
 
 	// Leaving frees a place.
-	if err := registry.Delete(ctx, "a"); err != nil {
+	if err := registry.Delete(ctx, "a", anyOwner); err != nil {
 		test.Fatalf("delete: %v", err)
 	}
 
@@ -441,5 +446,76 @@ func concurrentCreateNeverExceedsLimit(test *testing.T, registry discovery.Regis
 
 	if got := len(mustList(test, registry, "")); got != limit {
 		test.Errorf("expected exactly %d stored instances, got %d", limit, got)
+	}
+}
+
+// owned returns instance id, named "orders", registered by owner.
+func owned(id, owner string) discovery.Instance {
+	item := instance(id, "orders", base)
+	item.Owner = owner
+
+	return item
+}
+
+func touchChecksOwner(test *testing.T, registry discovery.Registry) {
+	ctx := test.Context()
+	mustCreate(test, registry, owned("alice-1", "alice"), owned("unowned", ""))
+
+	later := base.Add(time.Minute)
+	alice := discovery.OwnerCheck{Owner: "alice"}
+	bob := discovery.OwnerCheck{Owner: "bob"}
+
+	if err := registry.Touch(ctx, "alice-1", later, bob); !errors.Is(err, discovery.ErrInstanceNotOwned) {
+		test.Fatalf("expected ErrInstanceNotOwned for another caller, got %v", err)
+	}
+
+	if got, err := registry.Get(ctx, "alice-1"); err != nil || !got.LastHeartbeat.Equal(base) {
+		test.Errorf("a refused touch must not change the instance, got %+v, %v", got, err)
+	}
+
+	for name, check := range map[string]discovery.OwnerCheck{"owner": alice, "any": anyOwner} {
+		if err := registry.Touch(ctx, "alice-1", later, check); err != nil {
+			test.Errorf("%s: expected the touch to be allowed, got %v", name, err)
+		}
+	}
+
+	if err := registry.Touch(ctx, "unowned", later, bob); err != nil {
+		test.Errorf("expected anyone to touch an instance without an owner, got %v", err)
+	}
+
+	// An unknown ID is not found, whatever the check says.
+	if err := registry.Touch(ctx, "missing", later, bob); !errors.Is(err, discovery.ErrInstanceNotFound) {
+		test.Errorf("expected ErrInstanceNotFound for an unknown ID, got %v", err)
+	}
+}
+
+func deleteChecksOwner(test *testing.T, registry discovery.Registry) {
+	ctx := test.Context()
+	mustCreate(test, registry, owned("alice-1", "alice"), owned("alice-2", "alice"), owned("unowned", ""))
+
+	bob := discovery.OwnerCheck{Owner: "bob"}
+
+	if err := registry.Delete(ctx, "alice-1", bob); !errors.Is(err, discovery.ErrInstanceNotOwned) {
+		test.Fatalf("expected ErrInstanceNotOwned for another caller, got %v", err)
+	}
+
+	if got := mustList(test, registry, ""); !sameIDs(got, "alice-1", "alice-2", "unowned") {
+		test.Errorf("a refused delete must not remove anything, got %v", ids(got))
+	}
+
+	if err := registry.Delete(ctx, "alice-1", discovery.OwnerCheck{Owner: "alice"}); err != nil {
+		test.Errorf("expected the owner to delete, got %v", err)
+	}
+
+	if err := registry.Delete(ctx, "alice-2", anyOwner); err != nil {
+		test.Errorf("expected any-owner to delete, got %v", err)
+	}
+
+	if err := registry.Delete(ctx, "unowned", bob); err != nil {
+		test.Errorf("expected anyone to delete an instance without an owner, got %v", err)
+	}
+
+	if err := registry.Delete(ctx, "missing", bob); !errors.Is(err, discovery.ErrInstanceNotFound) {
+		test.Errorf("expected ErrInstanceNotFound for an unknown ID, got %v", err)
 	}
 }

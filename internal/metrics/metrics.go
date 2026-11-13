@@ -57,7 +57,7 @@ func New(version string) *Metrics {
 		registryOperations: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: namespace,
 			Name:      "registry_operations_total",
-			Help:      "Calls to the storage backend, by operation and result (ok, not_found, full or error).",
+			Help:      "Calls to the storage backend, by operation and result (ok, not_found, not_owned, full or error).",
 		}, []string{"operation", "result"}),
 		registryDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Namespace: namespace,

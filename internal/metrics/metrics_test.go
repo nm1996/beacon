@@ -104,10 +104,10 @@ func TestInstrumentRegistryCountsOperationsAndResults(t *testing.T) {
 		}
 	}
 
-	_ = registry.Touch(ctx, "a", time.Now())
-	_ = registry.Touch(ctx, "missing", time.Now())
+	_ = registry.Touch(ctx, "a", time.Now(), discovery.OwnerCheck{Any: true})
+	_ = registry.Touch(ctx, "missing", time.Now(), discovery.OwnerCheck{Any: true})
 	_, _ = registry.List(ctx, "")
-	_ = registry.Delete(ctx, "missing")
+	_ = registry.Delete(ctx, "missing", discovery.OwnerCheck{Any: true})
 
 	removed, err := registry.DeleteStale(ctx, time.Now().Add(-time.Minute))
 	if err != nil || removed != 2 {

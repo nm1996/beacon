@@ -32,6 +32,8 @@ func (registry *instrumentedRegistry) observe(operation string, started time.Tim
 		result = "not_found"
 	case errors.Is(err, discovery.ErrRegistryFull):
 		result = "full"
+	case errors.Is(err, discovery.ErrInstanceNotOwned):
+		result = "not_owned"
 	case err != nil:
 		result = "error"
 	}
@@ -59,9 +61,9 @@ func (registry *instrumentedRegistry) Get(ctx context.Context, id string) (disco
 }
 
 // Touch records and forwards the call.
-func (registry *instrumentedRegistry) Touch(ctx context.Context, id string, at time.Time) error {
+func (registry *instrumentedRegistry) Touch(ctx context.Context, id string, at time.Time, check discovery.OwnerCheck) error {
 	started := time.Now()
-	err := registry.next.Touch(ctx, id, at)
+	err := registry.next.Touch(ctx, id, at, check)
 	registry.observe("touch", started, err)
 
 	return err
@@ -77,9 +79,9 @@ func (registry *instrumentedRegistry) List(ctx context.Context, name string) ([]
 }
 
 // Delete records and forwards the call.
-func (registry *instrumentedRegistry) Delete(ctx context.Context, id string) error {
+func (registry *instrumentedRegistry) Delete(ctx context.Context, id string, check discovery.OwnerCheck) error {
 	started := time.Now()
-	err := registry.next.Delete(ctx, id)
+	err := registry.next.Delete(ctx, id, check)
 	registry.observe("delete", started, err)
 
 	return err

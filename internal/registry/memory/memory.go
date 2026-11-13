@@ -49,14 +49,19 @@ func (registry *MemoryRegistry) Create(_ context.Context, instance discovery.Ins
 	return nil
 }
 
-// Touch sets the LastHeartbeat of the instance with id.
-func (registry *MemoryRegistry) Touch(_ context.Context, id string, at time.Time) error {
+// Touch sets the LastHeartbeat of the instance with id, if check allows it.
+// The owner is checked under the same lock as the change.
+func (registry *MemoryRegistry) Touch(_ context.Context, id string, at time.Time, check discovery.OwnerCheck) error {
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
 
 	instance, exists := registry.instances[id]
 	if !exists {
 		return discovery.ErrInstanceNotFound
+	}
+
+	if !check.Allows(instance.Owner) {
+		return discovery.ErrInstanceNotOwned
 	}
 
 	instance.LastHeartbeat = at
@@ -95,13 +100,19 @@ func (registry *MemoryRegistry) Get(_ context.Context, id string) (discovery.Ins
 	return instance, nil
 }
 
-// Delete removes the instance with id.
-func (registry *MemoryRegistry) Delete(_ context.Context, id string) error {
+// Delete removes the instance with id, if check allows it. The owner is
+// checked under the same lock as the removal.
+func (registry *MemoryRegistry) Delete(_ context.Context, id string, check discovery.OwnerCheck) error {
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
 
-	if _, exists := registry.instances[id]; !exists {
+	instance, exists := registry.instances[id]
+	if !exists {
 		return discovery.ErrInstanceNotFound
+	}
+
+	if !check.Allows(instance.Owner) {
+		return discovery.ErrInstanceNotOwned
 	}
 
 	delete(registry.instances, id)

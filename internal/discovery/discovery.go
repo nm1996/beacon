@@ -44,11 +44,27 @@ type Caller struct {
 	AnyInstance bool
 }
 
-// mayChange reports whether caller may send heartbeats for, or unregister,
-// instance. Instances without an owner, registered while authentication was
-// off, may be changed by anyone.
-func (caller Caller) mayChange(instance Instance) bool {
-	return caller.AnyInstance || instance.Owner == "" || instance.Owner == caller.Name
+// check returns the OwnerCheck that limits caller's changes.
+func (caller Caller) check() OwnerCheck {
+	return OwnerCheck{Owner: caller.Name, Any: caller.AnyInstance}
+}
+
+// OwnerCheck limits Touch and Delete to instances a caller may change.
+// Registry backends apply it in the same operation as the change, so no
+// other request can come between the check and the change.
+type OwnerCheck struct {
+	// Owner is the caller's name. Instances registered by someone else are
+	// refused with ErrInstanceNotOwned.
+	Owner string
+	// Any allows every instance, whoever registered it.
+	Any bool
+}
+
+// Allows reports whether an instance registered by owner may be changed.
+// Instances without an owner, registered while authentication was off,
+// may be changed by anyone.
+func (check OwnerCheck) Allows(owner string) bool {
+	return check.Any || owner == "" || owner == check.Owner
 }
 
 // Registration is what a service sends to announce one of its instances.
@@ -96,15 +112,19 @@ type Registry interface {
 	// Get returns a copy of the instance with id. It returns
 	// ErrInstanceNotFound if there is none.
 	Get(ctx context.Context, id string) (Instance, error)
-	// Touch sets the LastHeartbeat of the instance with id to at. It returns
-	// ErrInstanceNotFound if there is none.
-	Touch(ctx context.Context, id string, at time.Time) error
+	// Touch sets the LastHeartbeat of the instance with id to at, if check
+	// allows changing it. It returns ErrInstanceNotFound if there is no such
+	// instance and ErrInstanceNotOwned if check refuses it; checking and
+	// changing are one operation.
+	Touch(ctx context.Context, id string, at time.Time, check OwnerCheck) error
 	// List returns the instances named name, or every instance when name is
 	// empty, in no particular order.
 	List(ctx context.Context, name string) ([]Instance, error)
-	// Delete removes the instance with id. It returns ErrInstanceNotFound if
-	// there is none.
-	Delete(ctx context.Context, id string) error
+	// Delete removes the instance with id, if check allows changing it. It
+	// returns ErrInstanceNotFound if there is no such instance and
+	// ErrInstanceNotOwned if check refuses it; checking and removing are one
+	// operation.
+	Delete(ctx context.Context, id string, check OwnerCheck) error
 	// DeleteStale removes every instance whose LastHeartbeat is before cutoff
 	// and reports how many it removed. An instance exactly at cutoff stays.
 	DeleteStale(ctx context.Context, cutoff time.Time) (int, error)
