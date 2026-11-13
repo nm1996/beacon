@@ -497,7 +497,7 @@ Refused requests are logged at `warn` level, with the caller's name when it is k
 
 ## Rate limits
 
-Beacon limits two things per client, each with a token bucket: a steady rate, plus a burst that may be spent at once. The limits live in each Beacon process; there is nothing to set up.
+Beacon limits two things per client, each with a token bucket: a steady rate, plus a burst that may be spent at once. The limits live in each Beacon process; there is nothing to set up. They are not shared between processes, so if several Beacon nodes ever sit behind one load balancer, each enforces its own and a client spread over three nodes gets up to three times the limit; enforce the limit at the load balancer then.
 
 | Limit | Counted per | Default | Beyond it |
 |---|---|---|---|
@@ -509,7 +509,7 @@ Beacon limits two things per client, each with a token bucket: a steady rate, pl
 - Requests without any credentials and callers lacking a permission do not count as failures: the first are probes or misconfiguration, and the second have already proved who they are.
 - The failure limit is enforced before credentials are checked, so concurrent attempts cannot get past it together: each request holds one place from its network's burst while Beacon checks its credentials, and gives it back unless they turn out invalid. The check takes microseconds, but a network sending more than `rate_limit.auth_failure_burst` requests at the very same moment, such as many clients behind one NAT under heavy load, can see some valid ones refused with `429`; raise the burst if it does.
 - Heartbeats, lookups and unregistering are not rate limited.
-- Behind a reverse proxy or load balancer every client has the proxy's address, so the per-network limits apply to all of them together. Beacon does not read `X-Forwarded-For`, because a client could set it to anything. Raise the limits, or set them to `0`, when the proxy enforces its own.
+- Behind a reverse proxy or load balancer every client has the proxy's address, so the per-network limits apply to all of them together. Beacon does not read `X-Forwarded-For`, because a client could set it to anything, and one client could then use up the failure limit of others by naming their addresses. Raise the limits, or set them to `0`, when the proxy enforces its own.
 - The defaults leave room for a large rollout that shares one token: a burst of 200 registrations at once, then 20 a second. `client.Announce` returns the error if its first registration is refused, so size the burst for the most instances that start together.
 - Each limit tracks up to 65536 callers or networks. Callers and networks whose buckets have refilled are forgotten to make room; if every place is still in use, new ones are not limited until there is room again.
 
@@ -760,6 +760,7 @@ Beacon is deliberately small. Before you depend on it, know that:
 - **It runs as a single node.** There is no clustering or replication.
 - **Authentication is off by default.** Until you turn on [authentication](#authentication), anyone who can reach the port can register, discover and remove instances. By default only the same machine can, since Beacon listens on `127.0.0.1`; see [Exposing Beacon to a network](#exposing-beacon-to-a-network). [TLS](#tls) encrypts the traffic but does not decide who may connect.
 - **Ownership is by name, not by service.** Every instance registered with the same token or certificate belongs to the same caller, so two services sharing one token can change each other's instances. Give each service its own token or certificate.
+- **The owner is the name in the tokens file.** Ownership and `registry.max_instances_per_owner` are keyed by the entry's `name`, which is also what logs show, so renaming an entry changes the owner; see [Instance ownership](#instance-ownership). A stable owner ID, kept apart from the name shown in logs, is planned.
 - **Client certificates are not checked for revocation.** Use short-lived certificates.
 
 ## Development
@@ -880,6 +881,9 @@ Transports only translate requests and errors; every rule lives in `discovery`, 
 - [ ] Client-side caching and load balancing in the Go client
 - [ ] Cache and database
 - [ ] Scale, multiple nodes
+- [ ] Rate limits shared between nodes, or enforced at the load balancer
+- [ ] Trusted proxies, so rate limits can use the client address a known proxy forwards
+- [ ] A stable owner ID for instance ownership and quotas, separate from the name shown in logs
 - [ ] Idempotency
 
 ## Versioning
