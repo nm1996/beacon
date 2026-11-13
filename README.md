@@ -511,7 +511,7 @@ Beacon limits two things per client, each with a token bucket: a steady rate, pl
 - Heartbeats, lookups and unregistering are not rate limited.
 - Behind a reverse proxy or load balancer every client has the proxy's address, so the per-network limits apply to all of them together. Beacon does not read `X-Forwarded-For`, because a client could set it to anything, and one client could then use up the failure limit of others by naming their addresses. Raise the limits, or set them to `0`, when the proxy enforces its own.
 - The defaults leave room for a large rollout that shares one token: a burst of 200 registrations at once, then 20 a second. `client.Announce` returns the error if its first registration is refused, so size the burst for the most instances that start together.
-- Each limit tracks up to 65536 callers or networks. Callers and networks whose buckets have refilled are forgotten to make room; if every place is still in use, new ones are not limited until there is room again.
+- Each limit tracks up to 65536 callers or networks. Callers and networks whose buckets have refilled are forgotten to make room; if every place is still in use, new ones are not limited until there is room again. The same bound applies to requests in authentication: once 65536 networks have one in progress, requests from further networks that have not failed before are checked without holding a place, though their failures still count. Networks that have failed are always held to their limit.
 
 ## Reloading certificates and tokens
 

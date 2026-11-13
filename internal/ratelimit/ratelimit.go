@@ -34,6 +34,12 @@ const (
 // growing. If every bucket is still in use, keys it cannot track are
 // allowed: the limit then stops protecting against more distinct clients
 // than that, rather than turning legitimate new clients away.
+//
+// The same holds for attempts in progress (see Reserve): an untracked key
+// only has its attempts counted while fewer than maxKeys keys have attempts
+// in progress, so a flood of requests from distinct clients cannot grow the
+// Limiter either. Keys it already tracks are always counted, and so stay
+// protected; at most 2 * maxKeys keys have attempts in progress.
 type Limiter struct {
 	limit   rate.Limit
 	burst   int
@@ -100,6 +106,9 @@ func (limiter *Limiter) Allow(key string) (bool, time.Duration) {
 type Reservation struct {
 	limiter *Limiter
 	key     string
+	// held is whether the attempt is counted as in progress. It is not when
+	// too many untracked keys already have attempts in progress.
+	held bool
 }
 
 // Reserve sets aside one of key's tokens for an attempt whose outcome
@@ -112,6 +121,10 @@ type Reservation struct {
 // hold their tokens until they are spent or released. A key is only tracked
 // once a token is spent, so keys whose attempts are always released cost
 // nothing between attempts.
+//
+// When maxKeys keys already have attempts in progress, an attempt for an
+// untracked key that has none is allowed without being counted, as keys the
+// Limiter has no room for are. Spending it still counts the failure.
 func (limiter *Limiter) Reserve(key string) (Reservation, bool, time.Duration) {
 	if limiter == nil {
 		return Reservation{}, true, 0
@@ -121,18 +134,26 @@ func (limiter *Limiter) Reserve(key string) (Reservation, bool, time.Duration) {
 	defer limiter.mu.Unlock()
 
 	available := float64(limiter.burst)
-	if bucket, tracked := limiter.buckets[key]; tracked {
+
+	bucket, tracked := limiter.buckets[key]
+	if tracked {
 		available = bucket.TokensAt(time.Now())
 	}
 
-	available -= float64(limiter.pending[key])
+	inProgress, counted := limiter.pending[key]
+
+	available -= float64(inProgress)
 	if available < 1 {
 		return Reservation{}, false, limiter.waitFor(available)
 	}
 
+	if !counted && !tracked && len(limiter.pending) >= limiter.maxKeys {
+		return Reservation{limiter: limiter, key: key}, true, 0
+	}
+
 	limiter.pending[key]++
 
-	return Reservation{limiter: limiter, key: key}, true, 0
+	return Reservation{limiter: limiter, key: key, held: true}, true, 0
 }
 
 // Spend takes the reserved token: the attempt counts against the limit.
@@ -155,15 +176,27 @@ func (reservation Reservation) settle(spend bool) {
 	limiter.mu.Lock()
 	defer limiter.mu.Unlock()
 
+	if !reservation.held {
+		if spend {
+			limiter.spend(reservation.key)
+		}
+
+		return
+	}
+
 	if limiter.pending[reservation.key]--; limiter.pending[reservation.key] <= 0 {
 		delete(limiter.pending, reservation.key)
 	}
 
-	if !spend {
-		return
+	if spend {
+		limiter.spend(reservation.key)
 	}
+}
 
-	if bucket := limiter.bucket(reservation.key); bucket != nil {
+// spend takes one token from key's bucket, tracking key if there is room.
+// The caller holds mu.
+func (limiter *Limiter) spend(key string) {
+	if bucket := limiter.bucket(key); bucket != nil {
 		bucket.AllowN(time.Now(), 1)
 	}
 }
