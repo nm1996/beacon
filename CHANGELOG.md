@@ -9,6 +9,13 @@ Add an entry under **Unreleased** in the same pull request as the change.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-13
+
+Upgrading from 0.1.0 needs attention in three places, each described below:
+Beacon now listens on `127.0.0.1` unless `server.host` says otherwise
+(containers are unaffected), registrations must follow the new name and
+address rules, and `beacon_instances` no longer has a `service` label.
+
 ### Added
 
 - HTTPS: setting `tls.cert_file` and `tls.key_file` (`BEACON_TLS_CERT_FILE`,
@@ -209,5 +216,6 @@ HTTP API.
   operations, registered and expired instances and the running build,
   controlled by `metrics.enabled` (`BEACON_METRICS_ENABLED`).
 
-[Unreleased]: https://github.com/nm1996/beacon/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/nm1996/beacon/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/nm1996/beacon/releases/tag/v0.2.0
 [0.1.0]: https://github.com/nm1996/beacon/releases/tag/v0.1.0
