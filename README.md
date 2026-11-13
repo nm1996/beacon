@@ -27,6 +27,7 @@ Services register themselves, send heartbeats, and discover each other over a sm
 - [Configuration](#configuration)
 - [TLS](#tls)
 - [Authentication](#authentication)
+- [Rate limits](#rate-limits)
 - [Reloading certificates and tokens](#reloading-certificates-and-tokens)
 - [Running in Docker](#running-in-docker)
 - [Go client](#go-client)
@@ -163,6 +164,7 @@ Every error response has the same shape:
 | `400` | `invalid_query` | A query parameter is invalid, such as `limit=0` or a `cursor` Beacon did not issue |
 | `403` | `instance_not_owned` | [Authentication](#authentication) is on and another caller registered this instance; see [Instance ownership](#instance-ownership) |
 | `429` | `quota_exceeded` | Beacon already holds `registry.max_instances` instances, or the caller already holds `registry.max_instances_per_owner`; retry after some unregister or expire |
+| `429` | `rate_limited` | Too many registrations from this caller, or too many failed authentication attempts from this network; retry after the `Retry-After` header. See [Rate limits](#rate-limits) |
 | `404` | `service_not_found` | No instance is registered with the given ID |
 | `404` | `not_found` | No endpoint exists at the path |
 | `401` | `unauthorized` | [Authentication](#authentication) is on and the request has no bearer token, a malformed `Authorization` header or a token Beacon does not accept |
@@ -186,7 +188,7 @@ Every error response has the same shape:
 |---|---|
 | `201 Created` | Registered. The `Location` header points at the new instance |
 | `400 Bad Request` | The body is invalid or a field breaks a rule above |
-| `429 Too Many Requests` | `quota_exceeded`: Beacon is full, or this caller holds its maximum number of instances |
+| `429 Too Many Requests` | `quota_exceeded`: Beacon is full, or this caller holds its maximum number of instances. `rate_limited`: this caller registered too often; see [Rate limits](#rate-limits) |
 
 ```json
 { "id": "8c0f3c56-5d7e-4a63-9a39-2b7c1e5e8f40", "ttl_seconds": 30 }
@@ -293,6 +295,10 @@ A file only needs the keys it changes, and no file is needed at all. [`configs/b
 | `registry.max_address_length` | `BEACON_REGISTRY_MAX_ADDRESS_LENGTH` | `253` | Longest accepted host name as an address, 1–253. IP addresses are not held to it |
 | `registry.max_instances` | `BEACON_REGISTRY_MAX_INSTANCES` | `10000` | The most instances Beacon holds at once; further registrations get `429 quota_exceeded`. Bounds memory use and the size of discovery responses |
 | `registry.max_instances_per_owner` | `BEACON_REGISTRY_MAX_INSTANCES_PER_OWNER` | `0` | The most instances one token or certificate may hold at once, so no single caller can take every place; `0` is no limit. Needs [authentication](#instance-ownership), and must not exceed `registry.max_instances` |
+| `rate_limit.registrations_per_second` | `BEACON_RATE_LIMIT_REGISTRATIONS_PER_SECOND` | `20` | Registrations each caller may make per second on average; `0` is off. See [Rate limits](#rate-limits) |
+| `rate_limit.registration_burst` | `BEACON_RATE_LIMIT_REGISTRATION_BURST` | `200` | Registrations a caller may make at once before the rate applies |
+| `rate_limit.auth_failures_per_second` | `BEACON_RATE_LIMIT_AUTH_FAILURES_PER_SECOND` | `1` | Failed authentication attempts each client network may make per second on average; `0` is off |
+| `rate_limit.auth_failure_burst` | `BEACON_RATE_LIMIT_AUTH_FAILURE_BURST` | `20` | Failed attempts a network may make at once before the rate applies |
 | `storage.backend` | `BEACON_STORAGE_BACKEND` | `"memory"` | Where instances are kept. Only `memory` exists today |
 | `metrics.enabled` | `BEACON_METRICS_ENABLED` | `true` | Serve Prometheus metrics at `GET /metrics` |
 | `logging.level` | `BEACON_LOGGING_LEVEL` | `"info"` | `debug`, `info`, `warn` or `error` |
@@ -489,6 +495,23 @@ A request without a token or verified client certificate, with a malformed `Auth
 
 Refused requests are logged at `warn` level, with the caller's name when it is known (`caller`), or the certificate's names when no entry matched (`certificate_names`), and at `debug` level when no credentials were sent at all. Tokens themselves are never logged. Refusals are also counted in `beacon_auth_failures_total`; see [Metrics](#metrics).
 
+## Rate limits
+
+Beacon limits two things per client, each with a token bucket: a steady rate, plus a burst that may be spent at once. The limits live in each Beacon process; there is nothing to set up.
+
+| Limit | Counted per | Default | Beyond it |
+|---|---|---|---|
+| Registrations (`POST /api/v1/services`) | Caller: the token or certificate's `name` with [authentication](#authentication) on, the client network without it | 20 per second, bursts of 200 | That caller's registrations get `429 rate_limited` |
+| Failed authentication: an unknown token or certificate, or a malformed `Authorization` header | Client network | 1 per second, bursts of 20 | Every request from that network gets `429 rate_limited`, valid credentials or not, until it is back under the limit |
+
+- Refused requests carry a `Retry-After` header with the seconds to wait, are logged at `warn` level with the `limit`, and are counted in `beacon_rate_limited_total{limit}`. The [Go client](#go-client) reports them as `client.ErrRateLimited`, and a `Lease` keeps retrying with backoff.
+- A client network is the IPv4 address of the connection, or the `/64` its IPv6 address is in, since one host often holds a whole `/64`.
+- Requests without any credentials and callers lacking a permission do not count as failures: the first are probes or misconfiguration, and the second have already proved who they are.
+- Heartbeats, lookups and unregistering are not rate limited.
+- Behind a reverse proxy or load balancer every client has the proxy's address, so the per-network limits apply to all of them together. Beacon does not read `X-Forwarded-For`, because a client could set it to anything. Raise the limits, or set them to `0`, when the proxy enforces its own.
+- The defaults leave room for a large rollout that shares one token: a burst of 200 registrations at once, then 20 a second. `client.Announce` returns the error if its first registration is refused, so size the burst for the most instances that start together.
+- Each limit tracks up to 65536 callers or networks. Callers and networks whose buckets have refilled are forgotten to make room; if every place is still in use, new ones are not limited until there is room again.
+
 ## Reloading certificates and tokens
 
 Beacon reads the TLS certificate and key, the client CA bundle and the tokens file at startup, and can read them again while it runs, so you can renew a certificate or add and revoke tokens without a restart:
@@ -606,7 +629,7 @@ When Beacon has [authentication](#authentication) on, give the client its token.
 beacon, err := client.New("https://beacon:8080", client.WithToken(os.Getenv("BEACON_TOKEN")))
 ```
 
-The client then sends `Authorization: Bearer <token>` on every request. Errors for refused requests match `client.ErrUnauthorized` (`401`) and `client.ErrForbidden` (`403`) with `errors.Is`, including a `401` or `403` from a proxy in front of Beacon. A heartbeat or unregister of an instance another caller registered also matches `client.ErrNotOwned`; see [Instance ownership](#instance-ownership). A registration refused because Beacon is full matches `client.ErrQuotaExceeded`; a `Lease` that has to register again keeps retrying with backoff until there is room. A `Lease` whose heartbeats are refused keeps retrying with backoff and logs each failure; it never registers again because of them, though once its instance expires it gets `404` and registers again as usual.
+The client then sends `Authorization: Bearer <token>` on every request. Errors for refused requests match `client.ErrUnauthorized` (`401`) and `client.ErrForbidden` (`403`) with `errors.Is`, including a `401` or `403` from a proxy in front of Beacon. A heartbeat or unregister of an instance another caller registered also matches `client.ErrNotOwned`; see [Instance ownership](#instance-ownership). A registration refused because Beacon is full matches `client.ErrQuotaExceeded`; a `Lease` that has to register again keeps retrying with backoff until there is room. A request refused by a [rate limit](#rate-limits), or any `429` without Beacon's error format, such as a proxy's, matches `client.ErrRateLimited`. A `Lease` whose heartbeats are refused keeps retrying with backoff and logs each failure; it never registers again because of them, though once its instance expires it gets `404` and registers again as usual.
 
 For a Beacon served over [TLS](#tls), use an `https://` URL. If its certificate comes from a private CA, trust that CA through `WithHTTPClient`:
 
@@ -673,6 +696,7 @@ scrape_configs:
 | `beacon_expired_instances_total` | counter | | Instances removed because they stopped sending heartbeats |
 | `beacon_registry_operations_total` | counter | `operation`, `result` | Calls to the storage backend; `result` is `ok`, `not_found`, `not_owned`, `full` (refused by `registry.max_instances`), `owner_full` (refused by `registry.max_instances_per_owner`) or `error` |
 | `beacon_registry_operation_duration_seconds` | histogram | `operation` | Time spent in the storage backend |
+| `beacon_rate_limited_total` | counter | `limit` | Requests refused by a [rate limit](#rate-limits); `limit` is `registrations` or `auth_failures`. Only appears once a request has been refused |
 | `beacon_auth_failures_total` | counter | `reason` | Requests refused by [authentication](#authentication); `reason` is `missing`, `invalid` or `forbidden`. Only appears once a request has been refused |
 | `beacon_credential_reloads_total` | counter | `result` | Attempts to [reload](#reloading-certificates-and-tokens) the TLS files and tokens file while running; `result` is `ok` or `error`. Only appears after the first attempt |
 | `beacon_build_info` | gauge | `version`, `goversion` | Always `1`; describes the running build |
@@ -774,6 +798,7 @@ Run `mise tasks` to list them all. CI runs the same tasks on every pull request.
 │   ├── auth/                # Tokens file: token hashes, client certificate names and permissions
 │   ├── discovery/           # Business rules: validation, IDs, TTL, cleanup; the Registry interface
 │   ├── metrics/             # Prometheus metrics around the HTTP handler and any Registry backend
+│   ├── ratelimit/           # Token buckets per caller or client network, bounded in size
 │   ├── registry/
 │   │   ├── memory/          # In-memory Registry backend
 │   │   └── registrytest/    # Contract tests every Registry backend must pass

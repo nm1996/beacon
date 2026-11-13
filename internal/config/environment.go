@@ -38,6 +38,10 @@ func environmentVariables(config *Config) []environmentVariable {
 		{name: "BEACON_REGISTRY_MAX_INSTANCES", apply: setInt(&config.Registry.MaxInstances)},
 		{name: "BEACON_REGISTRY_MAX_INSTANCES_PER_OWNER", apply: setInt(&config.Registry.MaxInstancesPerOwner)},
 		{name: "BEACON_STORAGE_BACKEND", apply: setString(&config.Storage.Backend)},
+		{name: "BEACON_RATE_LIMIT_REGISTRATIONS_PER_SECOND", apply: setFloat(&config.RateLimit.RegistrationsPerSecond)},
+		{name: "BEACON_RATE_LIMIT_REGISTRATION_BURST", apply: setInt(&config.RateLimit.RegistrationBurst)},
+		{name: "BEACON_RATE_LIMIT_AUTH_FAILURES_PER_SECOND", apply: setFloat(&config.RateLimit.AuthFailuresPerSecond)},
+		{name: "BEACON_RATE_LIMIT_AUTH_FAILURE_BURST", apply: setInt(&config.RateLimit.AuthFailureBurst)},
 		{name: "BEACON_METRICS_ENABLED", apply: setBool(&config.Metrics.Enabled)},
 		{name: "BEACON_LOGGING_LEVEL", apply: setString(&config.Logging.Level)},
 		{name: "BEACON_LOGGING_FORMAT", apply: setString(&config.Logging.Format)},
@@ -88,6 +92,18 @@ func setInt64(target *int64) func(string) error {
 		parsed, err := strconv.ParseInt(value, 10, 64)
 		if err != nil {
 			return errors.New("must be an integer")
+		}
+
+		*target = parsed
+		return nil
+	}
+}
+
+func setFloat(target *float64) func(string) error {
+	return func(value string) error {
+		parsed, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return errors.New("must be a number")
 		}
 
 		*target = parsed

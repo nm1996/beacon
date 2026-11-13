@@ -15,6 +15,7 @@ import (
 	"github.com/nm1996/beacon/internal/credentials"
 	"github.com/nm1996/beacon/internal/discovery"
 	"github.com/nm1996/beacon/internal/metrics"
+	"github.com/nm1996/beacon/internal/ratelimit"
 	"github.com/nm1996/beacon/internal/registry/memory"
 )
 
@@ -81,20 +82,36 @@ func New(settings config.Config, logger *slog.Logger, version string) (*Componen
 		return nil, fmt.Errorf("build discovery: %w", err)
 	}
 
+	var (
+		failed      func(reason string)
+		rateLimited func(limit string)
+	)
+
+	if observer != nil {
+		failed = observer.AuthFailed
+		rateLimited = observer.RateLimited
+	}
+
+	limits := settings.RateLimit
+
 	var guard *api.Guard
 	if settings.Auth.Enabled {
-		var failed func(reason string)
-		if observer != nil {
-			failed = observer.AuthFailed
-		}
-
-		guard = api.NewGuard(store, logger, failed)
+		guard = api.NewGuard(store, logger, failed, api.WithFailureLimit(
+			ratelimit.New(limits.AuthFailuresPerSecond, limits.AuthFailureBurst, 0),
+			func() {
+				if rateLimited != nil {
+					rateLimited(api.LimitAuthFailures)
+				}
+			},
+		))
 	}
 
 	handler := api.NewRouter(service, logger, api.Config{
 		MaxRequestBodyBytes: settings.Server.MaxRequestBodyBytes,
 		Version:             version,
 		Guard:               guard,
+		RegistrationLimit:   ratelimit.New(limits.RegistrationsPerSecond, limits.RegistrationBurst, 0),
+		RateLimited:         rateLimited,
 	})
 
 	if observer != nil {

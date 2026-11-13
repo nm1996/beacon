@@ -324,7 +324,12 @@ func (handler *countingHandler) ServeHTTP(writer http.ResponseWriter, request *h
 }
 
 func TestDiscoverFollowsPages(t *testing.T) {
-	components, err := bootstrap.New(config.Default(), slog.New(slog.DiscardHandler), "v9.9.9")
+	// Registering 1203 instances from one address at once is what the
+	// registration rate limit exists to stop.
+	settings := config.Default()
+	settings.RateLimit.RegistrationsPerSecond = 0
+
+	components, err := bootstrap.New(settings, slog.New(slog.DiscardHandler), "v9.9.9")
 	if err != nil {
 		t.Fatalf("build server: %v", err)
 	}
@@ -502,5 +507,51 @@ func TestDiscoverGivesUpAfterTooManyPages(t *testing.T) {
 
 	if got := requests.Load(); got != 10_000 {
 		t.Errorf("expected exactly 10000 page requests, got %d", got)
+	}
+}
+
+func TestRegisterTooOftenMatchesErrRateLimited(t *testing.T) {
+	settings := config.Default()
+	settings.RateLimit.RegistrationsPerSecond = 0.001
+	settings.RateLimit.RegistrationBurst = 1
+
+	components, err := bootstrap.New(settings, slog.New(slog.DiscardHandler), "v9.9.9")
+	if err != nil {
+		t.Fatalf("build server: %v", err)
+	}
+
+	server := httptest.NewServer(components.Server.Handler)
+	defer server.Close()
+
+	beacon := mustNew(t, server.URL)
+
+	if _, err := beacon.Register(t.Context(), orders); err != nil {
+		t.Fatalf("first registration: %v", err)
+	}
+
+	_, err = beacon.Register(t.Context(), orders)
+
+	if !errors.Is(err, client.ErrRateLimited) {
+		t.Fatalf("expected ErrRateLimited, got %v", err)
+	}
+
+	if errors.Is(err, client.ErrQuotaExceeded) {
+		t.Error("a rate limit must not look like a full registry")
+	}
+}
+
+func TestProxyTooManyRequestsMatchesErrRateLimited(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		http.Error(writer, "slow down", http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+
+	_, err := mustNew(t, server.URL).Register(t.Context(), orders)
+	if !errors.Is(err, client.ErrRateLimited) {
+		t.Errorf("expected a plain 429 to match ErrRateLimited, got %v", err)
+	}
+
+	if errors.Is(err, client.ErrQuotaExceeded) {
+		t.Error("a plain 429 must not look like a full registry")
 	}
 }

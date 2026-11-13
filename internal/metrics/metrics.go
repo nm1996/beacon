@@ -34,6 +34,7 @@ type Metrics struct {
 
 	authFailures      *prometheus.CounterVec
 	credentialReloads *prometheus.CounterVec
+	rateLimited       *prometheus.CounterVec
 }
 
 // New returns Metrics with the Go runtime and process collectors and a
@@ -57,7 +58,7 @@ func New(version string) *Metrics {
 		registryOperations: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: namespace,
 			Name:      "registry_operations_total",
-			Help:      "Calls to the storage backend, by operation and result (ok, not_found, not_owned, full or error).",
+			Help:      "Calls to the storage backend, by operation and result (ok, not_found, not_owned, full, owner_full or error).",
 		}, []string{"operation", "result"}),
 		registryDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Namespace: namespace,
@@ -80,6 +81,11 @@ func New(version string) *Metrics {
 			Name:      "credential_reloads_total",
 			Help:      "Attempts to reload the TLS files and tokens file while running, by result (ok or error).",
 		}, []string{"result"}),
+		rateLimited: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "rate_limited_total",
+			Help:      "Requests refused by a rate limit, by limit (registrations or auth_failures).",
+		}, []string{"limit"}),
 	}
 
 	buildInfo := prometheus.NewGauge(prometheus.GaugeOpts{
@@ -101,6 +107,7 @@ func New(version string) *Metrics {
 		metrics.expiredInstances,
 		metrics.authFailures,
 		metrics.credentialReloads,
+		metrics.rateLimited,
 	)
 
 	return metrics
@@ -109,6 +116,11 @@ func New(version string) *Metrics {
 // AuthFailed counts one request refused by authentication for reason.
 func (metrics *Metrics) AuthFailed(reason string) {
 	metrics.authFailures.WithLabelValues(reason).Inc()
+}
+
+// RateLimited counts one request refused by limit.
+func (metrics *Metrics) RateLimited(limit string) {
+	metrics.rateLimited.WithLabelValues(limit).Inc()
 }
 
 // CredentialsReloaded counts one attempt to reload credentials, by result.

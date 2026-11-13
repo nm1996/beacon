@@ -111,6 +111,10 @@ func TestLoadFailures(t *testing.T) {
 		{name: "fractional TTL", content: "[registry]\nservice_ttl = \"1.5s\"\ncleanup_interval = \"1s\"", wantErr: []string{"registry.service_ttl must be a whole number of seconds"}},
 		{name: "negative per-owner limit", content: "[registry]\nmax_instances_per_owner = -1", wantErr: []string{"registry.max_instances_per_owner must be between 0 (no limit) and registry.max_instances (10000), got -1"}},
 		{name: "per-owner limit above the total", content: "[registry]\nmax_instances = 10\nmax_instances_per_owner = 11", wantErr: []string{"registry.max_instances_per_owner must be between 0 (no limit) and registry.max_instances (10), got 11"}},
+		{name: "negative registration rate", content: "[rate_limit]\nregistrations_per_second = -1", wantErr: []string{"rate_limit.registrations_per_second must be 0 (off) or a positive number, got -1"}},
+		{name: "infinite auth failure rate", content: "[rate_limit]\nauth_failures_per_second = inf", wantErr: []string{"rate_limit.auth_failures_per_second must be 0 (off) or a positive number"}},
+		{name: "zero burst while on", content: "[rate_limit]\nregistration_burst = 0", wantErr: []string{"rate_limit.registration_burst must be at least 1 while rate_limit.registrations_per_second is on, got 0"}},
+		{name: "zero auth burst while on", content: "[rate_limit]\nauth_failure_burst = 0", wantErr: []string{"rate_limit.auth_failure_burst must be at least 1"}},
 		{name: "zero max instances", content: "[registry]\nmax_instances = 0", wantErr: []string{"registry.max_instances must be positive"}},
 		{name: "negative TTL", content: "[registry]\nservice_ttl = \"-5s\"", wantErr: []string{"registry.service_ttl"}},
 		{name: "sub-second TTL", content: "[registry]\nservice_ttl = \"500ms\"\ncleanup_interval = \"100ms\"", wantErr: []string{"registry.service_ttl must be at least 1s"}},
@@ -240,5 +244,26 @@ func TestServerAddr(t *testing.T) {
 		if got := server.Addr(); got != tt.want {
 			t.Errorf("host %q: expected %q, got %q", tt.host, tt.want, got)
 		}
+	}
+}
+
+func TestRateLimitsAcceptWholeAndFractionalNumbers(t *testing.T) {
+	path := writeConfig(t, "[rate_limit]\nregistrations_per_second = 5\nauth_failures_per_second = 0.25\n")
+
+	config, err := Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	if config.RateLimit.RegistrationsPerSecond != 5 || config.RateLimit.AuthFailuresPerSecond != 0.25 {
+		t.Errorf("expected rates 5 and 0.25, got %+v", config.RateLimit)
+	}
+}
+
+func TestZeroRateWithZeroBurstIsOff(t *testing.T) {
+	path := writeConfig(t, "[rate_limit]\nregistrations_per_second = 0\nregistration_burst = 0\n")
+
+	if _, err := Load(path); err != nil {
+		t.Errorf("expected a limit that is off not to need a burst, got %v", err)
 	}
 }

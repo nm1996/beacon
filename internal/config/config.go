@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net"
 	"os"
 	"slices"
@@ -24,13 +25,14 @@ import (
 
 // Config holds every setting Beacon reads at startup.
 type Config struct {
-	Server   ServerConfig   `toml:"server"`
-	TLS      TLSConfig      `toml:"tls"`
-	Auth     AuthConfig     `toml:"auth"`
-	Registry RegistryConfig `toml:"registry"`
-	Storage  StorageConfig  `toml:"storage"`
-	Metrics  MetricsConfig  `toml:"metrics"`
-	Logging  LoggingConfig  `toml:"logging"`
+	Server    ServerConfig    `toml:"server"`
+	TLS       TLSConfig       `toml:"tls"`
+	Auth      AuthConfig      `toml:"auth"`
+	Registry  RegistryConfig  `toml:"registry"`
+	Storage   StorageConfig   `toml:"storage"`
+	RateLimit RateLimitConfig `toml:"rate_limit"`
+	Metrics   MetricsConfig   `toml:"metrics"`
+	Logging   LoggingConfig   `toml:"logging"`
 }
 
 // ServerConfig controls the HTTP server.
@@ -123,6 +125,25 @@ type StorageConfig struct {
 	Backend string `toml:"backend"`
 }
 
+// RateLimitConfig limits how often a client may do what is costly or a
+// sign of abuse. A rate of zero turns that limit off.
+type RateLimitConfig struct {
+	// RegistrationsPerSecond is how many registrations each caller may make
+	// per second on average: each token or certificate with authentication
+	// on, each client network without it.
+	RegistrationsPerSecond float64 `toml:"registrations_per_second"`
+	// RegistrationBurst is how many registrations a caller may make at once
+	// before RegistrationsPerSecond applies.
+	RegistrationBurst int `toml:"registration_burst"`
+	// AuthFailuresPerSecond is how many failed authentication attempts each
+	// client network may make per second on average. Beyond it, every
+	// request from that network gets 429 until it is back under the limit.
+	AuthFailuresPerSecond float64 `toml:"auth_failures_per_second"`
+	// AuthFailureBurst is how many failed attempts a client network may
+	// make at once before AuthFailuresPerSecond applies.
+	AuthFailureBurst int `toml:"auth_failure_burst"`
+}
+
 // MetricsConfig controls the Prometheus endpoint.
 type MetricsConfig struct {
 	// Enabled serves Prometheus metrics at GET /metrics on the API port.
@@ -159,6 +180,12 @@ func Default() Config {
 		},
 		Storage: StorageConfig{
 			Backend: StorageMemory,
+		},
+		RateLimit: RateLimitConfig{
+			RegistrationsPerSecond: 20,
+			RegistrationBurst:      200,
+			AuthFailuresPerSecond:  1,
+			AuthFailureBurst:       20,
 		},
 		Metrics: MetricsConfig{
 			Enabled: true,
@@ -271,6 +298,16 @@ func (config Config) Validate() error {
 	check(registry.MaxInstancesPerOwner >= 0 && registry.MaxInstancesPerOwner <= registry.MaxInstances,
 		"registry.max_instances_per_owner must be between 0 (no limit) and registry.max_instances (%d), got %d",
 		registry.MaxInstances, registry.MaxInstancesPerOwner)
+
+	limits := config.RateLimit
+	checkRate := func(key string, perSecond float64, burstKey string, burst int) {
+		check(perSecond >= 0 && !math.IsInf(perSecond, 0) && !math.IsNaN(perSecond),
+			"rate_limit.%s must be 0 (off) or a positive number, got %v", key, perSecond)
+		check(perSecond <= 0 || burst >= 1,
+			"rate_limit.%s must be at least 1 while rate_limit.%s is on, got %d", burstKey, key, burst)
+	}
+	checkRate("registrations_per_second", limits.RegistrationsPerSecond, "registration_burst", limits.RegistrationBurst)
+	checkRate("auth_failures_per_second", limits.AuthFailuresPerSecond, "auth_failure_burst", limits.AuthFailureBurst)
 
 	check(slices.Contains(storageBackends, config.Storage.Backend),
 		"storage.backend must be one of %s, got %q", strings.Join(storageBackends, ", "), config.Storage.Backend)

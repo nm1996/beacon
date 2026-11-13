@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/nm1996/beacon/internal/auth"
+	"github.com/nm1996/beacon/internal/ratelimit"
 )
 
 // Reasons a Guard refuses a request, passed to its failure callback and
@@ -41,20 +42,28 @@ type Authenticator interface {
 // reaches the handler it protects. A nil *Guard lets every request through,
 // which is how authentication is turned off.
 type Guard struct {
-	authenticator Authenticator
-	logger        *slog.Logger
-	failed        func(reason string)
+	authenticator  Authenticator
+	logger         *slog.Logger
+	failed         func(reason string)
+	failureLimit   *ratelimit.Limiter
+	failureLimited func()
 }
 
 // NewGuard returns a Guard that identifies callers with authenticator and
 // logs refused requests to logger. failed, if not nil, is called with one
 // of the AuthFailure reasons for every refused request.
-func NewGuard(authenticator Authenticator, logger *slog.Logger, failed func(reason string)) *Guard {
+func NewGuard(authenticator Authenticator, logger *slog.Logger, failed func(reason string), options ...GuardOption) *Guard {
 	if failed == nil {
 		failed = func(string) {}
 	}
 
-	return &Guard{authenticator: authenticator, logger: logger, failed: failed}
+	guard := &Guard{authenticator: authenticator, logger: logger, failed: failed, failureLimited: func() {}}
+
+	for _, option := range options {
+		option(guard)
+	}
+
+	return guard
 }
 
 // identityKey is the context key under which Require stores the caller's
@@ -88,6 +97,23 @@ func (guard *Guard) Require(permission auth.Permission, next http.Handler) http.
 	}
 
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		network := clientNetwork(request)
+
+		if exhausted, wait := guard.failureLimit.Exhausted(network); exhausted {
+			guard.failureLimited()
+			guard.logger.LogAttrs(request.Context(), slog.LevelWarn, "request refused",
+				slog.String("reason", codeRateLimited),
+				slog.String("limit", LimitAuthFailures),
+				slog.String("network", network),
+				slog.String("method", request.Method),
+				slog.String("path", request.URL.Path),
+			)
+			writeRateLimited(guard.logger, writer, wait,
+				"Too many failed authentication attempts from this network; retry after the time in the Retry-After header")
+
+			return
+		}
+
 		identity, refused := guard.identify(request)
 		if refused == nil && !identity.Allows(permission) {
 			refused = &refusal{
@@ -101,7 +127,12 @@ func (guard *Guard) Require(permission auth.Permission, next http.Handler) http.
 		}
 
 		if refused != nil {
+			if refused.reason == AuthFailureInvalid {
+				guard.failureLimit.Take(network)
+			}
+
 			guard.refuse(writer, request, refused)
+
 			return
 		}
 

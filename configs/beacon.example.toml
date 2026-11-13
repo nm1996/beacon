@@ -97,6 +97,23 @@ max_instances = 10000
 # applies with authentication on, since callers are not told apart without it.
 max_instances_per_owner = 0
 
+[rate_limit]
+# Each limit is a token bucket: a steady rate per second, and a burst that
+# may be spent at once. A rate of 0 turns that limit off.
+#
+# Registrations each caller may make: per token or certificate with
+# authentication on, per client network without it. Beyond it they get 429
+# rate_limited.
+registrations_per_second = 20
+registration_burst = 200
+
+# Failed authentication attempts (unknown or malformed credentials) each
+# client network may make. Beyond it, every request from that network gets
+# 429 rate_limited until it is back under the limit. Behind a proxy all
+# clients share its address; raise or turn off these limits there.
+auth_failures_per_second = 1
+auth_failure_burst = 20
+
 [storage]
 # Where registered instances are kept. Only "memory" exists today: fast, and
 # everything is forgotten on restart, so clients register again.

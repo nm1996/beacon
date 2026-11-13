@@ -79,6 +79,23 @@ Add an entry under **Unreleased** in the same pull request as the change.
   allows. Registrations beyond it get `429 quota_exceeded` and are counted as
   `result="owner_full"`. Like the total, it is checked in the same step as the
   insert. Without authentication it does not apply.
+- Rate limits, each a token bucket per client:
+  - Registrations per caller (the token or certificate with authentication
+    on, the client network without it): `rate_limit.registrations_per_second`
+    and `rate_limit.registration_burst`, default 20 per second in bursts of
+    200.
+  - Failed authentication per client network: `rate_limit.auth_failures_per_second`
+    and `rate_limit.auth_failure_burst`, default 1 per second in bursts of
+    20. Beyond it every request from that network is refused until it is
+    back under the limit.
+
+  Refused requests get `429 rate_limited` with a `Retry-After` header and
+  are counted in `beacon_rate_limited_total{limit}`. A client network is an
+  IPv4 address or an IPv6 `/64`. A rate of `0` turns a limit off. Each
+  setting has a `BEACON_RATE_LIMIT_*` environment variable. Built on
+  `golang.org/x/time/rate`, a new direct dependency.
+- `client.ErrRateLimited`, which matches `rate_limited` errors and any `429`
+  without Beacon's error format.
 
 ### Changed
 
