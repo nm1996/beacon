@@ -31,6 +31,7 @@ Services register themselves, send heartbeats, and discover each other over a sm
 - [Running in Docker](#running-in-docker)
 - [Go client](#go-client)
 - [Metrics](#metrics)
+- [Exposing Beacon to a network](#exposing-beacon-to-a-network)
 - [Limitations](#limitations)
 - [Development](#development)
 - [Project layout](#project-layout)
@@ -79,7 +80,7 @@ git clone https://github.com/nm1996/beacon.git
 cd beacon
 
 go run ./cmd/beacon
-# {"time":"...","level":"INFO","msg":"beacon listening","addr":":8080","version":"..."}
+# {"time":"...","level":"INFO","msg":"beacon listening","addr":"127.0.0.1:8080","version":"..."}
 ```
 
 Check that it is up:
@@ -272,7 +273,7 @@ A file only needs the keys it changes, and no file is needed at all. [`configs/b
 
 | Key | Environment variable | Default | Meaning |
 |---|---|---|---|
-| `server.host` | `BEACON_SERVER_HOST` | `"0.0.0.0"` | Interface to listen on |
+| `server.host` | `BEACON_SERVER_HOST` | `"127.0.0.1"` | Interface to listen on. The default accepts local connections only; see [Exposing Beacon to a network](#exposing-beacon-to-a-network). The container image sets `0.0.0.0` |
 | `server.port` | `BEACON_SERVER_PORT` | `8080` | TCP port, `1`–`65535` |
 | `server.read_timeout` | `BEACON_SERVER_READ_TIMEOUT` | `"5s"` | Time allowed to read a request, headers included |
 | `server.write_timeout` | `BEACON_SERVER_WRITE_TIMEOUT` | `"10s"` | Time allowed to write a response |
@@ -517,7 +518,7 @@ docker run --rm -p 8080:8080 ghcr.io/nm1996/beacon:0.1
 | `0.1` | The newest `0.1.x` release |
 | `latest` | The newest release; pre-releases such as `0.1.0-rc.1` never move it |
 
-The image is built on [distroless](https://github.com/GoogleContainerTools/distroless) `static`: it has no shell or package manager and runs as a non-root user. It reads `/etc/beacon/beacon.toml`, a copy of the example configuration, so every default from [Configuration](#configuration) applies. Change settings either way:
+The image is built on [distroless](https://github.com/GoogleContainerTools/distroless) `static`: it has no shell or package manager and runs as a non-root user. It reads `/etc/beacon/beacon.toml`, a copy of the example configuration, so every default from [Configuration](#configuration) applies, except that the image sets `BEACON_SERVER_HOST=0.0.0.0` so the published port can reach it. Environment variables win over the file, so a mounted file's `server.host` is ignored unless you also pass `-e BEACON_SERVER_HOST=...`. Change settings either way:
 
 ```bash
 # Environment variables
@@ -708,13 +709,28 @@ To scrape with a [client certificate](#client-certificates-mtls) instead, replac
 
 Without authentication, `/metrics` is open like the rest of the API. Disable it with `BEACON_METRICS_ENABLED=false` if it must not be reachable.
 
+## Exposing Beacon to a network
+
+> [!WARNING]
+> The defaults are for one machine: Beacon listens on `127.0.0.1`, without TLS or authentication. Before other machines can reach it, decide who may.
+
+To accept connections from the network:
+
+1. Turn on [TLS](#tls), so tokens and registrations are not sent in the clear.
+2. Turn on [authentication](#authentication), so only callers with a token or certificate can register, discover or remove instances, and only an instance's owner can change it.
+3. Set `server.host` to `"0.0.0.0"` (or `BEACON_SERVER_HOST=0.0.0.0`), or to the address of one interface.
+
+Beacon starts either way, but logs a warning when it serves plain HTTP on an address other than loopback.
+
+The [container image](#running-in-docker) already listens on `0.0.0.0`, because inside a container `127.0.0.1` is only reachable from the container itself; who can reach it is decided by the ports you publish. Publish them only on a trusted network, or with TLS and authentication on. To bind a published port to the host's loopback only, use `-p 127.0.0.1:8080:8080`.
+
 ## Limitations
 
 Beacon is deliberately small. Before you depend on it, know that:
 
 - **State lives in memory.** Restarting Beacon forgets every instance. Services find out on their next heartbeat (`404`) and should register again.
 - **It runs as a single node.** There is no clustering or replication.
-- **Authentication is off by default.** Until you turn on [authentication](#authentication), anyone who can reach the port can register, discover and remove instances. [TLS](#tls) encrypts the traffic but does not decide who may connect.
+- **Authentication is off by default.** Until you turn on [authentication](#authentication), anyone who can reach the port can register, discover and remove instances. By default only the same machine can, since Beacon listens on `127.0.0.1`; see [Exposing Beacon to a network](#exposing-beacon-to-a-network). [TLS](#tls) encrypts the traffic but does not decide who may connect.
 - **Ownership is by name, not by service.** Every instance registered with the same token or certificate belongs to the same caller, so two services sharing one token can change each other's instances. Give each service its own token or certificate.
 - **Client certificates are not checked for revocation.** Use short-lived certificates.
 

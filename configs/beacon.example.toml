@@ -15,8 +15,13 @@
 # Do not put passwords, tokens, or other secrets in this file.
 
 [server]
-# Interface the HTTP server listens on. "0.0.0.0" means all interfaces.
-host = "0.0.0.0"
+# Interface the HTTP server listens on. The default only accepts connections
+# from this machine. Use "0.0.0.0" to accept them from the network, and turn
+# on TLS and authentication before you do: without them anyone who can reach
+# the port can register and remove instances. The container image sets
+# BEACON_SERVER_HOST=0.0.0.0, since it is only reachable through its
+# published ports.
+host = "127.0.0.1"
 
 # TCP port for the HTTP API.
 port = 8080
