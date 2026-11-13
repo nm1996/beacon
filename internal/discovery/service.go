@@ -27,6 +27,12 @@ type Config struct {
 	// Registrations beyond it get ErrRegistryFull. It bounds memory use,
 	// response sizes and metric work however clients behave.
 	MaxInstances int
+	// MaxInstancesPerOwner is the most instances one caller may hold at
+	// once, so a single identity cannot take every place MaxInstances
+	// allows. Registrations beyond it get ErrOwnerQuotaExceeded. Zero means
+	// no limit per owner. It applies only to callers with a Name, that is
+	// when the transport authenticates.
+	MaxInstancesPerOwner int
 }
 
 // validate reports the first setting that is out of range.
@@ -49,6 +55,10 @@ func (config Config) validate() error {
 
 	if config.MaxInstances <= 0 {
 		return errors.New("maximum number of instances must be positive")
+	}
+
+	if config.MaxInstancesPerOwner < 0 || config.MaxInstancesPerOwner > config.MaxInstances {
+		return errors.New("maximum number of instances per owner must be between 0 (no limit) and the maximum number of instances")
 	}
 
 	return nil
@@ -116,7 +126,10 @@ func (service *Service) Register(ctx context.Context, registration Registration,
 		LastHeartbeat: now,
 	}
 
-	if err := service.registry.Create(ctx, instance, service.config.MaxInstances); err != nil {
+	if err := service.registry.Create(ctx, instance, Limits{
+		Total:    service.config.MaxInstances,
+		PerOwner: service.config.MaxInstancesPerOwner,
+	}); err != nil {
 		return Instance{}, fmt.Errorf("store instance: %w", err)
 	}
 

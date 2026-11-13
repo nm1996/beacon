@@ -70,6 +70,8 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 		{name: "zero interval", config: discovery.Config{TTL: time.Second}},
 		{name: "negative interval", config: discovery.Config{TTL: time.Second, CleanupInterval: -time.Second, MaxInstances: 1}},
 		{name: "zero max instances", config: discovery.Config{TTL: time.Second, CleanupInterval: time.Second}},
+		{name: "negative per-owner limit", config: discovery.Config{TTL: time.Second, CleanupInterval: time.Second, MaxInstances: 10, MaxInstancesPerOwner: -1}},
+		{name: "per-owner limit above the total", config: discovery.Config{TTL: time.Second, CleanupInterval: time.Second, MaxInstances: 10, MaxInstancesPerOwner: 11}},
 	}
 
 	for _, tt := range tests {
@@ -233,7 +235,7 @@ type failingRegistry struct {
 }
 
 // Create always fails.
-func (registry failingRegistry) Create(context.Context, discovery.Instance, int) error {
+func (registry failingRegistry) Create(context.Context, discovery.Instance, discovery.Limits) error {
 	return registry.err
 }
 
@@ -328,5 +330,67 @@ func TestRegisterRefusesBeyondMaxInstances(t *testing.T) {
 
 	if _, err := service.Register(t.Context(), registration("orders"), anyone); err != nil {
 		t.Errorf("expected a place once an instance left, got %v", err)
+	}
+}
+
+func TestRegisterRefusesBeyondMaxInstancesPerOwner(t *testing.T) {
+	config := testConfig
+	config.MaxInstancesPerOwner = 2
+
+	service, err := discovery.New(memory.New(), config, discard)
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	ctx := t.Context()
+	orders := discovery.Caller{Name: "orders"}
+	payments := discovery.Caller{Name: "payments"}
+
+	var first discovery.Instance
+
+	for index := range 2 {
+		instance, err := service.Register(ctx, registration("orders"), orders)
+		if err != nil {
+			t.Fatalf("register %d within the owner limit: %v", index, err)
+		}
+
+		if index == 0 {
+			first = instance
+		}
+	}
+
+	if _, err := service.Register(ctx, registration("orders"), orders); !errors.Is(err, discovery.ErrOwnerQuotaExceeded) {
+		t.Fatalf("expected ErrOwnerQuotaExceeded beyond the owner limit, got %v", err)
+	}
+
+	// One owner at its limit leaves the registry open to everyone else.
+	if _, err := service.Register(ctx, registration("payments"), payments); err != nil {
+		t.Errorf("expected another owner to register, got %v", err)
+	}
+
+	if err := service.Unregister(ctx, first.ID, orders); err != nil {
+		t.Fatalf("unregister: %v", err)
+	}
+
+	if _, err := service.Register(ctx, registration("orders"), orders); err != nil {
+		t.Errorf("expected a place once one of the owner's instances left, got %v", err)
+	}
+}
+
+func TestOwnerLimitDoesNotApplyWithoutAuthentication(t *testing.T) {
+	config := testConfig
+	config.MaxInstancesPerOwner = 1
+
+	service, err := discovery.New(memory.New(), config, discard)
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	// Without authentication every caller is anonymous; a per-owner limit
+	// of 1 must not become a registry-wide limit of 1.
+	for index := range 3 {
+		if _, err := service.Register(t.Context(), registration("orders"), anyone); err != nil {
+			t.Fatalf("register %d: %v", index, err)
+		}
 	}
 }

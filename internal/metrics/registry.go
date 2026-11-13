@@ -32,6 +32,8 @@ func (registry *instrumentedRegistry) observe(operation string, started time.Tim
 		result = "not_found"
 	case errors.Is(err, discovery.ErrRegistryFull):
 		result = "full"
+	case errors.Is(err, discovery.ErrOwnerQuotaExceeded):
+		result = "owner_full"
 	case errors.Is(err, discovery.ErrInstanceNotOwned):
 		result = "not_owned"
 	case err != nil:
@@ -43,9 +45,9 @@ func (registry *instrumentedRegistry) observe(operation string, started time.Tim
 }
 
 // Create records and forwards the call.
-func (registry *instrumentedRegistry) Create(ctx context.Context, instance discovery.Instance, limit int) error {
+func (registry *instrumentedRegistry) Create(ctx context.Context, instance discovery.Instance, limits discovery.Limits) error {
 	started := time.Now()
-	err := registry.next.Create(ctx, instance, limit)
+	err := registry.next.Create(ctx, instance, limits)
 	registry.observe("create", started, err)
 
 	return err

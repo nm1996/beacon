@@ -72,6 +72,13 @@ Add an entry under **Unreleased** in the same pull request as the change.
   Refused creates are counted as `result="full"` in
   `beacon_registry_operations_total`. `client.ErrQuotaExceeded` matches the
   error.
+- A per-owner limit: `registry.max_instances_per_owner`
+  (`BEACON_REGISTRY_MAX_INSTANCES_PER_OWNER`, default 0, no limit). With
+  authentication on, each token or certificate may hold at most that many
+  instances, so one caller cannot take every place `registry.max_instances`
+  allows. Registrations beyond it get `429 quota_exceeded` and are counted as
+  `result="owner_full"`. Like the total, it is checked in the same step as the
+  insert. Without authentication it does not apply.
 
 ### Changed
 

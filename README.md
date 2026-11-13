@@ -162,7 +162,7 @@ Every error response has the same shape:
 | `400` | `invalid_service` | A registration field breaks a rule, for example a port outside `1`–`65535` |
 | `400` | `invalid_query` | A query parameter is invalid, such as `limit=0` or a `cursor` Beacon did not issue |
 | `403` | `instance_not_owned` | [Authentication](#authentication) is on and another caller registered this instance; see [Instance ownership](#instance-ownership) |
-| `429` | `quota_exceeded` | Beacon already holds `registry.max_instances` instances; retry after some unregister or expire |
+| `429` | `quota_exceeded` | Beacon already holds `registry.max_instances` instances, or the caller already holds `registry.max_instances_per_owner`; retry after some unregister or expire |
 | `404` | `service_not_found` | No instance is registered with the given ID |
 | `404` | `not_found` | No endpoint exists at the path |
 | `401` | `unauthorized` | [Authentication](#authentication) is on and the request has no bearer token, a malformed `Authorization` header or a token Beacon does not accept |
@@ -186,6 +186,7 @@ Every error response has the same shape:
 |---|---|
 | `201 Created` | Registered. The `Location` header points at the new instance |
 | `400 Bad Request` | The body is invalid or a field breaks a rule above |
+| `429 Too Many Requests` | `quota_exceeded`: Beacon is full, or this caller holds its maximum number of instances |
 
 ```json
 { "id": "8c0f3c56-5d7e-4a63-9a39-2b7c1e5e8f40", "ttl_seconds": 30 }
@@ -291,6 +292,7 @@ A file only needs the keys it changes, and no file is needed at all. [`configs/b
 | `registry.max_name_length` | `BEACON_REGISTRY_MAX_NAME_LENGTH` | `63` | Longest accepted service name, 1–253. The default fits a DNS label |
 | `registry.max_address_length` | `BEACON_REGISTRY_MAX_ADDRESS_LENGTH` | `253` | Longest accepted host name as an address, 1–253. IP addresses are not held to it |
 | `registry.max_instances` | `BEACON_REGISTRY_MAX_INSTANCES` | `10000` | The most instances Beacon holds at once; further registrations get `429 quota_exceeded`. Bounds memory use and the size of discovery responses |
+| `registry.max_instances_per_owner` | `BEACON_REGISTRY_MAX_INSTANCES_PER_OWNER` | `0` | The most instances one token or certificate may hold at once, so no single caller can take every place; `0` is no limit. Needs [authentication](#instance-ownership), and must not exceed `registry.max_instances` |
 | `storage.backend` | `BEACON_STORAGE_BACKEND` | `"memory"` | Where instances are kept. Only `memory` exists today |
 | `metrics.enabled` | `BEACON_METRICS_ENABLED` | `true` | Serve Prometheus metrics at `GET /metrics` |
 | `logging.level` | `BEACON_LOGGING_LEVEL` | `"info"` | `debug`, `info`, `warn` or `error` |
@@ -410,7 +412,8 @@ With authentication on, Beacon records which token or certificate registered eac
 - An operator who needs to remove a stuck instance of another service uses an entry with `permissions = ["register", "manage"]`, alongside `discover` if it should also list instances.
 - The owner is the entry's `name`. Renaming an entry, or moving a service from a token to a certificate under another name, means its existing instances belong to the old name: their heartbeats get `403`, they expire after `registry.service_ttl`, and a [`Lease`](#go-client) then gets `404` and registers again under the new name.
 - Owners appear in the `service registered` log line (`owner`), and whoever unregistered an instance in `service unregistered` (`by`). `GET /api/v1/services` does not show them.
-- Without authentication nothing is recorded or checked, and anyone may change any instance.
+- `registry.max_instances_per_owner` limits how many instances each owner may hold at once, so one service, or one leaked token, cannot fill Beacon and lock everyone else out. Registrations beyond it get `429 quota_exceeded`, logged as `registration refused: owner quota reached` with the `caller`. Other owners are not affected.
+- Without authentication nothing is recorded or checked, and anyone may change any instance. The per-owner limit does not apply then; only `registry.max_instances` does.
 
 ### Client certificates (mTLS)
 
@@ -668,7 +671,7 @@ scrape_configs:
 | `beacon_instances` | gauge | | Registered instances |
 | `beacon_services` | gauge | | Distinct service names with at least one registered instance |
 | `beacon_expired_instances_total` | counter | | Instances removed because they stopped sending heartbeats |
-| `beacon_registry_operations_total` | counter | `operation`, `result` | Calls to the storage backend; `result` is `ok`, `not_found`, `not_owned`, `full` (refused by `registry.max_instances`) or `error` |
+| `beacon_registry_operations_total` | counter | `operation`, `result` | Calls to the storage backend; `result` is `ok`, `not_found`, `not_owned`, `full` (refused by `registry.max_instances`), `owner_full` (refused by `registry.max_instances_per_owner`) or `error` |
 | `beacon_registry_operation_duration_seconds` | histogram | `operation` | Time spent in the storage backend |
 | `beacon_auth_failures_total` | counter | `reason` | Requests refused by [authentication](#authentication); `reason` is `missing`, `invalid` or `forbidden`. Only appears once a request has been refused |
 | `beacon_credential_reloads_total` | counter | `result` | Attempts to [reload](#reloading-certificates-and-tokens) the TLS files and tokens file while running; `result` is `ok` or `error`. Only appears after the first attempt |

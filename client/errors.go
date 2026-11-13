@@ -30,10 +30,10 @@ var (
 	ErrNotOwned = errors.New("beacon: instance registered by another caller")
 
 	// ErrQuotaExceeded matches errors for a registration Beacon refused
-	// because it already holds its maximum number of instances. Retrying
-	// later can succeed once other instances unregister or expire; a Lease
-	// keeps retrying on its own.
-	ErrQuotaExceeded = errors.New("beacon: registry is full")
+	// because it already holds its maximum number of instances, or the
+	// caller already holds its own maximum. Retrying later can succeed once
+	// instances unregister or expire; a Lease keeps retrying on its own.
+	ErrQuotaExceeded = errors.New("beacon: instance quota exceeded")
 )
 
 // Error is a response Beacon answered with an unexpected status. Code holds

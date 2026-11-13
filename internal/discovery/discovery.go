@@ -30,6 +30,11 @@ var (
 	// registry already holds the configured maximum number of instances.
 	// Registry implementations return it, unwrapped or wrapped, from Create.
 	ErrRegistryFull = errors.New("registry is full")
+
+	// ErrOwnerQuotaExceeded reports that a registration was refused because
+	// its owner already holds the configured maximum number of instances.
+	// Registry implementations return it, unwrapped or wrapped, from Create.
+	ErrOwnerQuotaExceeded = errors.New("owner holds its maximum number of instances")
 )
 
 // Caller is who asks to change an instance. Transports build it from
@@ -47,6 +52,16 @@ type Caller struct {
 // check returns the OwnerCheck that limits caller's changes.
 func (caller Caller) check() OwnerCheck {
 	return OwnerCheck{Owner: caller.Name, Any: caller.AnyInstance}
+}
+
+// Limits bounds what Registry.Create may store.
+type Limits struct {
+	// Total is the most instances the registry may hold.
+	Total int
+	// PerOwner is the most instances that share one non-empty Owner. Zero
+	// means no limit per owner. Instances without an owner, registered
+	// while authentication is off, never count towards it.
+	PerOwner int
 }
 
 // ListQuery selects instances for Registry.List.
@@ -115,12 +130,13 @@ type Instance struct {
 // and expiry policy are decided by Service, so every backend behaves the
 // same. Implementations must be safe for concurrent use.
 type Registry interface {
-	// Create stores instance under instance.ID unless the registry already
-	// holds limit instances, in which case it returns ErrRegistryFull. The
-	// check and the insert are one operation, so concurrent calls can never
-	// take the registry past limit. It fails if an instance with that ID
-	// already exists.
-	Create(ctx context.Context, instance Instance, limit int) error
+	// Create stores instance under instance.ID unless that would break
+	// limits: it returns ErrRegistryFull if the registry already holds
+	// limits.Total instances, and ErrOwnerQuotaExceeded if instance.Owner
+	// already holds limits.PerOwner. The checks and the insert are one
+	// operation, so concurrent calls can never go past either limit. It
+	// fails if an instance with that ID already exists.
+	Create(ctx context.Context, instance Instance, limits Limits) error
 	// Get returns a copy of the instance with id. It returns
 	// ErrInstanceNotFound if there is none.
 	Get(ctx context.Context, id string) (Instance, error)

@@ -102,6 +102,11 @@ type RegistryConfig struct {
 	// MaxInstances is the most instances Beacon holds at once; registrations
 	// beyond it are refused until others leave or expire.
 	MaxInstances int `toml:"max_instances"`
+	// MaxInstancesPerOwner is the most instances one token or certificate
+	// may hold at once, so no single caller can take every place. Zero means
+	// no limit per owner. It needs authentication, since without it callers
+	// are not told apart.
+	MaxInstancesPerOwner int `toml:"max_instances_per_owner"`
 }
 
 // StorageMemory selects the in-memory registry backend, which keeps
@@ -263,6 +268,9 @@ func (config Config) Validate() error {
 		"registry.max_name_length must be between 1 and %d, got %d", discovery.MaxLengthLimit, registry.MaxNameLength)
 	check(registry.MaxAddressLength >= 1 && registry.MaxAddressLength <= discovery.MaxLengthLimit,
 		"registry.max_address_length must be between 1 and %d, got %d", discovery.MaxLengthLimit, registry.MaxAddressLength)
+	check(registry.MaxInstancesPerOwner >= 0 && registry.MaxInstancesPerOwner <= registry.MaxInstances,
+		"registry.max_instances_per_owner must be between 0 (no limit) and registry.max_instances (%d), got %d",
+		registry.MaxInstances, registry.MaxInstancesPerOwner)
 
 	check(slices.Contains(storageBackends, config.Storage.Backend),
 		"storage.backend must be one of %s, got %q", strings.Join(storageBackends, ", "), config.Storage.Backend)

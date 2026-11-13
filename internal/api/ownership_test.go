@@ -8,8 +8,11 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nm1996/beacon/internal/auth"
+	"github.com/nm1996/beacon/internal/discovery"
+	"github.com/nm1996/beacon/internal/registry/memory"
 )
 
 // ownershipTokens are callers that register instances, or manage them.
@@ -129,4 +132,42 @@ func TestListingDoesNotShowOwners(test *testing.T) {
 	if strings.Contains(body, "owner") || strings.Contains(body, `"orders-token"`) {
 		test.Errorf("expected the listing to leave owners out, got %s", body)
 	}
+}
+
+func TestOwnerQuotaAnswersQuotaExceeded(test *testing.T) {
+	var logs bytes.Buffer
+
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+
+	service, err := discovery.New(memory.New(), discovery.Config{
+		TTL: testTTL, CleanupInterval: time.Second, MaxInstances: 100, MaxInstancesPerOwner: 1,
+	}, discard)
+	if err != nil {
+		test.Fatalf("new discovery: %v", err)
+	}
+
+	config := testConfig
+	config.Guard = NewGuard(ownershipTokens, logger, nil)
+	router := NewRouter(service, logger, config)
+
+	registerAs(test, router, "orders-token")
+
+	recorder := send(router, http.MethodPost, servicesPath, "orders-token", `{"name":"orders","address":"10.0.0.1","port":8081}`)
+	if recorder.Code != http.StatusTooManyRequests {
+		test.Fatalf("expected status %d, got %d", http.StatusTooManyRequests, recorder.Code)
+	}
+
+	detail := decodeError(test, recorder)
+	if detail.Code != codeQuotaExceeded || !strings.Contains(detail.Message, "This caller") {
+		test.Errorf("expected a quota_exceeded error about this caller, got %+v", detail)
+	}
+
+	for _, want := range []string{"level=WARN", "owner quota reached", "caller=orders"} {
+		if !strings.Contains(logs.String(), want) {
+			test.Errorf("expected the log to contain %q, logs:\n%s", want, logs.String())
+		}
+	}
+
+	// Another caller is not affected.
+	registerAs(test, router, "payments-token")
 }

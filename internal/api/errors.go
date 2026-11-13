@@ -63,6 +63,13 @@ func (handler *Handler) writeDiscoveryError(writer http.ResponseWriter, request 
 		handler.logger.WarnContext(request.Context(), "registration refused: registry is full")
 		handler.writeError(writer, http.StatusTooManyRequests, codeQuotaExceeded,
 			"Beacon already holds the maximum number of instances; retry after others unregister or expire")
+	case errors.Is(err, discovery.ErrOwnerQuotaExceeded):
+		caller := handler.caller(request)
+		handler.logger.LogAttrs(request.Context(), slog.LevelWarn, "registration refused: owner quota reached",
+			slog.String("caller", caller.Name),
+		)
+		handler.writeError(writer, http.StatusTooManyRequests, codeQuotaExceeded,
+			"This caller already holds its maximum number of instances; retry after some of them unregister or expire")
 	default:
 		handler.logger.ErrorContext(request.Context(), "discovery operation failed", slog.Any("error", err))
 		handler.writeError(writer, http.StatusInternalServerError, codeInternalError, "Internal server error")

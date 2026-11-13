@@ -109,6 +109,8 @@ func TestLoadFailures(t *testing.T) {
 		{name: "port out of range", content: "[server]\nport = 70000", wantErr: []string{"server.port"}},
 		{name: "zero timeout", content: "[server]\nwrite_timeout = \"0s\"", wantErr: []string{"server.write_timeout"}},
 		{name: "fractional TTL", content: "[registry]\nservice_ttl = \"1.5s\"\ncleanup_interval = \"1s\"", wantErr: []string{"registry.service_ttl must be a whole number of seconds"}},
+		{name: "negative per-owner limit", content: "[registry]\nmax_instances_per_owner = -1", wantErr: []string{"registry.max_instances_per_owner must be between 0 (no limit) and registry.max_instances (10000), got -1"}},
+		{name: "per-owner limit above the total", content: "[registry]\nmax_instances = 10\nmax_instances_per_owner = 11", wantErr: []string{"registry.max_instances_per_owner must be between 0 (no limit) and registry.max_instances (10), got 11"}},
 		{name: "zero max instances", content: "[registry]\nmax_instances = 0", wantErr: []string{"registry.max_instances must be positive"}},
 		{name: "negative TTL", content: "[registry]\nservice_ttl = \"-5s\"", wantErr: []string{"registry.service_ttl"}},
 		{name: "sub-second TTL", content: "[registry]\nservice_ttl = \"500ms\"\ncleanup_interval = \"100ms\"", wantErr: []string{"registry.service_ttl must be at least 1s"}},

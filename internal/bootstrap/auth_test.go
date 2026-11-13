@@ -180,3 +180,23 @@ func TestReloadedTokensApplyToTheRunningAPI(test *testing.T) {
 		test.Error("expected the reload to be counted in /metrics")
 	}
 }
+
+func TestNewAppliesMaxInstancesPerOwner(test *testing.T) {
+	settings := authSettings(test)
+	settings.Registry.MaxInstancesPerOwner = 1
+
+	handler := mustNew(test, settings, "v0.0.0-test").Server.Handler
+
+	want := []int{http.StatusCreated, http.StatusTooManyRequests}
+	for attempt, status := range want {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/services", strings.NewReader(`{"name":"orders","address":"10.0.0.1","port":8081}`))
+		request.Header.Set("Authorization", "Bearer "+serviceToken)
+
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+
+		if recorder.Code != status {
+			test.Errorf("registration %d: expected status %d, got %d: %s", attempt+1, status, recorder.Code, recorder.Body)
+		}
+	}
+}

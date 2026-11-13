@@ -23,7 +23,7 @@ import (
 var anyOwner = discovery.OwnerCheck{Any: true}
 
 // noLimit is a Create limit no case reaches.
-const noLimit = math.MaxInt
+var noLimit = discovery.Limits{Total: math.MaxInt}
 
 // base is a fixed point in time the cases build their timestamps from.
 var base = time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC)
@@ -56,6 +56,11 @@ func Run(test *testing.T, newRegistry func(test *testing.T) discovery.Registry) 
 		{name: "ListPagesWithinAName", run: listPagesWithinAName},
 		{name: "DeleteChecksOwner", run: deleteChecksOwner},
 		{name: "ConcurrentCreateNeverExceedsLimit", run: concurrentCreateNeverExceedsLimit},
+		{name: "CreateRespectsOwnerLimit", run: createRespectsOwnerLimit},
+		{name: "OwnerLimitSkipsUnownedInstances", run: ownerLimitSkipsUnownedInstances},
+		{name: "RemovalFreesOwnerPlaces", run: removalFreesOwnerPlaces},
+		{name: "TotalLimitComesFirst", run: totalLimitComesFirst},
+		{name: "ConcurrentCreateNeverExceedsOwnerLimit", run: concurrentCreateNeverExceedsOwnerLimit},
 	}
 
 	for _, tc := range cases {
@@ -380,12 +385,12 @@ func createRespectsLimit(test *testing.T, registry discovery.Registry) {
 	ctx := test.Context()
 
 	for _, id := range []string{"a", "b"} {
-		if err := registry.Create(ctx, instance(id, "orders", base), 2); err != nil {
+		if err := registry.Create(ctx, instance(id, "orders", base), discovery.Limits{Total: 2}); err != nil {
 			test.Fatalf("create %s within the limit: %v", id, err)
 		}
 	}
 
-	if err := registry.Create(ctx, instance("c", "orders", base), 2); !errors.Is(err, discovery.ErrRegistryFull) {
+	if err := registry.Create(ctx, instance("c", "orders", base), discovery.Limits{Total: 2}); !errors.Is(err, discovery.ErrRegistryFull) {
 		test.Fatalf("expected ErrRegistryFull at the limit, got %v", err)
 	}
 
@@ -398,7 +403,7 @@ func createRespectsLimit(test *testing.T, registry discovery.Registry) {
 		test.Fatalf("delete: %v", err)
 	}
 
-	if err := registry.Create(ctx, instance("c", "orders", base), 2); err != nil {
+	if err := registry.Create(ctx, instance("c", "orders", base), discovery.Limits{Total: 2}); err != nil {
 		test.Errorf("expected a place after one instance left, got %v", err)
 	}
 }
@@ -426,7 +431,7 @@ func concurrentCreateNeverExceedsLimit(test *testing.T, registry discovery.Regis
 			<-start
 
 			for op := range perWorker {
-				err := registry.Create(ctx, instance(fmt.Sprintf("w%d-%d", worker, op), "orders", base), limit)
+				err := registry.Create(ctx, instance(fmt.Sprintf("w%d-%d", worker, op), "orders", base), discovery.Limits{Total: limit})
 
 				switch {
 				case err == nil:
@@ -619,5 +624,150 @@ func listPagesWithinAName(test *testing.T, registry discovery.Registry) {
 	second := page(test, registry, discovery.ListQuery{Name: "orders", After: first[len(first)-1].ID, Limit: 2})
 	if got := orderedIDs(second); got != "[e]" {
 		test.Errorf("expected the second orders page [e], got %s", got)
+	}
+}
+
+// ownerLimit allows two instances per owner and plenty in total.
+var ownerLimit = discovery.Limits{Total: 100, PerOwner: 2}
+
+func createRespectsOwnerLimit(test *testing.T, registry discovery.Registry) {
+	ctx := test.Context()
+
+	for _, id := range []string{"a1", "a2"} {
+		if err := registry.Create(ctx, owned(id, "alice"), ownerLimit); err != nil {
+			test.Fatalf("create %s within the owner limit: %v", id, err)
+		}
+	}
+
+	if err := registry.Create(ctx, owned("a3", "alice"), ownerLimit); !errors.Is(err, discovery.ErrOwnerQuotaExceeded) {
+		test.Fatalf("expected ErrOwnerQuotaExceeded at the owner limit, got %v", err)
+	}
+
+	// Another owner still has its own places.
+	for _, id := range []string{"b1", "b2"} {
+		if err := registry.Create(ctx, owned(id, "bob"), ownerLimit); err != nil {
+			test.Errorf("expected bob to register %s while alice is at her limit, got %v", id, err)
+		}
+	}
+
+	if got := mustList(test, registry, ""); !sameIDs(got, "a1", "a2", "b1", "b2") {
+		test.Errorf("expected the refused instance not to be stored, got %v", ids(got))
+	}
+}
+
+func ownerLimitSkipsUnownedInstances(test *testing.T, registry discovery.Registry) {
+	ctx := test.Context()
+
+	// Without authentication every instance has an empty owner; the owner
+	// limit must not turn them into one owner sharing two places.
+	for index := range 5 {
+		if err := registry.Create(ctx, instance(fmt.Sprintf("u%d", index), "orders", base), ownerLimit); err != nil {
+			test.Fatalf("create unowned instance %d: %v", index, err)
+		}
+	}
+
+	// Nor may they use up an owner's places.
+	for _, id := range []string{"a1", "a2"} {
+		if err := registry.Create(ctx, owned(id, "alice"), ownerLimit); err != nil {
+			test.Errorf("create %s: %v", id, err)
+		}
+	}
+}
+
+func removalFreesOwnerPlaces(test *testing.T, registry discovery.Registry) {
+	ctx := test.Context()
+
+	fresh := owned("fresh", "alice")
+	stale := owned("stale", "alice")
+	stale.LastHeartbeat = base.Add(-time.Hour)
+
+	for _, item := range []discovery.Instance{fresh, stale} {
+		if err := registry.Create(ctx, item, ownerLimit); err != nil {
+			test.Fatalf("create %s: %v", item.ID, err)
+		}
+	}
+
+	// Expiry frees a place.
+	if removed, err := registry.DeleteStale(ctx, base.Add(-time.Minute)); err != nil || removed != 1 {
+		test.Fatalf("expected 1 stale instance removed, got %d, %v", removed, err)
+	}
+
+	if err := registry.Create(ctx, owned("after-expiry", "alice"), ownerLimit); err != nil {
+		test.Fatalf("expected a place after an instance expired, got %v", err)
+	}
+
+	// So does unregistering.
+	if err := registry.Delete(ctx, "fresh", anyOwner); err != nil {
+		test.Fatalf("delete: %v", err)
+	}
+
+	if err := registry.Create(ctx, owned("after-delete", "alice"), ownerLimit); err != nil {
+		test.Fatalf("expected a place after an instance was deleted, got %v", err)
+	}
+
+	if err := registry.Create(ctx, owned("over", "alice"), ownerLimit); !errors.Is(err, discovery.ErrOwnerQuotaExceeded) {
+		test.Errorf("expected the limit to hold again, got %v", err)
+	}
+}
+
+func totalLimitComesFirst(test *testing.T, registry discovery.Registry) {
+	limits := discovery.Limits{Total: 1, PerOwner: 1}
+
+	if err := registry.Create(test.Context(), owned("a", "alice"), limits); err != nil {
+		test.Fatalf("create: %v", err)
+	}
+
+	// Both limits are reached; the registry being full is the reason that
+	// does not depend on who asks.
+	if err := registry.Create(test.Context(), owned("b", "alice"), limits); !errors.Is(err, discovery.ErrRegistryFull) {
+		test.Errorf("expected ErrRegistryFull when both limits are reached, got %v", err)
+	}
+}
+
+// concurrentCreateNeverExceedsOwnerLimit races two owners, each sending more
+// creates than its limit allows. Each must end with exactly its limit.
+func concurrentCreateNeverExceedsOwnerLimit(test *testing.T, registry discovery.Registry) {
+	const (
+		perOwner  = 20
+		workers   = 8
+		perWorker = 10
+	)
+
+	limits := discovery.Limits{Total: math.MaxInt, PerOwner: perOwner}
+	owners := []string{"alice", "bob"}
+
+	var (
+		group sync.WaitGroup
+		start = make(chan struct{})
+		ctx   = context.Background()
+	)
+
+	for worker := range workers {
+		owner := owners[worker%len(owners)]
+
+		group.Go(func() {
+			<-start
+
+			for op := range perWorker {
+				err := registry.Create(ctx, owned(fmt.Sprintf("%s-%d-%d", owner, worker, op), owner), limits)
+				if err != nil && !errors.Is(err, discovery.ErrOwnerQuotaExceeded) {
+					test.Errorf("create: %v", err)
+				}
+			}
+		})
+	}
+
+	close(start)
+	group.Wait()
+
+	counts := make(map[string]int)
+	for _, item := range mustList(test, registry, "") {
+		counts[item.Owner]++
+	}
+
+	for _, owner := range owners {
+		if counts[owner] != perOwner {
+			test.Errorf("expected %s to hold exactly %d instances, got %d", owner, perOwner, counts[owner])
+		}
 	}
 }
