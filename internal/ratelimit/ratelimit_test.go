@@ -258,6 +258,144 @@ func TestReleasedKeysAreNotTracked(t *testing.T) {
 	}
 }
 
+// holdMany reserves for count distinct keys at once and returns the
+// reservations, failing the test if any is refused.
+func holdMany(t *testing.T, limiter *Limiter, prefix string, count int) []Reservation {
+	t.Helper()
+
+	held := make([]Reservation, 0, count)
+
+	for index := range count {
+		reservation, ok, _ := limiter.Reserve(fmt.Sprintf("%s-%d", prefix, index))
+		if !ok {
+			t.Fatalf("expected key %d to be allowed", index)
+		}
+
+		held = append(held, reservation)
+	}
+
+	return held
+}
+
+func TestKeysInProgressStayBounded(t *testing.T) {
+	limiter := New(1, 1, 10)
+
+	// A flood of distinct clients, all in the middle of authenticating.
+	held := holdMany(t, limiter, "flood", 1000)
+
+	if got := len(limiter.pending); got != 10 {
+		t.Fatalf("expected at most 10 keys counted in progress, got %d", got)
+	}
+
+	// Ending an attempt that was not counted leaves the counted ones alone.
+	held[999].Release()
+
+	if got := len(limiter.pending); got != 10 {
+		t.Fatalf("expected an uncounted release not to touch the counts, got %d", got)
+	}
+
+	for _, reservation := range held[:999] {
+		reservation.Release()
+	}
+
+	if got := len(limiter.pending); got != 0 {
+		t.Errorf("expected nothing in progress after every release, got %d", got)
+	}
+}
+
+func TestTrackedKeysStayProtectedWhileKeysInProgressAreFull(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		limiter := New(1, 3, 10)
+
+		// The attacker has failed once, so it is tracked, with 2 tokens left.
+		failed, _, _ := limiter.Reserve("attacker")
+		failed.Spend()
+
+		flood := holdMany(t, limiter, "flood", 1000)
+
+		first, ok, _ := limiter.Reserve("attacker")
+		if !ok {
+			t.Fatal("expected the attacker's first attempt to be allowed")
+		}
+
+		second, ok, _ := limiter.Reserve("attacker")
+		if !ok {
+			t.Fatal("expected the attacker's second attempt to be allowed")
+		}
+
+		if _, ok, _ := limiter.Reserve("attacker"); ok {
+			t.Fatal("expected a tracked key to stay limited however many other keys are in progress")
+		}
+
+		first.Spend()
+		second.Spend()
+
+		if _, ok, _ := limiter.Reserve("attacker"); ok {
+			t.Error("expected the spent burst to leave nothing to reserve")
+		}
+
+		for _, reservation := range flood {
+			reservation.Release()
+		}
+	})
+}
+
+func TestUncountedAttemptsStillCountFailures(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		limiter := New(1, 1, 10)
+		flood := holdMany(t, limiter, "flood", 10)
+
+		uncounted, ok, _ := limiter.Reserve("newcomer")
+		if !ok {
+			t.Fatal("expected an untracked key to be allowed when no more can be counted")
+		}
+
+		uncounted.Spend()
+
+		for _, reservation := range flood {
+			reservation.Release()
+		}
+
+		if _, ok, _ := limiter.Reserve("newcomer"); ok {
+			t.Error("expected the failure to be counted although its attempt was not")
+		}
+	})
+}
+
+func TestUncountedAttemptsLeaveLaterCountsAlone(t *testing.T) {
+	limiter := New(1, 2, 10)
+	flood := holdMany(t, limiter, "flood", 10)
+
+	uncounted, _, _ := limiter.Reserve("newcomer")
+
+	// Room frees up, and the same key's next attempt is counted.
+	flood[0].Release()
+
+	counted, ok, _ := limiter.Reserve("newcomer")
+	if !ok {
+		t.Fatal("expected the second attempt to be allowed")
+	}
+
+	// The first attempt ends; it must not end the second one's count.
+	uncounted.Release()
+
+	third, ok, _ := limiter.Reserve("newcomer")
+	if !ok {
+		t.Fatal("expected one of the two tokens to be free")
+	}
+
+	if _, ok, _ := limiter.Reserve("newcomer"); ok {
+		t.Error("expected the counted attempts to hold both tokens")
+	}
+
+	counted.Release()
+	third.Release()
+
+	for _, reservation := range flood[1:] {
+		reservation.Release()
+	}
+}
+
 func TestZeroRateTurnsLimitingOff(t *testing.T) {
 	limiter := New(0, 1, 0)
 	if limiter != nil {

@@ -89,7 +89,9 @@ Add an entry under **Unreleased** in the same pull request as the change.
     20. Beyond it every request from that network is refused until it is
     back under the limit. Each request reserves a place before its
     credentials are checked, so concurrent attempts cannot overshoot the
-    burst; the place is used up only if the credentials are invalid.
+    burst; the place is used up only if the credentials are invalid. Like
+    the buckets, places held by networks that have not failed before are
+    bounded, so a flood from many networks cannot grow memory.
 
   Refused requests get `429 rate_limited` with a `Retry-After` header and
   are counted in `beacon_rate_limited_total{limit}`. A client network is an
