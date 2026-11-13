@@ -178,7 +178,7 @@ Every error response has the same shape:
 
 | Field | Rule |
 |---|---|
-| `name` | Required. 1–63 (`registry.max_name_length`) lowercase letters, digits, `.`, `_` or `-`, starting and ending with a letter or digit, such as `orders` or `payment-service.v2`. Uppercase and spaces are rejected, not changed |
+| `name` | Required. 1–63 (`registry.max_name_length`) lowercase letters, digits, `.`, `_` or `-`, starting and ending with a letter or digit, with no two of `.`, `_` and `-` in a row, such as `orders` or `payment-service.v2`. Uppercase, spaces and names like `orders..v2` are rejected, not changed |
 | `address` | Required. An IPv4 or IPv6 address, or a host name such as `orders.internal`, up to 253 characters (`registry.max_address_length`). No scheme, port or path |
 | `port` | Required, between `1` and `65535` |
 

@@ -80,13 +80,13 @@ Add an entry under **Unreleased** in the same pull request as the change.
   Set `server.host` to `"0.0.0.0"` to accept remote connections. The
   container image sets `BEACON_SERVER_HOST=0.0.0.0`, so containers behave as
   before. The README has a new section on exposing Beacon safely.
-- Stricter registration rules. A service name must be 1–63 lowercase
-  letters, digits, `.`, `_` or `-`, starting and ending with a letter or
-  digit, so `orders`, `Orders` and `orders ` can no longer become three
-  different services. An address must be an IP address or a valid host name
-  of at most 253 characters, without a scheme, port or path. Registrations
-  that break either rule get `400 invalid_service`; names are not changed to
-  fit. Both lengths can be changed, between 1 and 253, with
+- Stricter registration rules. A service name must be 1–63 lowercase letters,
+  digits, `.`, `_` or `-`, starting and ending with a letter or digit, with no
+  two of `.`, `_` and `-` in a row, so `orders`, `Orders` and `orders ` can no
+  longer become three different services. An address must be an IP address or
+  a valid host name of at most 253 characters, without a scheme, port or path.
+  Registrations that break either rule get `400 invalid_service`; names are
+  not changed to fit. Both lengths can be changed, between 1 and 253, with
   `registry.max_name_length` and `registry.max_address_length`
   (`BEACON_REGISTRY_MAX_NAME_LENGTH`, `BEACON_REGISTRY_MAX_ADDRESS_LENGTH`);
   IP addresses are not held to the address limit.

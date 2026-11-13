@@ -21,6 +21,8 @@ func TestServiceNames(t *testing.T) {
 		{name: "a", valid: true},
 		{name: "0", valid: true},
 		{name: "3d-render", valid: true},
+		{name: "a.b_c-d", valid: true},
+		{name: "payment-service.v2", valid: true},
 		{name: strings.Repeat("a", 63), valid: true},
 
 		{name: ""},
@@ -40,6 +42,11 @@ func TestServiceNames(t *testing.T) {
 		{name: "orders:8080"},
 		{name: "ordérs"},
 		{name: "orders\n"},
+		{name: "a..b"},
+		{name: "a._b"},
+		{name: "orders--v2"},
+		{name: "orders-.v2"},
+		{name: "orders__v2"},
 	}
 
 	for _, tt := range tests {
@@ -112,7 +119,8 @@ func TestAddresses(t *testing.T) {
 func TestInvalidNameMessageExplainsTheRule(t *testing.T) {
 	_, err := newService(t).Register(t.Context(), registration("Orders"), anyone)
 
-	if err == nil || !strings.Contains(err.Error(), "lowercase") || !strings.Contains(err.Error(), "63") {
+	if err == nil || !strings.Contains(err.Error(), "lowercase") || !strings.Contains(err.Error(), "63") ||
+		!strings.Contains(err.Error(), "in a row") {
 		t.Errorf("expected the error to state the naming rule, got %v", err)
 	}
 }
