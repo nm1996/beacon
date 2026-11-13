@@ -54,6 +54,13 @@ Add an entry under **Unreleased** in the same pull request as the change.
   removing a stuck instance. Owners are logged, not shown by the API.
   Without authentication nothing changes.
 - `client.ErrNotOwned`, which matches `instance_not_owned` errors.
+- Paging for `GET /api/v1/services`: `limit` (1 to 1000) returns at most that
+  many instances and, when more follow, a `Link: <...>; rel="next"` header
+  with an opaque `cursor` for the next page. The body stays a JSON array and
+  requests without `limit` return everything as before, so existing clients
+  keep working. Invalid parameters get `400 invalid_query`.
+- `client.Discover` fetches 500 instances at a time and follows the page
+  links, so it no longer fails when a registry outgrows one response.
 - A limit on registered instances: `registry.max_instances`
   (`BEACON_REGISTRY_MAX_INSTANCES`, default 10000). Registrations beyond it
   get `429 quota_exceeded` until instances unregister or expire, which bounds
@@ -76,6 +83,8 @@ Add an entry under **Unreleased** in the same pull request as the change.
   (`BEACON_REGISTRY_MAX_NAME_LENGTH`, `BEACON_REGISTRY_MAX_ADDRESS_LENGTH`);
   IP addresses are not held to the address limit.
 
+- `GET /api/v1/services` returns instances sorted by ID instead of in no
+  particular order.
 - Heartbeats and unregistrations refused because another caller owns the
   instance are counted as `result="not_owned"` in
   `beacon_registry_operations_total`.

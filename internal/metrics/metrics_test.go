@@ -106,7 +106,7 @@ func TestInstrumentRegistryCountsOperationsAndResults(t *testing.T) {
 
 	_ = registry.Touch(ctx, "a", time.Now(), discovery.OwnerCheck{Any: true})
 	_ = registry.Touch(ctx, "missing", time.Now(), discovery.OwnerCheck{Any: true})
-	_, _ = registry.List(ctx, "")
+	_, _ = registry.List(ctx, discovery.ListQuery{})
 	_ = registry.Delete(ctx, "missing", discovery.OwnerCheck{Any: true})
 
 	removed, err := registry.DeleteStale(ctx, time.Now().Add(-time.Minute))
@@ -150,7 +150,7 @@ type brokenRegistry struct {
 }
 
 // List always fails.
-func (brokenRegistry) List(context.Context, string) ([]discovery.Instance, error) {
+func (brokenRegistry) List(context.Context, discovery.ListQuery) ([]discovery.Instance, error) {
 	return nil, errors.New("backend unavailable")
 }
 
@@ -158,7 +158,7 @@ func TestInstrumentRegistryCountsBackendErrors(t *testing.T) {
 	m := New("test")
 	registry := m.InstrumentRegistry(brokenRegistry{Registry: memory.New()})
 
-	if _, err := registry.List(t.Context(), ""); err == nil {
+	if _, err := registry.List(t.Context(), discovery.ListQuery{}); err == nil {
 		t.Fatal("expected the backend error to pass through")
 	}
 

@@ -6,6 +6,8 @@ package memory
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -70,18 +72,26 @@ func (registry *MemoryRegistry) Touch(_ context.Context, id string, at time.Time
 	return nil
 }
 
-// List returns copies of the instances named name, or of all instances when
-// name is empty.
-func (registry *MemoryRegistry) List(_ context.Context, name string) ([]discovery.Instance, error) {
+// List returns copies of the instances query selects, sorted by ID. It
+// scans and sorts every match on each call, which is fine for the sizes
+// registry.max_instances allows; a backend with an index can do better.
+func (registry *MemoryRegistry) List(_ context.Context, query discovery.ListQuery) ([]discovery.Instance, error) {
 	registry.mu.RLock()
-	defer registry.mu.RUnlock()
-
 	result := make([]discovery.Instance, 0, len(registry.instances))
 
 	for _, instance := range registry.instances {
-		if name == "" || instance.Name == name {
+		if (query.Name == "" || instance.Name == query.Name) && instance.ID > query.After {
 			result = append(result, instance)
 		}
+	}
+	registry.mu.RUnlock()
+
+	slices.SortFunc(result, func(left, right discovery.Instance) int {
+		return strings.Compare(left.ID, right.ID)
+	})
+
+	if query.Limit > 0 && len(result) > query.Limit {
+		result = result[:query.Limit]
 	}
 
 	return result, nil

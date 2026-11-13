@@ -49,6 +49,18 @@ func (caller Caller) check() OwnerCheck {
 	return OwnerCheck{Owner: caller.Name, Any: caller.AnyInstance}
 }
 
+// ListQuery selects instances for Registry.List.
+type ListQuery struct {
+	// Name keeps only instances with this name. Empty keeps every name.
+	Name string
+	// After keeps only instances whose ID sorts after it, for fetching the
+	// page that follows the one whose last ID it is. Empty starts at the
+	// beginning.
+	After string
+	// Limit is the most instances to return. Zero means no limit.
+	Limit int
+}
+
 // OwnerCheck limits Touch and Delete to instances a caller may change.
 // Registry backends apply it in the same operation as the change, so no
 // other request can come between the check and the change.
@@ -117,9 +129,9 @@ type Registry interface {
 	// instance and ErrInstanceNotOwned if check refuses it; checking and
 	// changing are one operation.
 	Touch(ctx context.Context, id string, at time.Time, check OwnerCheck) error
-	// List returns the instances named name, or every instance when name is
-	// empty, in no particular order.
-	List(ctx context.Context, name string) ([]Instance, error)
+	// List returns the instances query selects, sorted by ID, so a caller
+	// can page through them with query.After.
+	List(ctx context.Context, query ListQuery) ([]Instance, error)
 	// Delete removes the instance with id, if check allows changing it. It
 	// returns ErrInstanceNotFound if there is no such instance and
 	// ErrInstanceNotOwned if check refuses it; checking and removing are one

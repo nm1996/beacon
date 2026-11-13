@@ -13,11 +13,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -36,6 +38,9 @@ const (
 
 	// servicesPath is the API collection every service call goes to.
 	servicesPath = "/api/v1/services"
+
+	// discoverPageSize is how many instances Discover asks for per request.
+	discoverPageSize = 500
 )
 
 // Client calls a Beacon server. It is safe for concurrent use.
@@ -143,24 +148,71 @@ func (client *Client) Heartbeat(ctx context.Context, id string) error {
 }
 
 // Discover returns the instances registered under name, or every instance
-// when name is empty, in no particular order.
+// when name is empty, sorted by ID.
+//
+// It fetches them discoverPageSize at a time, following the server's next
+// page links, so a large registry never has to fit in one response. A
+// server without paging returns everything at once, which also works.
 func (client *Client) Discover(ctx context.Context, name string) ([]Instance, error) {
-	var query url.Values
+	query := url.Values{"limit": {strconv.Itoa(discoverPageSize)}}
 	if name != "" {
-		query = url.Values{"name": {name}}
+		query.Set("name", name)
 	}
 
-	var response []instanceResponse
-	if err := client.do(ctx, http.MethodGet, servicesPath, query, nil, http.StatusOK, &response); err != nil {
-		return nil, err
+	var instances []Instance
+
+	for {
+		var page []instanceResponse
+
+		header, err := client.send(ctx, http.MethodGet, servicesPath, query, nil, http.StatusOK, &page)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, item := range page {
+			instances = append(instances, Instance(item))
+		}
+
+		cursor := nextCursor(header)
+		if cursor == "" {
+			break
+		}
+
+		if cursor == query.Get("cursor") {
+			return nil, errors.New("beacon: server returned the same page cursor twice")
+		}
+
+		query.Set("cursor", cursor)
 	}
 
-	instances := make([]Instance, 0, len(response))
-	for _, item := range response {
-		instances = append(instances, Instance(item))
+	if instances == nil {
+		instances = []Instance{}
 	}
 
 	return instances, nil
+}
+
+// nextCursor returns the cursor of the rel="next" Link in header, or "" if
+// there is none. Only the cursor is taken from the link: its path is the
+// server's own and would miss any prefix in front of it, such as a proxy's.
+func nextCursor(header http.Header) string {
+	for _, value := range header.Values("Link") {
+		for link := range strings.SplitSeq(value, ",") {
+			target, params, found := strings.Cut(strings.TrimSpace(link), ";")
+			if !found || !strings.Contains(params, `rel="next"`) {
+				continue
+			}
+
+			parsed, err := url.Parse(strings.Trim(strings.TrimSpace(target), "<>"))
+			if err != nil {
+				continue
+			}
+
+			return parsed.Query().Get("cursor")
+		}
+	}
+
+	return ""
 }
 
 // Unregister removes the instance with id. It returns an error matching
@@ -186,6 +238,13 @@ func (client *Client) Health(ctx context.Context) (Health, error) {
 // do sends one request and decodes the response into out when the status
 // is want. Any other status becomes an *Error.
 func (client *Client) do(ctx context.Context, method, path string, query url.Values, body any, want int, out any) error {
+	_, err := client.send(ctx, method, path, query, body, want, out)
+
+	return err
+}
+
+// send is do that also returns the response headers.
+func (client *Client) send(ctx context.Context, method, path string, query url.Values, body any, want int, out any) (http.Header, error) {
 	target := *client.baseURL
 	target.Path += path
 	target.RawQuery = query.Encode()
@@ -194,7 +253,7 @@ func (client *Client) do(ctx context.Context, method, path string, query url.Val
 	if body != nil {
 		encoded, err := json.Marshal(body)
 		if err != nil {
-			return fmt.Errorf("beacon: encode request: %w", err)
+			return nil, fmt.Errorf("beacon: encode request: %w", err)
 		}
 
 		reader = bytes.NewReader(encoded)
@@ -202,7 +261,7 @@ func (client *Client) do(ctx context.Context, method, path string, query url.Val
 
 	request, err := http.NewRequestWithContext(ctx, method, target.String(), reader)
 	if err != nil {
-		return fmt.Errorf("beacon: build request: %w", err)
+		return nil, fmt.Errorf("beacon: build request: %w", err)
 	}
 
 	request.Header.Set("User-Agent", userAgent)
@@ -218,25 +277,25 @@ func (client *Client) do(ctx context.Context, method, path string, query url.Val
 
 	response, err := client.httpClient.Do(request)
 	if err != nil {
-		return fmt.Errorf("beacon: %s %s: %w", method, path, err)
+		return nil, fmt.Errorf("beacon: %s %s: %w", method, path, err)
 	}
 	defer response.Body.Close()
 
 	limited := io.LimitReader(response.Body, maxResponseBytes)
 
 	if response.StatusCode != want {
-		return decodeError(response.StatusCode, limited)
+		return response.Header, decodeError(response.StatusCode, limited)
 	}
 
 	if out == nil {
-		return nil
+		return response.Header, nil
 	}
 
 	if err := json.NewDecoder(limited).Decode(out); err != nil {
-		return fmt.Errorf("beacon: decode %s %s response: %w", method, path, err)
+		return response.Header, fmt.Errorf("beacon: decode %s %s response: %w", method, path, err)
 	}
 
-	return nil
+	return response.Header, nil
 }
 
 // decodeError turns an unexpected response into an *Error. Bodies that are

@@ -147,9 +147,15 @@ func (service *Service) Heartbeat(ctx context.Context, id string, caller Caller)
 }
 
 // Discover returns the instances named name, or every instance when name is
-// empty, in no particular order.
+// empty, sorted by ID.
 func (service *Service) Discover(ctx context.Context, name string) ([]Instance, error) {
-	instances, err := service.registry.List(ctx, name)
+	return service.List(ctx, ListQuery{Name: name})
+}
+
+// List returns the instances query selects, sorted by ID. Transports use
+// it to serve one page at a time.
+func (service *Service) List(ctx context.Context, query ListQuery) ([]Instance, error) {
+	instances, err := service.registry.List(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("list instances: %w", err)
 	}

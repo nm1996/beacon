@@ -51,6 +51,9 @@ func Run(test *testing.T, newRegistry func(test *testing.T) discovery.Registry) 
 		{name: "ConcurrentUse", run: concurrentUse},
 		{name: "CreateRespectsLimit", run: createRespectsLimit},
 		{name: "TouchChecksOwner", run: touchChecksOwner},
+		{name: "ListIsSortedByID", run: listIsSortedByID},
+		{name: "ListPagesWithAfterAndLimit", run: listPagesWithAfterAndLimit},
+		{name: "ListPagesWithinAName", run: listPagesWithinAName},
 		{name: "DeleteChecksOwner", run: deleteChecksOwner},
 		{name: "ConcurrentCreateNeverExceedsLimit", run: concurrentCreateNeverExceedsLimit},
 	}
@@ -90,7 +93,7 @@ func mustCreate(test *testing.T, registry discovery.Registry, instances ...disco
 func mustList(test *testing.T, registry discovery.Registry, name string) []discovery.Instance {
 	test.Helper()
 
-	instances, err := registry.List(test.Context(), name)
+	instances, err := registry.List(test.Context(), discovery.ListQuery{Name: name})
 	if err != nil {
 		test.Fatalf("list %q: %v", name, err)
 	}
@@ -350,7 +353,7 @@ func concurrentUse(test *testing.T, registry discovery.Registry) {
 					test.Errorf("delete stale: %v", err)
 				}
 
-				if _, err := registry.List(ctx, ""); err != nil {
+				if _, err := registry.List(ctx, discovery.ListQuery{}); err != nil {
 					test.Errorf("list: %v", err)
 				}
 			}
@@ -517,5 +520,104 @@ func deleteChecksOwner(test *testing.T, registry discovery.Registry) {
 
 	if err := registry.Delete(ctx, "missing", bob); !errors.Is(err, discovery.ErrInstanceNotFound) {
 		test.Errorf("expected ErrInstanceNotFound for an unknown ID, got %v", err)
+	}
+}
+
+// page lists with query and fails the test on error.
+func page(test *testing.T, registry discovery.Registry, query discovery.ListQuery) []discovery.Instance {
+	test.Helper()
+
+	instances, err := registry.List(test.Context(), query)
+	if err != nil {
+		test.Fatalf("list %+v: %v", query, err)
+	}
+
+	return instances
+}
+
+// orderedIDs returns the IDs of instances in the order they came.
+func orderedIDs(instances []discovery.Instance) string {
+	result := make([]string, 0, len(instances))
+	for _, item := range instances {
+		result = append(result, item.ID)
+	}
+
+	return fmt.Sprint(result)
+}
+
+func listIsSortedByID(test *testing.T, registry discovery.Registry) {
+	mustCreate(test, registry,
+		instance("c", "orders", base),
+		instance("a", "orders", base),
+		instance("d", "payments", base),
+		instance("b", "orders", base),
+	)
+
+	if got := orderedIDs(page(test, registry, discovery.ListQuery{})); got != "[a b c d]" {
+		test.Errorf("expected every instance sorted by ID, got %s", got)
+	}
+
+	if got := orderedIDs(page(test, registry, discovery.ListQuery{Name: "orders"})); got != "[a b c]" {
+		test.Errorf("expected orders sorted by ID, got %s", got)
+	}
+}
+
+func listPagesWithAfterAndLimit(test *testing.T, registry discovery.Registry) {
+	for _, id := range []string{"e", "a", "d", "b", "c"} {
+		mustCreate(test, registry, instance(id, "orders", base))
+	}
+
+	// Walk the pages the way a client following cursors does.
+	var (
+		after string
+		pages []string
+	)
+
+	for range 10 {
+		items := page(test, registry, discovery.ListQuery{After: after, Limit: 2})
+		if len(items) == 0 {
+			break
+		}
+
+		pages = append(pages, orderedIDs(items))
+		after = items[len(items)-1].ID
+	}
+
+	if got := fmt.Sprint(pages); got != "[[a b] [c d] [e]]" {
+		test.Errorf("expected pages [a b] [c d] [e], got %s", got)
+	}
+
+	if got := orderedIDs(page(test, registry, discovery.ListQuery{After: "e", Limit: 2})); got != "[]" {
+		test.Errorf("expected nothing after the last ID, got %s", got)
+	}
+
+	// After need not be a stored ID, so a page still continues correctly
+	// when the instance it ended on has been removed meanwhile.
+	if got := orderedIDs(page(test, registry, discovery.ListQuery{After: "bb", Limit: 2})); got != "[c d]" {
+		test.Errorf("expected the page after a removed ID to continue at c, got %s", got)
+	}
+
+	if got := orderedIDs(page(test, registry, discovery.ListQuery{Limit: 0})); got != "[a b c d e]" {
+		test.Errorf("expected Limit 0 to mean no limit, got %s", got)
+	}
+}
+
+func listPagesWithinAName(test *testing.T, registry discovery.Registry) {
+	mustCreate(test, registry,
+		instance("a", "orders", base),
+		instance("b", "payments", base),
+		instance("c", "orders", base),
+		instance("d", "payments", base),
+		instance("e", "orders", base),
+	)
+
+	first := page(test, registry, discovery.ListQuery{Name: "orders", Limit: 2})
+	if got := orderedIDs(first); got != "[a c]" {
+		test.Fatalf("expected the first orders page [a c], got %s", got)
+	}
+
+	second := page(test, registry, discovery.ListQuery{Name: "orders", After: first[len(first)-1].ID, Limit: 2})
+	if got := orderedIDs(second); got != "[e]" {
+		test.Errorf("expected the second orders page [e], got %s", got)
 	}
 }

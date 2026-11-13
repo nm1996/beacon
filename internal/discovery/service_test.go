@@ -248,7 +248,7 @@ func (registry failingRegistry) Touch(context.Context, string, time.Time, discov
 }
 
 // List always fails.
-func (registry failingRegistry) List(context.Context, string) ([]discovery.Instance, error) {
+func (registry failingRegistry) List(context.Context, discovery.ListQuery) ([]discovery.Instance, error) {
 	return nil, registry.err
 }
 

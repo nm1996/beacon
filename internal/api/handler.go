@@ -18,7 +18,7 @@ import (
 type Discovery interface {
 	Register(ctx context.Context, registration discovery.Registration, caller discovery.Caller) (discovery.Instance, error)
 	Heartbeat(ctx context.Context, id string, caller discovery.Caller) error
-	Discover(ctx context.Context, name string) ([]discovery.Instance, error)
+	List(ctx context.Context, query discovery.ListQuery) ([]discovery.Instance, error)
 	Unregister(ctx context.Context, id string, caller discovery.Caller) error
 	TTL() time.Duration
 }
@@ -89,13 +89,38 @@ func (handler *Handler) Heartbeat(writer http.ResponseWriter, request *http.Requ
 	writeStatus(writer, http.StatusNoContent)
 }
 
-// GetServices lists registered instances as a JSON array, filtered by the
-// optional "name" query parameter. An empty registry gives an empty array.
+// GetServices lists registered instances as a JSON array sorted by ID,
+// filtered by the optional "name" query parameter. An empty registry gives
+// an empty array.
+//
+// With "limit" it returns at most that many and, when more follow, a
+// Link header with rel="next" whose URL fetches the next page through an
+// opaque "cursor" parameter. Without "limit" it returns every instance, as
+// it always has.
 func (handler *Handler) GetServices(writer http.ResponseWriter, request *http.Request) {
-	instances, err := handler.discovery.Discover(request.Context(), request.URL.Query().Get("name"))
+	params := request.URL.Query()
+
+	query, err := parseListQuery(params)
+	if err != nil {
+		handler.writeError(writer, http.StatusBadRequest, codeInvalidQuery, err.Error())
+		return
+	}
+
+	// Ask for one more than the page holds to learn whether another follows.
+	fetch := query
+	if fetch.Limit > 0 {
+		fetch.Limit++
+	}
+
+	instances, err := handler.discovery.List(request.Context(), fetch)
 	if err != nil {
 		handler.writeDiscoveryError(writer, request, err)
 		return
+	}
+
+	if query.Limit > 0 && len(instances) > query.Limit {
+		instances = instances[:query.Limit]
+		writer.Header().Set("Link", nextPageLink(query, instances[len(instances)-1].ID))
 	}
 
 	result := make([]Service, 0, len(instances))
