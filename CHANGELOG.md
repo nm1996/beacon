@@ -57,6 +57,11 @@ Add an entry under **Unreleased** in the same pull request as the change.
 
 ### Fixed
 
+- `mise run check` no longer rewrites unformatted files; it fails instead.
+  The release workflow runs it, so a release is now always built from the
+  tagged source.
+- `client.WithHTTPClient(nil)` and `client.WithLogger(nil)` no longer cause a
+  panic; they keep the defaults.
 - A sentence in the README's Go client section that rendered after a code
   block's closing fence.
 

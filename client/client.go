@@ -51,19 +51,24 @@ type Option func(*Client)
 
 // WithHTTPClient makes the client send requests through httpClient, for
 // example to set a different timeout, a proxy or TLS settings. By default
-// requests use an http.Client with a 10 second timeout.
+// requests use an http.Client with a 10 second timeout. A nil httpClient
+// keeps that default.
 func WithHTTPClient(httpClient *http.Client) Option {
 	return func(client *Client) {
-		client.httpClient = httpClient
+		if httpClient != nil {
+			client.httpClient = httpClient
+		}
 	}
 }
 
 // WithLogger makes the client report background events, such as a Lease
 // registering again after Beacon restarted, to logger. By default nothing
-// is logged.
+// is logged, and a nil logger keeps it that way.
 func WithLogger(logger *slog.Logger) Option {
 	return func(client *Client) {
-		client.logger = logger
+		if logger != nil {
+			client.logger = logger
+		}
 	}
 }
 

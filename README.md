@@ -700,7 +700,7 @@ Beacon uses [mise](https://mise.jdx.dev/) to pin the Go and `golangci-lint` vers
 
 ```bash
 mise install   # install the pinned tools
-mise run check # format, vet, lint and run tests with the race detector
+mise run check # check formatting, vet, lint and run tests with the race detector
 ```
 
 | Task | What it does |
@@ -716,7 +716,7 @@ mise run check # format, vet, lint and run tests with the race detector
 | `mise run docker-build` | Build the `beacon:dev` container image |
 | `mise run dist` | Build release archives for every platform into `dist/` |
 | `mise run run` | Start the server on `:8080` |
-| `mise run check` | Format, vet, lint, race tests and vulnerability scan |
+| `mise run check` | Check formatting, vet, lint, race tests and vulnerability scan; never changes files |
 
 Run `mise tasks` to list them all. CI runs the same tasks on every pull request.
 

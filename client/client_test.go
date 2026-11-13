@@ -265,3 +265,17 @@ func TestWithHTTPClientIsUsed(t *testing.T) {
 		t.Errorf("expected the client's User-Agent, got %q", sawAgent)
 	}
 }
+
+func TestNilOptionsKeepDefaults(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(writer, `{"status":"ok","version":"x"}`)
+	}))
+	defer server.Close()
+
+	beacon := mustNew(t, server.URL, client.WithHTTPClient(nil), client.WithLogger(nil))
+
+	// A nil http.Client would panic here.
+	if _, err := beacon.Health(t.Context()); err != nil {
+		t.Fatalf("health: %v", err)
+	}
+}

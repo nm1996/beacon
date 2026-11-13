@@ -47,9 +47,11 @@ run = "docker build -f deployments/docker/Dockerfile --build-arg VERSION=$(git d
 description = "Run the Beacon server"
 run = "go run ./cmd/beacon"
 
+# check only reads the source, so CI and release builds test exactly what was
+# committed. Run mise run fmt to fix formatting.
 [tasks.check]
-description = "Format, vet, lint, and run race-enabled tests"
-depends = ["fmt"]
+description = "Check formatting, vet, lint, and run race-enabled tests and govulncheck"
+depends = ["fmt-check"]
 run = [
   "go vet ./...",
   "golangci-lint run ./...",
