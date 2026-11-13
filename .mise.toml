@@ -31,6 +31,10 @@ run = "go test -race ./..."
 description = "Run the benchmarks, without the tests"
 run = "go test -run '^$' -bench . -benchmem ./..."
 
+[tasks.bench-parallel]
+description = "Run the mixed backend benchmark at 1, 2, 4 and 8 goroutines"
+run = "go test -run '^$' -bench MixedParallel -benchmem -cpu 1,2,4,8 ./internal/registry/memory"
+
 [tasks.vuln]
 description = "Scan dependencies and code for known vulnerabilities"
 run = "go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./..."

@@ -781,6 +781,7 @@ mise run check # check formatting, vet, lint and run tests with the race detecto
 | `mise run test` | Run tests |
 | `mise run test-race` | Run tests with the race detector |
 | `mise run bench` | Run the benchmarks; see [Benchmarks](#benchmarks) |
+| `mise run bench-parallel` | Run the mixed backend benchmark at 1, 2, 4 and 8 goroutines |
 | `mise run vuln` | Scan for known vulnerabilities with `govulncheck` |
 | `mise run build` | Build `bin/beacon` |
 | `mise run docker-build` | Build the `beacon:dev` container image |
@@ -803,10 +804,24 @@ Run `mise tasks` to list them all. CI runs the same tasks on every pull request.
 | A page of 500, or every instance (`List`) | 4.7 ms | 1 |
 | `POST /api/v1/services` through the router, with validation and JSON | 14 µs | 42 |
 | `GET /api/v1/services?limit=500` through the router | 5.4 ms | 48 |
+| A valid token through the Guard, with the failed-authentication limit | 0.9 µs | 7 |
 
 - Heartbeats and registrations cost the same at any size; they are what clients send most.
 - `List` scans, copies and sorts every match on each call, so a page of 500 costs as much as the whole registry, and grows with it: 82 ms for one page at 100000. The default limit keeps it in the low milliseconds; a backend with an index by ID, or by name, would make a page cost what it returns.
-- Every operation shares one lock, so a slow `List` holds up heartbeats for as long as it copies. `BenchmarkMixedParallel` measures 90% heartbeats, 9% lookups and 1% registrations from all threads at once.
+- The failed-authentication limit adds about 0.1 µs to a request with valid credentials: it only notes the attempt while the credentials are checked, and keeps no state for networks that have never failed.
+
+Every operation shares one lock: lookups can run side by side, but heartbeats and registrations wait for every scan in progress. `mise run bench-parallel` measures that with `BenchmarkMixedParallel`, 90% heartbeats, 9% lookups of one service of 100, and 1% registrations, from 1 to 8 goroutines at once. Average time per operation, the median of five runs:
+
+| Instances | 1 goroutine | 2 | 4 | 8 |
+|---|---|---|---|---|
+| 100 | 0.78 µs | 0.79 µs | 0.73 µs | 0.76 µs |
+| 1000 | 8.6 µs | 7.4 µs | 6.8 µs | 6.8 µs |
+| 10000 | 137 µs | 101 µs | 95 µs | 107 µs |
+| 100000 | 1.9 ms | 1.1 ms | 0.84 ms | 0.75 ms |
+
+- The lookups set the pace. Each scans the whole registry, while heartbeats and registrations together add less than 0.1 µs to the average, so at 10000 instances the mix tops out near 10000 operations a second.
+- More goroutines barely help, and at 10000 instances eight do worse than four: heartbeats need the lock to themselves, so they queue behind every scan. Lookups can share the lock, which is why eight goroutines get 2.5 times as far as one at 100000.
+- 10000 instances heartbeating every 10 seconds send 1000 heartbeats a second, well within this. The mix becomes the limit when clients look services up about as often as they heartbeat. Caching lookups in the Go client is on the [roadmap](#roadmap); a backend that indexes by name would make each lookup cost what it returns.
 - On this machine reading the clock takes about 2.4 µs, because the kernel uses the HPET clock source, which shows up in `BenchmarkServiceHeartbeat` and every HTTP benchmark. Most servers read the TSC in tens of nanoseconds.
 
 ## Project layout
