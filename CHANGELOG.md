@@ -87,7 +87,9 @@ Add an entry under **Unreleased** in the same pull request as the change.
   - Failed authentication per client network: `rate_limit.auth_failures_per_second`
     and `rate_limit.auth_failure_burst`, default 1 per second in bursts of
     20. Beyond it every request from that network is refused until it is
-    back under the limit.
+    back under the limit. Each request reserves a place before its
+    credentials are checked, so concurrent attempts cannot overshoot the
+    burst; the place is used up only if the credentials are invalid.
 
   Refused requests get `429 rate_limited` with a `Retry-After` header and
   are counted in `beacon_rate_limited_total{limit}`. A client network is an
@@ -128,6 +130,9 @@ Add an entry under **Unreleased** in the same pull request as the change.
   reach Beacon, used to be final; now the heartbeats stop on the first call
   and a later call with a new context finishes unregistering. Once
   unregistered, further calls return `nil`.
+- `BenchmarkMixedParallel` runs at 100 to 100000 instances, and
+  `mise run bench-parallel` runs it at 1, 2, 4 and 8 goroutines. Filling the
+  registry no longer counts towards its time. The README gives the results.
 
 ### Fixed
 

@@ -186,33 +186,35 @@ func BenchmarkDeleteStaleEverythingExpired(b *testing.B) {
 	})
 }
 
-// BenchmarkMixedParallel is traffic from many goroutines at once against a
-// registry of 10000: mostly heartbeats, some first-page lookups, and a few
-// registrations, while every operation shares one lock.
+// BenchmarkMixedParallel is traffic from many goroutines at once: mostly
+// heartbeats, some lookups of one service, and a few registrations, while
+// every operation shares one lock. Run it with -cpu to vary how many
+// goroutines compete; mise run bench-parallel does.
 func BenchmarkMixedParallel(b *testing.B) {
-	const size = 10_000
+	eachSize(b, func(b *testing.B, size int) {
+		registry, ids := filled(b, size)
+		ctx := context.Background()
 
-	registry, ids := filled(b, size)
-	ctx := context.Background()
+		b.ReportAllocs()
+		b.ResetTimer()
 
-	b.ReportAllocs()
+		b.RunParallel(func(pb *testing.PB) {
+			random := rand.New(rand.NewPCG(rand.Uint64(), rand.Uint64()))
+			now := time.Now()
+			instance := discovery.Instance{Name: "orders", Address: "10.0.0.1", Port: 8080}
 
-	b.RunParallel(func(pb *testing.PB) {
-		random := rand.New(rand.NewPCG(rand.Uint64(), rand.Uint64()))
-		now := time.Now()
-		instance := discovery.Instance{Name: "orders", Address: "10.0.0.1", Port: 8080}
-
-		for pb.Next() {
-			switch roll := random.IntN(100); {
-			case roll < 90:
-				_ = registry.Touch(ctx, ids[random.IntN(size)], now, anyOwner)
-			case roll < 99:
-				_, _ = registry.List(ctx, discovery.ListQuery{Name: "service-7"})
-			default:
-				instance.ID = uuid.NewString()
-				_ = registry.Create(ctx, instance, unlimited)
-				_ = registry.Delete(ctx, instance.ID, anyOwner)
+			for pb.Next() {
+				switch roll := random.IntN(100); {
+				case roll < 90:
+					_ = registry.Touch(ctx, ids[random.IntN(size)], now, anyOwner)
+				case roll < 99:
+					_, _ = registry.List(ctx, discovery.ListQuery{Name: "service-7"})
+				default:
+					instance.ID = uuid.NewString()
+					_ = registry.Create(ctx, instance, unlimited)
+					_ = registry.Delete(ctx, instance.ID, anyOwner)
+				}
 			}
-		}
+		})
 	})
 }

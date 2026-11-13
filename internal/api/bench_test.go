@@ -8,7 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nm1996/beacon/internal/auth"
 	"github.com/nm1996/beacon/internal/discovery"
+	"github.com/nm1996/beacon/internal/ratelimit"
 	"github.com/nm1996/beacon/internal/registry/memory"
 )
 
@@ -67,6 +69,33 @@ func BenchmarkHTTPListPage(b *testing.B) {
 				if recorder.Code != http.StatusOK {
 					b.Fatalf("expected 200, got %d", recorder.Code)
 				}
+			}
+		})
+	}
+}
+
+// BenchmarkGuard is the Guard alone, in front of a handler that does
+// nothing, for a valid token: with and without the failed-authentication
+// limit, whose reservation is taken and given back on every request.
+func BenchmarkGuard(b *testing.B) {
+	next := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
+
+	for _, test := range []struct {
+		name    string
+		options []GuardOption
+	}{
+		{name: "no-limit"},
+		{name: "failure-limit", options: []GuardOption{WithFailureLimit(ratelimit.New(1, 20, 0), nil)}},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			handler := NewGuard(failureTokens, discard, nil, test.options...).Require(auth.PermissionDiscover, next)
+			request := httptest.NewRequest(http.MethodGet, servicesPath, nil)
+			request.Header.Set("Authorization", "Bearer good-token")
+
+			b.ReportAllocs()
+
+			for b.Loop() {
+				handler.ServeHTTP(httptest.NewRecorder(), request)
 			}
 		})
 	}

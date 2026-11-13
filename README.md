@@ -497,7 +497,7 @@ Refused requests are logged at `warn` level, with the caller's name when it is k
 
 ## Rate limits
 
-Beacon limits two things per client, each with a token bucket: a steady rate, plus a burst that may be spent at once. The limits live in each Beacon process; there is nothing to set up.
+Beacon limits two things per client, each with a token bucket: a steady rate, plus a burst that may be spent at once. The limits live in each Beacon process; there is nothing to set up. They are not shared between processes, so if several Beacon nodes ever sit behind one load balancer, each enforces its own and a client spread over three nodes gets up to three times the limit; enforce the limit at the load balancer then.
 
 | Limit | Counted per | Default | Beyond it |
 |---|---|---|---|
@@ -507,8 +507,9 @@ Beacon limits two things per client, each with a token bucket: a steady rate, pl
 - Refused requests carry a `Retry-After` header with the seconds to wait, are logged at `warn` level with the `limit`, and are counted in `beacon_rate_limited_total{limit}`. The [Go client](#go-client) reports them as `client.ErrRateLimited`, and a `Lease` keeps retrying with backoff.
 - A client network is the IPv4 address of the connection, or the `/64` its IPv6 address is in, since one host often holds a whole `/64`.
 - Requests without any credentials and callers lacking a permission do not count as failures: the first are probes or misconfiguration, and the second have already proved who they are.
+- The failure limit is enforced before credentials are checked, so concurrent attempts cannot get past it together: each request holds one place from its network's burst while Beacon checks its credentials, and gives it back unless they turn out invalid. The check takes microseconds, but a network sending more than `rate_limit.auth_failure_burst` requests at the very same moment, such as many clients behind one NAT under heavy load, can see some valid ones refused with `429`; raise the burst if it does.
 - Heartbeats, lookups and unregistering are not rate limited.
-- Behind a reverse proxy or load balancer every client has the proxy's address, so the per-network limits apply to all of them together. Beacon does not read `X-Forwarded-For`, because a client could set it to anything. Raise the limits, or set them to `0`, when the proxy enforces its own.
+- Behind a reverse proxy or load balancer every client has the proxy's address, so the per-network limits apply to all of them together. Beacon does not read `X-Forwarded-For`, because a client could set it to anything, and one client could then use up the failure limit of others by naming their addresses. Raise the limits, or set them to `0`, when the proxy enforces its own.
 - The defaults leave room for a large rollout that shares one token: a burst of 200 registrations at once, then 20 a second. `client.Announce` returns the error if its first registration is refused, so size the burst for the most instances that start together.
 - Each limit tracks up to 65536 callers or networks. Callers and networks whose buckets have refilled are forgotten to make room; if every place is still in use, new ones are not limited until there is room again.
 
@@ -759,6 +760,7 @@ Beacon is deliberately small. Before you depend on it, know that:
 - **It runs as a single node.** There is no clustering or replication.
 - **Authentication is off by default.** Until you turn on [authentication](#authentication), anyone who can reach the port can register, discover and remove instances. By default only the same machine can, since Beacon listens on `127.0.0.1`; see [Exposing Beacon to a network](#exposing-beacon-to-a-network). [TLS](#tls) encrypts the traffic but does not decide who may connect.
 - **Ownership is by name, not by service.** Every instance registered with the same token or certificate belongs to the same caller, so two services sharing one token can change each other's instances. Give each service its own token or certificate.
+- **The owner is the name in the tokens file.** Ownership and `registry.max_instances_per_owner` are keyed by the entry's `name`, which is also what logs show, so renaming an entry changes the owner; see [Instance ownership](#instance-ownership). A stable owner ID, kept apart from the name shown in logs, is planned.
 - **Client certificates are not checked for revocation.** Use short-lived certificates.
 
 ## Development
@@ -779,6 +781,7 @@ mise run check # check formatting, vet, lint and run tests with the race detecto
 | `mise run test` | Run tests |
 | `mise run test-race` | Run tests with the race detector |
 | `mise run bench` | Run the benchmarks; see [Benchmarks](#benchmarks) |
+| `mise run bench-parallel` | Run the mixed backend benchmark at 1, 2, 4 and 8 goroutines |
 | `mise run vuln` | Scan for known vulnerabilities with `govulncheck` |
 | `mise run build` | Build `bin/beacon` |
 | `mise run docker-build` | Build the `beacon:dev` container image |
@@ -801,10 +804,24 @@ Run `mise tasks` to list them all. CI runs the same tasks on every pull request.
 | A page of 500, or every instance (`List`) | 4.7 ms | 1 |
 | `POST /api/v1/services` through the router, with validation and JSON | 14 µs | 42 |
 | `GET /api/v1/services?limit=500` through the router | 5.4 ms | 48 |
+| A valid token through the Guard, with the failed-authentication limit | 0.9 µs | 7 |
 
 - Heartbeats and registrations cost the same at any size; they are what clients send most.
 - `List` scans, copies and sorts every match on each call, so a page of 500 costs as much as the whole registry, and grows with it: 82 ms for one page at 100000. The default limit keeps it in the low milliseconds; a backend with an index by ID, or by name, would make a page cost what it returns.
-- Every operation shares one lock, so a slow `List` holds up heartbeats for as long as it copies. `BenchmarkMixedParallel` measures 90% heartbeats, 9% lookups and 1% registrations from all threads at once.
+- The failed-authentication limit adds about 0.1 µs to a request with valid credentials: it only notes the attempt while the credentials are checked, and keeps no state for networks that have never failed.
+
+Every operation shares one lock: lookups can run side by side, but heartbeats and registrations wait for every scan in progress. `mise run bench-parallel` measures that with `BenchmarkMixedParallel`, 90% heartbeats, 9% lookups of one service of 100, and 1% registrations, from 1 to 8 goroutines at once. Average time per operation, the median of five runs:
+
+| Instances | 1 goroutine | 2 | 4 | 8 |
+|---|---|---|---|---|
+| 100 | 0.78 µs | 0.79 µs | 0.73 µs | 0.76 µs |
+| 1000 | 8.6 µs | 7.4 µs | 6.8 µs | 6.8 µs |
+| 10000 | 137 µs | 101 µs | 95 µs | 107 µs |
+| 100000 | 1.9 ms | 1.1 ms | 0.84 ms | 0.75 ms |
+
+- The lookups set the pace. Each scans the whole registry, while heartbeats and registrations together add less than 0.1 µs to the average, so at 10000 instances the mix tops out near 10000 operations a second.
+- More goroutines barely help, and at 10000 instances eight do worse than four: heartbeats need the lock to themselves, so they queue behind every scan. Lookups can share the lock, which is why eight goroutines get 2.5 times as far as one at 100000.
+- 10000 instances heartbeating every 10 seconds send 1000 heartbeats a second, well within this. The mix becomes the limit when clients look services up about as often as they heartbeat. Caching lookups in the Go client is on the [roadmap](#roadmap); a backend that indexes by name would make each lookup cost what it returns.
 - On this machine reading the clock takes about 2.4 µs, because the kernel uses the HPET clock source, which shows up in `BenchmarkServiceHeartbeat` and every HTTP benchmark. Most servers read the TSC in tens of nanoseconds.
 
 ## Project layout
@@ -879,6 +896,9 @@ Transports only translate requests and errors; every rule lives in `discovery`, 
 - [ ] Client-side caching and load balancing in the Go client
 - [ ] Cache and database
 - [ ] Scale, multiple nodes
+- [ ] Rate limits shared between nodes, or enforced at the load balancer
+- [ ] Trusted proxies, so rate limits can use the client address a known proxy forwards
+- [ ] A stable owner ID for instance ownership and quotas, separate from the name shown in logs
 - [ ] Idempotency
 
 ## Versioning

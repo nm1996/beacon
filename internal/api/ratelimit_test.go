@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -273,5 +275,112 @@ func TestOnlyInvalidCredentialsCountAsFailures(t *testing.T) {
 
 	if recorder := listFrom(router, remote, "Bearer good-token"); recorder.Code != http.StatusOK {
 		t.Errorf("expected missing credentials and permissions not to use up the limit, got %d", recorder.Code)
+	}
+}
+
+// gatedTokens is failureTokens behind a gate: every Authenticate call waits
+// until the gate opens, so a test can hold many checks in progress at once.
+type gatedTokens struct {
+	fakeTokens
+	gate  chan struct{}
+	calls atomic.Int64
+}
+
+func (tokens *gatedTokens) Authenticate(token string) (auth.Identity, bool) {
+	tokens.calls.Add(1)
+	<-tokens.gate
+
+	return tokens.fakeTokens.Authenticate(token)
+}
+
+func TestConcurrentFailedAuthenticationNeverExceedsTheBurst(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		tokens := &gatedTokens{fakeTokens: failureTokens, gate: make(chan struct{})}
+		config := testConfig
+		config.Guard = NewGuard(tokens, discard, nil, WithFailureLimit(ratelimit.New(1, 20, 0), nil))
+		router := NewRouter(newDiscovery(t, testTTL), discard, config)
+
+		var (
+			group sync.WaitGroup
+			mu    sync.Mutex
+			codes = make(map[int]int)
+		)
+
+		for range 100 {
+			group.Go(func() {
+				recorder := listFrom(router, "10.0.0.1:1000", "Bearer wrong")
+
+				mu.Lock()
+				codes[recorder.Code]++
+				mu.Unlock()
+			})
+		}
+
+		// Every request is either waiting in Authenticate or already refused.
+		synctest.Wait()
+
+		if got := tokens.calls.Load(); got != 20 {
+			t.Errorf("expected only the burst of 20 to reach authentication at once, got %d", got)
+		}
+
+		close(tokens.gate)
+		group.Wait()
+
+		if codes[http.StatusUnauthorized] != 20 || codes[http.StatusTooManyRequests] != 80 {
+			t.Errorf("expected 20 answered 401 and 80 answered 429, got %v", codes)
+		}
+
+		if recorder := listFrom(router, "10.0.0.1:1000", "Bearer good-token"); recorder.Code != http.StatusTooManyRequests {
+			t.Errorf("expected the spent burst to refuse even a valid token, got %d", recorder.Code)
+		}
+	})
+}
+
+func TestValidCredentialsGiveTheirReservationBack(t *testing.T) {
+	config := testConfig
+	config.Guard = NewGuard(failureTokens, discard, nil, WithFailureLimit(ratelimit.New(1, 3, 0), nil))
+	router := NewRouter(newDiscovery(t, testTTL), discard, config)
+
+	remote := "10.0.0.1:1000"
+
+	for range 100 {
+		if recorder := listFrom(router, remote, "Bearer good-token"); recorder.Code != http.StatusOK {
+			t.Fatalf("expected a valid token to be served, got %d", recorder.Code)
+		}
+	}
+
+	for attempt := range 3 {
+		if recorder := listFrom(router, remote, "Bearer wrong"); recorder.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: expected valid requests to leave the whole burst, got %d", attempt+1, recorder.Code)
+		}
+	}
+
+	if recorder := listFrom(router, remote, "Bearer wrong"); recorder.Code != http.StatusTooManyRequests {
+		t.Errorf("expected 429 once the burst is spent, got %d", recorder.Code)
+	}
+}
+
+// panickingTokens panics on every token, as a broken authenticator might.
+type panickingTokens struct{ fakeTokens }
+
+func (panickingTokens) Authenticate(string) (auth.Identity, bool) {
+	panic("broken authenticator")
+}
+
+func TestPanickingAuthenticationGivesItsReservationBack(t *testing.T) {
+	config := testConfig
+	config.Guard = NewGuard(panickingTokens{}, discard, nil, WithFailureLimit(ratelimit.New(1, 1, 0), nil))
+	router := NewRouter(newDiscovery(t, testTTL), discard, config)
+
+	for range 3 {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Fatal("expected the authenticator's panic to reach the caller")
+				}
+			}()
+
+			listFrom(router, "10.0.0.1:1000", "Bearer anything")
+		}()
 	}
 }

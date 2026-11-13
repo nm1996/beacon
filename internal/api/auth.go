@@ -99,7 +99,8 @@ func (guard *Guard) Require(permission auth.Permission, next http.Handler) http.
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		network := clientNetwork(request)
 
-		if exhausted, wait := guard.failureLimit.Exhausted(network); exhausted {
+		reservation, ok, wait := guard.failureLimit.Reserve(network)
+		if !ok {
 			guard.failureLimited()
 			guard.logger.LogAttrs(request.Context(), slog.LevelWarn, "request refused",
 				slog.String("reason", codeRateLimited),
@@ -114,7 +115,7 @@ func (guard *Guard) Require(permission auth.Permission, next http.Handler) http.
 			return
 		}
 
-		identity, refused := guard.identify(request)
+		identity, refused := guard.identifyCounted(request, reservation)
 		if refused == nil && !identity.Allows(permission) {
 			refused = &refusal{
 				reason:     AuthFailureForbidden,
@@ -127,10 +128,6 @@ func (guard *Guard) Require(permission auth.Permission, next http.Handler) http.
 		}
 
 		if refused != nil {
-			if refused.reason == AuthFailureInvalid {
-				guard.failureLimit.Take(network)
-			}
-
 			guard.refuse(writer, request, refused)
 
 			return
@@ -138,6 +135,26 @@ func (guard *Guard) Require(permission auth.Permission, next http.Handler) http.
 
 		next.ServeHTTP(writer, request.WithContext(context.WithValue(request.Context(), identityKey{}, identity)))
 	})
+}
+
+// identifyCounted identifies the caller of request while reservation holds
+// a place under the failure limit, then spends it if the credentials were
+// invalid and releases it otherwise, even if identifying panics.
+func (guard *Guard) identifyCounted(request *http.Request, reservation ratelimit.Reservation) (identity auth.Identity, refused *refusal) {
+	invalid := false
+
+	defer func() {
+		if invalid {
+			reservation.Spend()
+		} else {
+			reservation.Release()
+		}
+	}()
+
+	identity, refused = guard.identify(request)
+	invalid = refused != nil && refused.reason == AuthFailureInvalid
+
+	return identity, refused
 }
 
 // identify finds the caller of request, or says why it cannot.
