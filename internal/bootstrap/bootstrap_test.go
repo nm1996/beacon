@@ -148,6 +148,30 @@ func TestNewReportsConfiguredTTLToClients(t *testing.T) {
 	}
 }
 
+func TestNewAppliesRegistrationLengthLimits(t *testing.T) {
+	settings := config.Default()
+	settings.Registry.MaxNameLength = 6
+	settings.Registry.MaxAddressLength = 9
+
+	handler := mustNew(t, settings, "v0.0.0-test").Server.Handler
+
+	for _, tt := range []struct {
+		body string
+		want int
+	}{
+		{body: `{"name":"orders","address":"localhost","port":8081}`, want: http.StatusCreated},
+		{body: `{"name":"orders1","address":"localhost","port":8081}`, want: http.StatusBadRequest},
+		{body: `{"name":"orders","address":"localhost1","port":8081}`, want: http.StatusBadRequest},
+	} {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/services", strings.NewReader(tt.body)))
+
+		if rec.Code != tt.want {
+			t.Errorf("%s: expected status %d, got %d: %s", tt.body, tt.want, rec.Code, rec.Body)
+		}
+	}
+}
+
 func TestNewReportsVersionOnHealth(t *testing.T) {
 	handler := mustNew(t, config.Default(), "v1.2.3").Server.Handler
 

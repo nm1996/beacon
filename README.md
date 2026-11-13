@@ -175,8 +175,8 @@ Every error response has the same shape:
 
 | Field | Rule |
 |---|---|
-| `name` | Required. 1–63 lowercase letters, digits, `.`, `_` or `-`, starting and ending with a letter or digit, such as `orders` or `payment-service.v2`. Uppercase and spaces are rejected, not changed |
-| `address` | Required. An IPv4 or IPv6 address, or a host name such as `orders.internal`, up to 253 characters. No scheme, port or path |
+| `name` | Required. 1–63 (`registry.max_name_length`) lowercase letters, digits, `.`, `_` or `-`, starting and ending with a letter or digit, such as `orders` or `payment-service.v2`. Uppercase and spaces are rejected, not changed |
+| `address` | Required. An IPv4 or IPv6 address, or a host name such as `orders.internal`, up to 253 characters (`registry.max_address_length`). No scheme, port or path |
 | `port` | Required, between `1` and `65535` |
 
 | Status | Meaning |
@@ -270,6 +270,8 @@ A file only needs the keys it changes, and no file is needed at all. [`configs/b
 | `auth.tokens_file` | `BEACON_AUTH_TOKENS_FILE` | `""` | File listing the accepted tokens. Required when `auth.enabled` is `true` |
 | `registry.service_ttl` | `BEACON_REGISTRY_SERVICE_TTL` | `"30s"` | Time without a heartbeat before an instance is removed |
 | `registry.cleanup_interval` | `BEACON_REGISTRY_CLEANUP_INTERVAL` | `"5s"` | How often stale instances are removed |
+| `registry.max_name_length` | `BEACON_REGISTRY_MAX_NAME_LENGTH` | `63` | Longest accepted service name, 1–253. The default fits a DNS label |
+| `registry.max_address_length` | `BEACON_REGISTRY_MAX_ADDRESS_LENGTH` | `253` | Longest accepted host name as an address, 1–253. IP addresses are not held to it |
 | `storage.backend` | `BEACON_STORAGE_BACKEND` | `"memory"` | Where instances are kept. Only `memory` exists today |
 | `metrics.enabled` | `BEACON_METRICS_ENABLED` | `true` | Serve Prometheus metrics at `GET /metrics` |
 | `logging.level` | `BEACON_LOGGING_LEVEL` | `"info"` | `debug`, `info`, `warn` or `error` |

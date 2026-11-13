@@ -59,6 +59,8 @@ read_timeout = "1m30s"
 
 [registry]
 service_ttl = "2m"
+max_name_length = 100
+max_address_length = 120
 
 [logging]
 format = "text"
@@ -73,6 +75,8 @@ format = "text"
 	want.Server.Port = 9090
 	want.Server.ReadTimeout = 90 * time.Second
 	want.Registry.ServiceTTL = 2 * time.Minute
+	want.Registry.MaxNameLength = 100
+	want.Registry.MaxAddressLength = 120
 	want.Logging.Format = "text"
 
 	if config != want {
@@ -106,6 +110,10 @@ func TestLoadFailures(t *testing.T) {
 		{name: "zero timeout", content: "[server]\nwrite_timeout = \"0s\"", wantErr: []string{"server.write_timeout"}},
 		{name: "negative TTL", content: "[registry]\nservice_ttl = \"-5s\"", wantErr: []string{"registry.service_ttl"}},
 		{name: "sub-second TTL", content: "[registry]\nservice_ttl = \"500ms\"\ncleanup_interval = \"100ms\"", wantErr: []string{"registry.service_ttl must be at least 1s"}},
+		{name: "zero name length", content: "[registry]\nmax_name_length = 0", wantErr: []string{"registry.max_name_length must be between 1 and 253, got 0"}},
+		{name: "name length over 253", content: "[registry]\nmax_name_length = 254", wantErr: []string{"registry.max_name_length must be between 1 and 253, got 254"}},
+		{name: "negative address length", content: "[registry]\nmax_address_length = -1", wantErr: []string{"registry.max_address_length must be between 1 and 253, got -1"}},
+		{name: "address length over 253", content: "[registry]\nmax_address_length = 254", wantErr: []string{"registry.max_address_length must be between 1 and 253, got 254"}},
 		{name: "zero body limit", content: "[server]\nmax_request_body_bytes = 0", wantErr: []string{"server.max_request_body_bytes"}},
 		{name: "sub-second reload interval", content: "[server]\nreload_interval = \"500ms\"", wantErr: []string{"server.reload_interval must be 0s (off) or at least 1s"}},
 		{name: "negative reload interval", content: "[server]\nreload_interval = \"-1s\"", wantErr: []string{"server.reload_interval"}},

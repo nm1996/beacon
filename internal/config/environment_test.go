@@ -22,6 +22,8 @@ func TestLoadAppliesEveryEnvironmentVariable(test *testing.T) {
 	test.Setenv("BEACON_AUTH_TOKENS_FILE", "/etc/beacon/tokens.toml")
 	test.Setenv("BEACON_REGISTRY_SERVICE_TTL", "1m")
 	test.Setenv("BEACON_REGISTRY_CLEANUP_INTERVAL", "500ms")
+	test.Setenv("BEACON_REGISTRY_MAX_NAME_LENGTH", "100")
+	test.Setenv("BEACON_REGISTRY_MAX_ADDRESS_LENGTH", "120")
 	test.Setenv("BEACON_STORAGE_BACKEND", "memory")
 	test.Setenv("BEACON_METRICS_ENABLED", "false")
 	test.Setenv("BEACON_LOGGING_LEVEL", "debug")
@@ -53,8 +55,10 @@ func TestLoadAppliesEveryEnvironmentVariable(test *testing.T) {
 			TokensFile: "/etc/beacon/tokens.toml",
 		},
 		Registry: RegistryConfig{
-			ServiceTTL:      time.Minute,
-			CleanupInterval: 500 * time.Millisecond,
+			ServiceTTL:       time.Minute,
+			CleanupInterval:  500 * time.Millisecond,
+			MaxNameLength:    100,
+			MaxAddressLength: 120,
 		},
 		Storage: StorageConfig{
 			Backend: StorageMemory,

@@ -14,14 +14,23 @@ const (
 )
 
 const (
-	// maxNameLength matches a DNS label, so a service name can always be
-	// used as one, for example in a Kubernetes Service or a DNS record.
-	maxNameLength = 63
+	// DefaultMaxNameLength is the longest service name accepted when
+	// Config.MaxNameLength is zero. It matches a DNS label, so a service
+	// name can always be used as one, for example in a Kubernetes Service
+	// or a DNS record.
+	DefaultMaxNameLength = 63
 
-	// maxAddressLength is the longest fully qualified DNS name.
-	maxAddressLength = 253
+	// DefaultMaxAddressLength is the longest address accepted when
+	// Config.MaxAddressLength is zero: the longest fully qualified DNS name.
+	DefaultMaxAddressLength = 253
 
-	// maxHostLabelLength is the longest single label of a host name.
+	// MaxLengthLimit is the highest value Config.MaxNameLength and
+	// Config.MaxAddressLength may be set to. Nothing longer is a valid DNS
+	// name, so a larger limit would only let in values no client can use.
+	MaxLengthLimit = 253
+
+	// maxHostLabelLength is the longest single label of a host name. It is
+	// a DNS rule, not a setting.
 	maxHostLabelLength = 63
 )
 
@@ -35,14 +44,15 @@ var namePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$`)
 // not starting or ending with '-'.
 var hostLabelPattern = regexp.MustCompile(`^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?$`)
 
-// validate checks the fields of a registration. The returned error wraps
-// ErrInvalidRegistration and names the first field that is wrong.
-func (registration Registration) validate() error {
-	if err := validateName(registration.Name); err != nil {
+// validate checks the fields of a registration against the rules and the
+// length limits in config. The returned error wraps ErrInvalidRegistration
+// and names the first field that is wrong.
+func (registration Registration) validate(config Config) error {
+	if err := validateName(registration.Name, config.maxNameLength()); err != nil {
 		return err
 	}
 
-	if err := validateAddress(registration.Address); err != nil {
+	if err := validateAddress(registration.Address, config.maxAddressLength()); err != nil {
 		return err
 	}
 
@@ -53,36 +63,39 @@ func (registration Registration) validate() error {
 	return nil
 }
 
-// validateName checks a service name against namePattern and its length.
-func validateName(name string) error {
+// validateName checks a service name against namePattern and maxLength.
+func validateName(name string, maxLength int) error {
 	if name == "" {
 		return fmt.Errorf("%w: name is required", ErrInvalidRegistration)
 	}
 
-	if len(name) > maxNameLength || !namePattern.MatchString(name) {
+	if len(name) > maxLength || !namePattern.MatchString(name) {
 		return fmt.Errorf("%w: name must be at most %d characters of lowercase letters, digits, '.', '_' or '-', "+
-			"starting and ending with a letter or digit", ErrInvalidRegistration, maxNameLength)
+			"starting and ending with a letter or digit", ErrInvalidRegistration, maxLength)
 	}
 
 	return nil
 }
 
-// validateAddress accepts an IPv4 or IPv6 address, or a host name made of
-// valid labels. It rejects anything else a client might send by mistake,
-// such as a URL, a host with a port, or surrounding whitespace.
-func validateAddress(address string) error {
+// validateAddress accepts an IPv4 or IPv6 address, or a host name of at most
+// maxLength characters made of valid labels. It rejects anything else a
+// client might send by mistake, such as a URL, a host with a port, or
+// surrounding whitespace.
+func validateAddress(address string, maxLength int) error {
 	if address == "" {
 		return fmt.Errorf("%w: address is required", ErrInvalidRegistration)
 	}
 
+	// The limit is for host names: an IP address is short by nature, and a
+	// low limit must not turn IPv6 addresses away.
 	if _, err := netip.ParseAddr(address); err == nil {
 		return nil
 	}
 
 	invalid := fmt.Errorf("%w: address must be an IP address or a host name of at most %d characters, "+
-		"without a scheme, port or path", ErrInvalidRegistration, maxAddressLength)
+		"without a scheme, port or path", ErrInvalidRegistration, maxLength)
 
-	if len(address) > maxAddressLength {
+	if len(address) > maxLength {
 		return invalid
 	}
 
