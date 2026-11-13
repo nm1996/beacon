@@ -810,6 +810,7 @@ Run `mise tasks` to list them all. CI runs the same tasks on every pull request.
 │   ├── docker/              # Dockerfile
 │   └── compose/             # Compose example
 ├── configs/                 # Example configuration
+├── test/integration/        # A real server on a real port, driven by the Go client
 ├── scripts/                 # Release build script
 ├── .github/workflows/       # CI and releases
 ├── .golangci.yml            # Linter configuration
