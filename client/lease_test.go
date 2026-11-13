@@ -22,7 +22,8 @@ import (
 // count heartbeats on. It is reached through handlerTransport, without a
 // network, so the tests can run in a synctest bubble.
 type fakeBeacon struct {
-	t *testing.T
+	t   *testing.T
+	ttl time.Duration
 
 	mu      sync.Mutex
 	handler http.Handler
@@ -32,11 +33,19 @@ type fakeBeacon struct {
 	succeeded  atomic.Int32
 }
 
-// newFakeBeacon returns a running fake with an empty registry.
+// newFakeBeacon returns a running fake with an empty registry and the
+// default 30s TTL.
 func newFakeBeacon(t *testing.T) *fakeBeacon {
 	t.Helper()
 
-	beacon := &fakeBeacon{t: t}
+	return newFakeBeaconWithTTL(t, config.Default().Registry.ServiceTTL)
+}
+
+// newFakeBeaconWithTTL returns a running fake that reports ttl.
+func newFakeBeaconWithTTL(t *testing.T, ttl time.Duration) *fakeBeacon {
+	t.Helper()
+
+	beacon := &fakeBeacon{t: t, ttl: ttl}
 	beacon.restart()
 
 	return beacon
@@ -47,7 +56,11 @@ func newFakeBeacon(t *testing.T) *fakeBeacon {
 func (beacon *fakeBeacon) restart() {
 	beacon.t.Helper()
 
-	components, err := bootstrap.New(config.Default(), slog.New(slog.DiscardHandler), "test")
+	settings := config.Default()
+	settings.Registry.ServiceTTL = beacon.ttl
+	settings.Registry.CleanupInterval = min(settings.Registry.CleanupInterval, beacon.ttl)
+
+	components, err := bootstrap.New(settings, slog.New(slog.DiscardHandler), "test")
 	if err != nil {
 		beacon.t.Fatalf("build server: %v", err)
 	}
@@ -262,33 +275,109 @@ func TestLeaseRetriesWhileBeaconIsDown(t *testing.T) {
 	})
 }
 
-func TestCloseIsIdempotentAndReportsUnreachableBeacon(t *testing.T) {
+func TestCloseCanBeRetriedAfterBeaconWasUnreachable(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fake := newFakeBeacon(t)
-		lease := mustAnnounce(t, clientFor(t, fake))
+		beacon := clientFor(t, fake)
+		lease := mustAnnounce(t, beacon)
 
 		fake.down.Store(true)
 
-		first := lease.Close(t.Context())
-		if first == nil {
+		if err := lease.Close(t.Context()); err == nil {
 			t.Fatal("expected Close to report that unregistering failed")
 		}
 
-		if second := lease.Close(t.Context()); !errors.Is(second, first) {
-			t.Errorf("expected a second Close to return the first result, got %v", second)
+		if err := lease.Close(t.Context()); err == nil {
+			t.Fatal("expected a retry while Beacon is still down to fail too")
+		}
+
+		// The heartbeats stopped with the first Close and stay stopped.
+		sent := fake.heartbeats.Load()
+		time.Sleep(5 * time.Minute)
+
+		if fake.heartbeats.Load() != sent {
+			t.Error("expected no heartbeats after the first Close")
+		}
+
+		fake.down.Store(false)
+
+		if err := lease.Close(t.Context()); err != nil {
+			t.Fatalf("expected Close to succeed once Beacon was back, got %v", err)
+		}
+
+		if ids := instanceIDs(t, beacon); len(ids) != 0 {
+			t.Errorf("expected the instance to be unregistered, %v remain", ids)
+		}
+
+		// Done: further calls send nothing.
+		fake.down.Store(true)
+
+		if err := lease.Close(t.Context()); err != nil {
+			t.Errorf("expected Close after unregistering to return nil, got %v", err)
 		}
 	})
 }
 
-func TestCloseGivesUpWhenItsContextEnds(t *testing.T) {
+func TestCloseCanBeRetriedAfterItsContextEnded(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		lease := mustAnnounce(t, clientFor(t, newFakeBeacon(t)))
+		fake := newFakeBeacon(t)
+		beacon := clientFor(t, fake)
+		lease := mustAnnounce(t, beacon)
 
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 
 		if err := lease.Close(ctx); !errors.Is(err, context.Canceled) {
-			t.Errorf("expected context.Canceled, got %v", err)
+			t.Fatalf("expected context.Canceled, got %v", err)
+		}
+
+		if err := lease.Close(t.Context()); err != nil {
+			t.Fatalf("expected a retry with a live context to succeed, got %v", err)
+		}
+
+		if ids := instanceIDs(t, beacon); len(ids) != 0 {
+			t.Errorf("expected the retry to unregister, %v remain", ids)
+		}
+	})
+}
+
+func TestConcurrentCloseUnregistersOnce(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		fake := newFakeBeacon(t)
+		beacon := clientFor(t, fake)
+		lease := mustAnnounce(t, beacon)
+
+		var closers sync.WaitGroup
+		for range 8 {
+			closers.Go(func() {
+				if err := lease.Close(t.Context()); err != nil {
+					t.Errorf("close: %v", err)
+				}
+			})
+		}
+
+		closers.Wait()
+
+		if ids := instanceIDs(t, beacon); len(ids) != 0 {
+			t.Errorf("expected the instance to be unregistered, %v remain", ids)
+		}
+	})
+}
+
+func TestCloseWhileHeartbeatsAreFailing(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		fake := newFakeBeacon(t)
+		lease := mustAnnounce(t, clientFor(t, fake))
+
+		fake.down.Store(true)
+		time.Sleep(20 * time.Second) // several failed heartbeats and retries
+		fake.down.Store(false)
+
+		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+		defer cancel()
+
+		if err := lease.Close(ctx); err != nil {
+			t.Fatalf("expected Close to stop the retry loop and unregister, got %v", err)
 		}
 	})
 }
@@ -334,5 +423,82 @@ func TestLeaseIDIsSafeToReadWhileRenewing(t *testing.T) {
 		}
 
 		readers.Wait()
+	})
+}
+
+// attemptsWhileDown takes fake down right after Announce, waits outage, and
+// returns how many heartbeats the lease tried meanwhile.
+func attemptsWhileDown(t *testing.T, ttl, outage time.Duration) int32 {
+	t.Helper()
+
+	fake := newFakeBeaconWithTTL(t, ttl)
+	lease := mustAnnounce(t, clientFor(t, fake))
+	defer lease.Close(context.Background())
+
+	fake.down.Store(true)
+	time.Sleep(outage)
+	synctest.Wait()
+
+	return fake.heartbeats.Load()
+}
+
+func TestRetryPaceDependsOnTTL(t *testing.T) {
+	// Retries start after 1s and double, but never wait longer than TTL/3,
+	// the normal heartbeat interval, so an instance is never left to expire
+	// just because the client backed off. With a short TTL that cap is below
+	// 1s and retries come at a steady TTL/3.
+	tests := []struct {
+		name     string
+		ttl      time.Duration
+		outage   time.Duration
+		min, max int32
+	}{
+		// Every ~333ms: about 30 in 10s.
+		{name: "1s TTL", ttl: time.Second, outage: 10 * time.Second, min: 25, max: 36},
+		// Every ~1s: the first retry delay already equals TTL/3.
+		{name: "3s TTL", ttl: 3 * time.Second, outage: 10 * time.Second, min: 8, max: 12},
+		// First attempt at ~10s, then retries after ~1s, 2s, 4s, 8s and
+		// every ~10s after that: about 8 in 60s.
+		{name: "30s TTL", ttl: 30 * time.Second, outage: time.Minute, min: 6, max: 10},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				if got := attemptsWhileDown(t, tt.ttl, tt.outage); got < tt.min || got > tt.max {
+					t.Errorf("expected %d to %d attempts in %s, got %d", tt.min, tt.max, tt.outage, got)
+				}
+			})
+		})
+	}
+}
+
+func TestLeaseRecoversAfterALongOutage(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		fake := newFakeBeacon(t)
+		beacon := clientFor(t, fake)
+		lease := mustAnnounce(t, beacon)
+		defer lease.Close(context.Background())
+
+		before := lease.ID()
+
+		// Beacon is down for an hour and comes back restarted, having
+		// forgotten every instance.
+		fake.down.Store(true)
+		time.Sleep(time.Hour)
+		fake.restart()
+		fake.down.Store(false)
+
+		// Retries are capped at TTL/3, so the lease notices within ~11s.
+		time.Sleep(12 * time.Second)
+		synctest.Wait()
+
+		if lease.ID() == before {
+			t.Fatal("expected the lease to register again after the outage")
+		}
+
+		if ids := instanceIDs(t, beacon); len(ids) != 1 || ids[0] != lease.ID() {
+			t.Errorf("expected Beacon to hold the new ID, got %v", ids)
+		}
 	})
 }
