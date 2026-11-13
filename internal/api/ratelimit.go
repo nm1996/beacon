@@ -120,6 +120,11 @@ type GuardOption func(*Guard)
 // allows, before looking at its credentials. limited, if not nil, is called
 // for each such refusal.
 //
+// Each request reserves a token before its credentials are checked, so
+// concurrent attempts cannot all get past the check before any is counted:
+// at most as many are checked at once as the network has tokens left. The
+// token is spent if the credentials are invalid and given back otherwise.
+//
 // Only invalid credentials count as failures. Requests without any are
 // probes or misconfiguration, and a known caller lacking a permission has
 // already proved who it is.

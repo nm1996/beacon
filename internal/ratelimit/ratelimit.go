@@ -41,6 +41,7 @@ type Limiter struct {
 
 	mu      sync.Mutex
 	buckets map[string]*rate.Limiter
+	pending map[string]int
 	sweptAt time.Time
 }
 
@@ -62,11 +63,13 @@ func New(perSecond float64, burst, maxKeys int) *Limiter {
 		burst:   burst,
 		maxKeys: maxKeys,
 		buckets: make(map[string]*rate.Limiter),
+		pending: make(map[string]int),
 	}
 }
 
-// Allow takes one token from key's bucket. If the bucket is empty it takes
-// nothing and returns false with how long until a token is available.
+// Allow takes one token from key's bucket. If the bucket is empty, or every
+// token left is reserved, it takes nothing and returns false with how long
+// until a token is available.
 func (limiter *Limiter) Allow(key string) (bool, time.Duration) {
 	if limiter == nil {
 		return true, 0
@@ -81,47 +84,98 @@ func (limiter *Limiter) Allow(key string) (bool, time.Duration) {
 	}
 
 	now := time.Now()
-
-	reservation := bucket.ReserveN(now, 1)
-	if !reservation.OK() {
-		return false, math.MaxInt64
+	if available := bucket.TokensAt(now) - float64(limiter.pending[key]); available < 1 {
+		return false, limiter.waitFor(available)
 	}
 
-	if wait := reservation.DelayFrom(now); wait > 0 {
-		reservation.CancelAt(now)
-		return false, wait
-	}
+	bucket.AllowN(now, 1)
 
 	return true, 0
 }
 
-// Exhausted reports whether key's bucket is empty, without taking a token,
-// and if so how long until it is not. Use it with Take to refuse a key only
-// after it has spent its tokens on something else, such as failed attempts.
-func (limiter *Limiter) Exhausted(key string) (bool, time.Duration) {
+// Reservation is a token Reserve has set aside for an attempt in progress.
+// Once the attempt is over, call exactly one of Spend, if it counts against
+// the limit, or Release, if it does not. The zero Reservation, which Reserve
+// returns when nothing is limited, does nothing.
+type Reservation struct {
+	limiter *Limiter
+	key     string
+}
+
+// Reserve sets aside one of key's tokens for an attempt whose outcome
+// decides whether it counts, such as an authentication that may fail. If
+// none is left it returns false with how long until one is, and the attempt
+// should not be made.
+//
+// Checking and reserving are one step, so however many attempts run at
+// once, no more of them start than there are tokens. Attempts in progress
+// hold their tokens until they are spent or released. A key is only tracked
+// once a token is spent, so keys whose attempts are always released cost
+// nothing between attempts.
+func (limiter *Limiter) Reserve(key string) (Reservation, bool, time.Duration) {
 	if limiter == nil {
-		return false, 0
+		return Reservation{}, true, 0
 	}
 
 	limiter.mu.Lock()
 	defer limiter.mu.Unlock()
 
-	bucket, tracked := limiter.buckets[key]
-	if !tracked {
-		return false, 0
+	available := float64(limiter.burst)
+	if bucket, tracked := limiter.buckets[key]; tracked {
+		available = bucket.TokensAt(time.Now())
 	}
 
-	now := time.Now()
-	if tokens := bucket.TokensAt(now); tokens < 1 {
-		return true, time.Duration((1 - tokens) / float64(limiter.limit) * float64(time.Second))
+	available -= float64(limiter.pending[key])
+	if available < 1 {
+		return Reservation{}, false, limiter.waitFor(available)
 	}
 
-	return false, 0
+	limiter.pending[key]++
+
+	return Reservation{limiter: limiter, key: key}, true, 0
 }
 
-// Take takes one token from key's bucket, if it has one.
-func (limiter *Limiter) Take(key string) {
-	limiter.Allow(key)
+// Spend takes the reserved token: the attempt counts against the limit.
+func (reservation Reservation) Spend() {
+	reservation.settle(true)
+}
+
+// Release gives the reserved token back: the attempt does not count.
+func (reservation Reservation) Release() {
+	reservation.settle(false)
+}
+
+// settle ends the reservation, taking its token if spend is true.
+func (reservation Reservation) settle(spend bool) {
+	limiter := reservation.limiter
+	if limiter == nil {
+		return
+	}
+
+	limiter.mu.Lock()
+	defer limiter.mu.Unlock()
+
+	if limiter.pending[reservation.key]--; limiter.pending[reservation.key] <= 0 {
+		delete(limiter.pending, reservation.key)
+	}
+
+	if !spend {
+		return
+	}
+
+	if bucket := limiter.bucket(reservation.key); bucket != nil {
+		bucket.AllowN(time.Now(), 1)
+	}
+}
+
+// waitFor returns how long until a key with available unreserved tokens
+// has one, if no reservation is released meanwhile.
+func (limiter *Limiter) waitFor(available float64) time.Duration {
+	if limiter.burst < 1 {
+		return math.MaxInt64
+	}
+
+	return time.Duration((1 - available) / float64(limiter.limit) * float64(time.Second))
 }
 
 // Keys reports how many keys the limiter tracks.
@@ -163,11 +217,12 @@ func (limiter *Limiter) bucket(key string) *rate.Limiter {
 	return bucket
 }
 
-// dropFull forgets every bucket that has refilled completely; a new bucket
-// for the same key would be identical. The caller holds mu.
+// dropFull forgets every bucket that has refilled completely and has no
+// attempt in progress; a new bucket for the same key would be identical. The
+// caller holds mu.
 func (limiter *Limiter) dropFull(now time.Time) {
 	for key, bucket := range limiter.buckets {
-		if bucket.TokensAt(now) >= float64(limiter.burst) {
+		if limiter.pending[key] == 0 && bucket.TokensAt(now) >= float64(limiter.burst) {
 			delete(limiter.buckets, key)
 		}
 	}

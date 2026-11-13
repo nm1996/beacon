@@ -87,7 +87,9 @@ Add an entry under **Unreleased** in the same pull request as the change.
   - Failed authentication per client network: `rate_limit.auth_failures_per_second`
     and `rate_limit.auth_failure_burst`, default 1 per second in bursts of
     20. Beyond it every request from that network is refused until it is
-    back under the limit.
+    back under the limit. Each request reserves a place before its
+    credentials are checked, so concurrent attempts cannot overshoot the
+    burst; the place is used up only if the credentials are invalid.
 
   Refused requests get `429 rate_limited` with a `Retry-After` header and
   are counted in `beacon_rate_limited_total{limit}`. A client network is an
