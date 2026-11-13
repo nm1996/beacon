@@ -894,13 +894,19 @@ Transports only translate requests and errors; every rule lives in `discovery`, 
 - [x] Go client library
 - [x] First release, `v0.1.0`
 
-**After v0.1.0**
+**v0.2.0**
 
 - [x] TLS for the HTTP API
 - [x] Authentication with bearer tokens and per-token permissions
 - [x] Client certificates (mTLS) as another way to authenticate
 - [x] Reload certificates and tokens without a restart
 - [x] Only the caller that registered an instance may change it
+- [x] Limits on instances, per owner, and on how fast clients register or fail to authenticate
+- [x] Paging for lookups
+- [x] Lookups by name that cost what they return
+
+**Next**
+
 - [ ] gRPC API alongside HTTP
 - [ ] Keep an instance's ID when it registers again, instead of issuing a new one
 - [ ] Client-side caching and load balancing in the Go client
