@@ -21,9 +21,9 @@ Add an entry under **Unreleased** in the same pull request as the change.
   (`BEACON_AUTH_ENABLED`, `BEACON_AUTH_TOKENS_FILE`), every endpoint except
   `GET /health` needs `Authorization: Bearer <token>`. The tokens file lists
   each token's name, SHA-256 hash and optional permissions (`register`,
-  `discover`, `metrics`); a token without a permission list may do
-  everything. Refused requests get `401 unauthorized` or `403 forbidden`.
-  Authentication is off by default.
+  `discover`, `metrics`, `manage`); a token without a permission list gets
+  `register`, `discover` and `metrics`. Refused requests get
+  `401 unauthorized` or `403 forbidden`. Authentication is off by default.
 - `beacon --hash-token`, which reads a token from standard input and prints
   the hash for the tokens file.
 - `beacon_auth_failures_total{reason}` metric counting refused requests.
@@ -46,6 +46,14 @@ Add an entry under **Unreleased** in the same pull request as the change.
   keeps the credentials already in use. New connections and every request
   after a reload use the new files.
 - `beacon_credential_reloads_total{result}` metric counting reload attempts.
+- Instance ownership: with authentication on, Beacon records which token or
+  certificate registered each instance, and only that caller may send its
+  heartbeats or unregister it. Others get `403 instance_not_owned`. The new
+  `manage` permission, which must be listed together with `register` and is
+  never granted by default, lifts that limit, for example for an operator
+  removing a stuck instance. Owners are logged, not shown by the API.
+  Without authentication nothing changes.
+- `client.ErrNotOwned`, which matches `instance_not_owned` errors.
 
 ### Fixed
 

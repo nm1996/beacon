@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/x509"
 	"fmt"
 	"log/slog"
@@ -56,6 +57,16 @@ func NewGuard(authenticator Authenticator, logger *slog.Logger, failed func(reas
 	return &Guard{authenticator: authenticator, logger: logger, failed: failed}
 }
 
+// identityKey is the context key under which Require stores the caller's
+// identity for the handlers it protects.
+type identityKey struct{}
+
+// identityFrom returns the identity Require stored in ctx, if any.
+func identityFrom(ctx context.Context) (auth.Identity, bool) {
+	identity, ok := ctx.Value(identityKey{}).(auth.Identity)
+	return identity, ok
+}
+
 // refusal describes why a request was refused and how to answer it.
 type refusal struct {
 	reason     string
@@ -94,7 +105,7 @@ func (guard *Guard) Require(permission auth.Permission, next http.Handler) http.
 			return
 		}
 
-		next.ServeHTTP(writer, request)
+		next.ServeHTTP(writer, request.WithContext(context.WithValue(request.Context(), identityKey{}, identity)))
 	})
 }
 

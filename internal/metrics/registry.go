@@ -47,6 +47,15 @@ func (registry *instrumentedRegistry) Create(ctx context.Context, instance disco
 	return err
 }
 
+// Get records and forwards the call.
+func (registry *instrumentedRegistry) Get(ctx context.Context, id string) (discovery.Instance, error) {
+	started := time.Now()
+	instance, err := registry.next.Get(ctx, id)
+	registry.observe("get", started, err)
+
+	return instance, err
+}
+
 // Touch records and forwards the call.
 func (registry *instrumentedRegistry) Touch(ctx context.Context, id string, at time.Time) error {
 	started := time.Now()

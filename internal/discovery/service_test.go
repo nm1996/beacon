@@ -40,7 +40,7 @@ func registration(name string) discovery.Registration {
 func mustRegister(t *testing.T, service *discovery.Service, name string) discovery.Instance {
 	t.Helper()
 
-	instance, err := service.Register(t.Context(), registration(name))
+	instance, err := service.Register(t.Context(), registration(name), anyone)
 	if err != nil {
 		t.Fatalf("register %q: %v", name, err)
 	}
@@ -143,7 +143,7 @@ func TestRegisterRejectsInvalidRegistration(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			service := newService(t)
 
-			instance, err := service.Register(t.Context(), tt.registration)
+			instance, err := service.Register(t.Context(), tt.registration, anyone)
 
 			if !errors.Is(err, discovery.ErrInvalidRegistration) {
 				t.Fatalf("expected ErrInvalidRegistration, got %v", err)
@@ -165,7 +165,7 @@ func TestRegisterAcceptsPortBoundaries(t *testing.T) {
 		reg := registration("orders")
 		reg.Port = port
 
-		if _, err := newService(t).Register(t.Context(), reg); err != nil {
+		if _, err := newService(t).Register(t.Context(), reg, anyone); err != nil {
 			t.Errorf("expected port %d to be accepted, got %v", port, err)
 		}
 	}
@@ -175,7 +175,7 @@ func TestHeartbeat(t *testing.T) {
 	service := newService(t)
 	instance := mustRegister(t, service, "orders")
 
-	if err := service.Heartbeat(t.Context(), instance.ID); err != nil {
+	if err := service.Heartbeat(t.Context(), instance.ID, anyone); err != nil {
 		t.Fatalf("heartbeat: %v", err)
 	}
 
@@ -186,7 +186,7 @@ func TestHeartbeat(t *testing.T) {
 }
 
 func TestHeartbeatUnknownInstance(t *testing.T) {
-	err := newService(t).Heartbeat(t.Context(), "unknown-id")
+	err := newService(t).Heartbeat(t.Context(), "unknown-id", anyone)
 
 	if !errors.Is(err, discovery.ErrInstanceNotFound) {
 		t.Errorf("expected ErrInstanceNotFound, got %v", err)
@@ -213,7 +213,7 @@ func TestUnregister(t *testing.T) {
 	service := newService(t)
 	instance := mustRegister(t, service, "orders")
 
-	if err := service.Unregister(t.Context(), instance.ID); err != nil {
+	if err := service.Unregister(t.Context(), instance.ID, anyone); err != nil {
 		t.Fatalf("unregister: %v", err)
 	}
 
@@ -221,7 +221,7 @@ func TestUnregister(t *testing.T) {
 		t.Errorf("expected the instance to be removed, %d remain", got)
 	}
 
-	if err := service.Unregister(t.Context(), instance.ID); !errors.Is(err, discovery.ErrInstanceNotFound) {
+	if err := service.Unregister(t.Context(), instance.ID, anyone); !errors.Is(err, discovery.ErrInstanceNotFound) {
 		t.Errorf("expected a second unregister to give ErrInstanceNotFound, got %v", err)
 	}
 }
@@ -234,6 +234,11 @@ type failingRegistry struct {
 // Create always fails.
 func (registry failingRegistry) Create(context.Context, discovery.Instance) error {
 	return registry.err
+}
+
+// Get always fails.
+func (registry failingRegistry) Get(context.Context, string) (discovery.Instance, error) {
+	return discovery.Instance{}, registry.err
 }
 
 // Touch always fails.
@@ -265,14 +270,17 @@ func TestRegistryErrorsArePassedOn(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	_, registerErr := service.Register(ctx, registration("orders"))
+	_, registerErr := service.Register(ctx, registration("orders"), anyone)
 	_, discoverErr := service.Discover(ctx, "orders")
 
 	for name, err := range map[string]error{
 		"register":   registerErr,
-		"heartbeat":  service.Heartbeat(ctx, "x"),
+		"heartbeat":  service.Heartbeat(ctx, "x", anyone),
 		"discover":   discoverErr,
-		"unregister": service.Unregister(ctx, "x"),
+		"unregister": service.Unregister(ctx, "x", anyone),
+		// A named caller makes the service look up the owner first.
+		"heartbeat, owner lookup":  service.Heartbeat(ctx, "x", orders),
+		"unregister, owner lookup": service.Unregister(ctx, "x", orders),
 	} {
 		if !errors.Is(err, unavailable) {
 			t.Errorf("%s: expected the registry error to be wrapped, got %v", name, err)

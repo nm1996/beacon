@@ -58,9 +58,9 @@ func (service *Service) TTL() time.Duration {
 }
 
 // Register validates registration and stores it as a new instance with a
-// generated ID. It returns an error wrapping ErrInvalidRegistration when
-// validation fails.
-func (service *Service) Register(ctx context.Context, registration Registration) (Instance, error) {
+// generated ID, owned by caller. It returns an error wrapping
+// ErrInvalidRegistration when validation fails.
+func (service *Service) Register(ctx context.Context, registration Registration, caller Caller) (Instance, error) {
 	if err := registration.validate(); err != nil {
 		return Instance{}, err
 	}
@@ -71,6 +71,7 @@ func (service *Service) Register(ctx context.Context, registration Registration)
 		Name:          registration.Name,
 		Address:       registration.Address,
 		Port:          registration.Port,
+		Owner:         caller.Name,
 		RegisteredAt:  now,
 		LastHeartbeat: now,
 	}
@@ -79,21 +80,52 @@ func (service *Service) Register(ctx context.Context, registration Registration)
 		return Instance{}, fmt.Errorf("store instance: %w", err)
 	}
 
-	service.logger.InfoContext(ctx, "service registered",
+	attributes := []slog.Attr{
 		slog.String("id", instance.ID),
 		slog.String("name", instance.Name),
 		slog.String("address", instance.Address),
 		slog.Int("port", instance.Port),
-	)
+	}
+	if instance.Owner != "" {
+		attributes = append(attributes, slog.String("owner", instance.Owner))
+	}
+
+	service.logger.LogAttrs(ctx, slog.LevelInfo, "service registered", attributes...)
 
 	return instance, nil
 }
 
 // Heartbeat records that the instance with id is still alive. It returns
-// ErrInstanceNotFound if there is none, for example because it expired.
-func (service *Service) Heartbeat(ctx context.Context, id string) error {
+// ErrInstanceNotFound if there is none, for example because it expired, and
+// ErrInstanceNotOwned if caller may not change it.
+func (service *Service) Heartbeat(ctx context.Context, id string, caller Caller) error {
+	if err := service.authorize(ctx, id, caller); err != nil {
+		return fmt.Errorf("heartbeat %s: %w", id, err)
+	}
+
 	if err := service.registry.Touch(ctx, id, time.Now()); err != nil {
 		return fmt.Errorf("heartbeat %s: %w", id, err)
+	}
+
+	return nil
+}
+
+// authorize returns ErrInstanceNotFound if no instance has id, and
+// ErrInstanceNotOwned if caller may not change it. An instance's owner
+// never changes and IDs are never reused, so the instance cannot become
+// someone else's between this check and the change that follows.
+func (service *Service) authorize(ctx context.Context, id string, caller Caller) error {
+	if caller.AnyInstance {
+		return nil
+	}
+
+	instance, err := service.registry.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	if !caller.mayChange(instance) {
+		return ErrInstanceNotOwned
 	}
 
 	return nil
@@ -111,13 +143,22 @@ func (service *Service) Discover(ctx context.Context, name string) ([]Instance, 
 }
 
 // Unregister removes the instance with id. It returns ErrInstanceNotFound if
-// there is none.
-func (service *Service) Unregister(ctx context.Context, id string) error {
+// there is none, and ErrInstanceNotOwned if caller may not change it.
+func (service *Service) Unregister(ctx context.Context, id string, caller Caller) error {
+	if err := service.authorize(ctx, id, caller); err != nil {
+		return fmt.Errorf("unregister %s: %w", id, err)
+	}
+
 	if err := service.registry.Delete(ctx, id); err != nil {
 		return fmt.Errorf("unregister %s: %w", id, err)
 	}
 
-	service.logger.InfoContext(ctx, "service unregistered", slog.String("id", id))
+	attributes := []slog.Attr{slog.String("id", id)}
+	if caller.Name != "" {
+		attributes = append(attributes, slog.String("by", caller.Name))
+	}
+
+	service.logger.LogAttrs(ctx, slog.LevelInfo, "service unregistered", attributes...)
 
 	return nil
 }

@@ -76,6 +76,19 @@ func (registry *MemoryRegistry) List(_ context.Context, name string) ([]discover
 	return result, nil
 }
 
+// Get returns a copy of the instance with id.
+func (registry *MemoryRegistry) Get(_ context.Context, id string) (discovery.Instance, error) {
+	registry.mu.RLock()
+	defer registry.mu.RUnlock()
+
+	instance, exists := registry.instances[id]
+	if !exists {
+		return discovery.Instance{}, discovery.ErrInstanceNotFound
+	}
+
+	return instance, nil
+}
+
 // Delete removes the instance with id.
 func (registry *MemoryRegistry) Delete(_ context.Context, id string) error {
 	registry.mu.Lock()
