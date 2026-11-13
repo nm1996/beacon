@@ -10,6 +10,22 @@ import (
 // by clients cannot create new label values.
 const unmatchedRoute = "unmatched"
 
+// otherMethod labels requests with a method outside the standard set, for
+// the same reason: clients may send any token as a method.
+const otherMethod = "other"
+
+// methodLabel returns method if it is a standard HTTP method, and
+// otherMethod otherwise.
+func methodLabel(method string) string {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodPatch,
+		http.MethodDelete, http.MethodConnect, http.MethodOptions, http.MethodTrace:
+		return method
+	default:
+		return otherMethod
+	}
+}
+
 // InstrumentHTTP wraps next so every request is counted and timed. Requests
 // are labelled with the ServeMux pattern that served them, such as
 // "/api/v1/services/{id}", never with the raw path, which keeps the number of
@@ -32,8 +48,9 @@ func (metrics *Metrics) InstrumentHTTP(next http.Handler) http.Handler {
 			route = unmatchedRoute
 		}
 
-		metrics.httpRequests.WithLabelValues(request.Method, route, strconv.Itoa(recorder.status)).Inc()
-		metrics.httpDuration.WithLabelValues(request.Method, route).Observe(time.Since(started).Seconds())
+		method := methodLabel(request.Method)
+		metrics.httpRequests.WithLabelValues(method, route, strconv.Itoa(recorder.status)).Inc()
+		metrics.httpDuration.WithLabelValues(method, route).Observe(time.Since(started).Seconds())
 	})
 }
 

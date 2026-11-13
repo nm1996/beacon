@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -172,17 +173,49 @@ func TestWatchInstancesCountsByService(t *testing.T) {
 	m.WatchInstances(registry.List)
 
 	for id, name := range map[string]string{"a": "orders", "b": "orders", "c": "payments"} {
-		if err := registry.Create(t.Context(), discovery.Instance{ID: id, Name: name}, 100); err != nil {
+		if err := registry.Create(t.Context(), discovery.Instance{ID: id, Name: name}, 1000); err != nil {
 			t.Fatalf("create: %v", err)
 		}
 	}
 
 	_, body := scrape(t, m)
 
-	for _, want := range []string{`beacon_instances{service="orders"} 2`, `beacon_instances{service="payments"} 1`} {
+	for _, want := range []string{"\nbeacon_instances 3\n", "\nbeacon_services 2\n"} {
 		if !strings.Contains(body, want) {
-			t.Errorf("expected the scrape to contain %q", want)
+			t.Errorf("expected the scrape to contain %q", strings.TrimSpace(want))
 		}
+	}
+}
+
+func TestInstanceMetricsDoNotGrowWithServiceNames(t *testing.T) {
+	m := New("test")
+	registry := memory.New()
+	m.WatchInstances(registry.List)
+
+	// Every registration uses a new name, as a careless or hostile client
+	// might.
+	for index := range 500 {
+		id := fmt.Sprintf("id-%d", index)
+		if err := registry.Create(t.Context(), discovery.Instance{ID: id, Name: fmt.Sprintf("service-%06d", index)}, 1000); err != nil {
+			t.Fatalf("create: %v", err)
+		}
+	}
+
+	_, body := scrape(t, m)
+
+	if strings.Contains(body, `service="`) {
+		t.Error("expected no metric to carry a service label")
+	}
+
+	series := 0
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(line, "beacon_instances") || strings.HasPrefix(line, "beacon_services") {
+			series++
+		}
+	}
+
+	if series != 2 {
+		t.Errorf("expected exactly 2 instance series for 500 service names, got %d", series)
 	}
 }
 
@@ -191,7 +224,27 @@ func TestWatchInstancesReportsBackendFailureAsScrapeError(t *testing.T) {
 	m.WatchInstances(brokenRegistry{}.List)
 
 	// A failing count must not be reported as zero instances.
-	if code, body := scrape(t, m); code != http.StatusInternalServerError || strings.Contains(body, "beacon_instances{") {
+	if code, body := scrape(t, m); code != http.StatusInternalServerError || strings.Contains(body, "\nbeacon_instances ") || strings.Contains(body, "\nbeacon_services ") {
 		t.Errorf("expected a 500 scrape without an instances value, got %d:\n%s", code, body)
+	}
+}
+
+func TestInstrumentHTTPGroupsUnknownMethods(t *testing.T) {
+	m := New("test")
+	handler := m.InstrumentHTTP(http.NewServeMux())
+
+	for index := range 50 {
+		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(fmt.Sprintf("METHOD%d", index), "/", nil))
+	}
+
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+
+	if got := testutil.ToFloat64(m.httpRequests.WithLabelValues(otherMethod, unmatchedRoute, "404")); got != 50 {
+		t.Errorf("expected 50 requests under method=%q, got %v", otherMethod, got)
+	}
+
+	// One series for the made-up methods and one for GET.
+	if got := testutil.CollectAndCount(m.httpRequests); got != 2 {
+		t.Errorf("expected 2 request series, got %d", got)
 	}
 }

@@ -646,9 +646,10 @@ scrape_configs:
 
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|
-| `beacon_http_requests_total` | counter | `method`, `route`, `code` | Requests served. `route` is the route pattern, such as `POST /api/v1/services/{id}/heartbeat`, or `unmatched` |
+| `beacon_http_requests_total` | counter | `method`, `route`, `code` | Requests served. `route` is the route pattern, such as `POST /api/v1/services/{id}/heartbeat`, or `unmatched`; `method` is a standard HTTP method or `other` |
 | `beacon_http_request_duration_seconds` | histogram | `method`, `route` | Time spent serving requests |
-| `beacon_instances` | gauge | `service` | Registered instances per service name |
+| `beacon_instances` | gauge | | Registered instances |
+| `beacon_services` | gauge | | Distinct service names with at least one registered instance |
 | `beacon_expired_instances_total` | counter | | Instances removed because they stopped sending heartbeats |
 | `beacon_registry_operations_total` | counter | `operation`, `result` | Calls to the storage backend; `result` is `ok`, `not_found`, `full` (refused by `registry.max_instances`) or `error` |
 | `beacon_registry_operation_duration_seconds` | histogram | `operation` | Time spent in the storage backend |
@@ -656,13 +657,16 @@ scrape_configs:
 | `beacon_credential_reloads_total` | counter | `result` | Attempts to [reload](#reloading-certificates-and-tokens) the TLS files and tokens file while running; `result` is `ok` or `error`. Only appears after the first attempt |
 | `beacon_build_info` | gauge | `version`, `goversion` | Always `1`; describes the running build |
 
-The standard `go_*` and `process_*` metrics are included too. Labels never contain instance IDs or raw paths, so the number of series stays small however many instances register. Requests to `/metrics` itself are not counted.
+The standard `go_*` and `process_*` metrics are included too. Labels only take values Beacon defines, such as route patterns, operations and results, never values clients choose, such as instance IDs, service names, owners or raw paths. The number of series therefore does not grow with registrations, however many instances or names clients send. For counts per service, use `GET /api/v1/services`. Requests to `/metrics` itself are not counted.
 
 A few useful queries:
 
 ```promql
-# Instances per service
-sum by (service) (beacon_instances)
+# Registered instances, and how close Beacon is to registry.max_instances
+beacon_instances
+
+# Distinct services
+beacon_services
 
 # Instances expiring per minute, a sign of crashing or unreachable services
 rate(beacon_expired_instances_total[5m]) * 60
