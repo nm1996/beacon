@@ -1,0 +1,50 @@
+name: Release candidate
+
+# Every push to stage, normally a merge from main, is tagged as the next
+# release candidate of the version at the top of CHANGELOG.md and published
+# as a pre-release.
+on:
+  push:
+    branches: [stage]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-stage
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: Tag the release candidate
+    # Creating the branch is not a release candidate.
+    if: ${{ !github.event.created }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - id: tag
+        name: Tag the next release candidate
+        run: |
+          tag="$(scripts/release-version.sh next-rc)"
+          git -c user.name="github-actions[bot]" \
+            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            tag -a "$tag" -m "$tag" "$GITHUB_SHA"
+          git push origin "refs/tags/$tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  release:
+    name: Release
+    needs: tag
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.tag.outputs.tag }}
+    permissions:
+      contents: write
+      packages: write
