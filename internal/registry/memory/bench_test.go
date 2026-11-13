@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"math"
 	"math/rand/v2"
+	"slices"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -217,4 +220,53 @@ func BenchmarkMixedParallel(b *testing.B) {
 			}
 		})
 	})
+}
+
+// BenchmarkHeartbeatDuringLookups is one heartbeat while other goroutines
+// look up one service as fast as they can: how long a heartbeat waits for
+// the lock that lookups hold. It reports the 99th percentile as p99-ns
+// besides the mean, since a few long waits are what can make instances
+// expire.
+func BenchmarkHeartbeatDuringLookups(b *testing.B) {
+	for _, lookups := range []int{0, 1, 4} {
+		b.Run(fmt.Sprintf("lookups=%d", lookups), func(b *testing.B) {
+			eachSize(b, func(b *testing.B, size int) {
+				registry, ids := filled(b, size)
+				ctx := context.Background()
+
+				var (
+					group sync.WaitGroup
+					stop  atomic.Bool
+				)
+
+				for range lookups {
+					group.Go(func() {
+						for !stop.Load() {
+							_, _ = registry.List(ctx, discovery.ListQuery{Name: "service-7"})
+						}
+					})
+				}
+
+				waits := make([]time.Duration, 0, 1<<16)
+				index := 0
+
+				for b.Loop() {
+					start := time.Now()
+
+					if err := registry.Touch(ctx, ids[index%size], start, anyOwner); err != nil {
+						b.Fatal(err)
+					}
+
+					waits = append(waits, time.Since(start))
+					index++
+				}
+
+				stop.Store(true)
+				group.Wait()
+
+				slices.Sort(waits)
+				b.ReportMetric(float64(waits[len(waits)*99/100]), "p99-ns")
+			})
+		})
+	}
 }

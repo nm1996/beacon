@@ -26,6 +26,11 @@ type MemoryRegistry struct { //nolint:revive // stutter accepted for clarity, se
 	// the per-owner limit without a scan. Every insert and removal updates
 	// it under mu.
 	owned map[string]int
+	// byName holds the IDs of each name's instances, so a lookup by name
+	// visits only those rather than the whole registry, and holds the lock
+	// that heartbeats wait for only that long. Every insert and removal
+	// updates it under mu.
+	byName map[string]map[string]struct{}
 }
 
 var _ discovery.Registry = (*MemoryRegistry)(nil)
@@ -35,6 +40,7 @@ func New() *MemoryRegistry {
 	return &MemoryRegistry{
 		instances: make(map[string]discovery.Instance),
 		owned:     make(map[string]int),
+		byName:    make(map[string]map[string]struct{}),
 	}
 }
 
@@ -59,6 +65,14 @@ func (registry *MemoryRegistry) Create(_ context.Context, instance discovery.Ins
 
 	registry.instances[instance.ID] = instance
 
+	ids, named := registry.byName[instance.Name]
+	if !named {
+		ids = make(map[string]struct{})
+		registry.byName[instance.Name] = ids
+	}
+
+	ids[instance.ID] = struct{}{}
+
 	if instance.Owner != "" {
 		registry.owned[instance.Owner]++
 	}
@@ -66,10 +80,16 @@ func (registry *MemoryRegistry) Create(_ context.Context, instance discovery.Ins
 	return nil
 }
 
-// remove deletes the instance with id and its share of the owner counts.
-// The caller holds mu for writing.
+// remove deletes the instance with id, its entry in the name index and its
+// share of the owner counts. The caller holds mu for writing.
 func (registry *MemoryRegistry) remove(id string, instance discovery.Instance) {
 	delete(registry.instances, id)
+
+	if ids := registry.byName[instance.Name]; len(ids) <= 1 {
+		delete(registry.byName, instance.Name)
+	} else {
+		delete(ids, id)
+	}
 
 	if instance.Owner == "" {
 		return
@@ -104,18 +124,37 @@ func (registry *MemoryRegistry) Touch(_ context.Context, id string, at time.Time
 	return nil
 }
 
-// List returns copies of the instances query selects, sorted by ID. It
-// scans and sorts every match on each call, which is fine for the sizes
-// registry.max_instances allows; a backend with an index can do better.
+// List returns copies of the instances query selects, sorted by ID. A
+// lookup by name visits only that name's instances; without a name it scans
+// every instance. Either way it copies and sorts every match before
+// applying Limit, so a page costs as much as all its matches.
 func (registry *MemoryRegistry) List(_ context.Context, query discovery.ListQuery) ([]discovery.Instance, error) {
 	registry.mu.RLock()
-	result := make([]discovery.Instance, 0, len(registry.instances))
 
-	for _, instance := range registry.instances {
-		if (query.Name == "" || instance.Name == query.Name) && instance.ID > query.After {
-			result = append(result, instance)
+	var result []discovery.Instance
+
+	if query.Name != "" {
+		ids := registry.byName[query.Name]
+		result = make([]discovery.Instance, 0, len(ids))
+
+		for id := range ids {
+			if id > query.After {
+				result = append(result, registry.instances[id])
+			}
+		}
+	} else {
+		// Room for every instance only when every instance may match.
+		if query.After == "" {
+			result = make([]discovery.Instance, 0, len(registry.instances))
+		}
+
+		for _, instance := range registry.instances {
+			if instance.ID > query.After {
+				result = append(result, instance)
+			}
 		}
 	}
+
 	registry.mu.RUnlock()
 
 	slices.SortFunc(result, func(left, right discovery.Instance) int {

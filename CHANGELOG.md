@@ -138,6 +138,14 @@ Add an entry under **Unreleased** in the same pull request as the change.
 
 ### Fixed
 
+- Looking a service up by name scanned the whole registry and reserved
+  room for every instance, holding the lock heartbeats need. With 10000
+  instances, four clients looking up in a loop held heartbeats to about 400
+  a second, fewer than those instances send, so live instances could
+  expire. The in-memory backend now keeps an index by name, and lookups
+  by name cost what they return: 27 µs rather than 0.94 ms at 10000, and
+  heartbeats during such lookups 84 µs rather than 2.5 ms on average.
+  Registering and removing cost about 0.4 µs more.
 - `beacon_instances` carried a `service` label taken from client-chosen
   service names, so a client registering many names could create any number
   of time series. It is now one series counting every instance, and the new

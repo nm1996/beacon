@@ -38,6 +38,7 @@ func Run(test *testing.T, newRegistry func(test *testing.T) discovery.Registry) 
 		{name: "CreateThenList", run: createThenList},
 		{name: "CreateRejectsDuplicateID", run: createRejectsDuplicateID},
 		{name: "ListFiltersByName", run: listFiltersByName},
+		{name: "ListByNameFollowsRemovals", run: listByNameFollowsRemovals},
 		{name: "ListOnEmptyRegistry", run: listOnEmptyRegistry},
 		{name: "ListReturnsCopies", run: listReturnsCopies},
 		{name: "GetReturnsStoredInstance", run: getReturnsStoredInstance},
@@ -176,6 +177,41 @@ func listFiltersByName(test *testing.T, registry discovery.Registry) {
 
 	if got := mustList(test, registry, ""); !sameIDs(got, "a", "b", "c") {
 		test.Errorf("expected every instance for an empty name, got %v", ids(got))
+	}
+}
+
+func listByNameFollowsRemovals(test *testing.T, registry discovery.Registry) {
+	mustCreate(test, registry,
+		instance("a", "orders", base),
+		instance("b", "orders", base.Add(-time.Hour)),
+		instance("c", "payments", base),
+	)
+
+	if err := registry.Delete(test.Context(), "a", anyOwner); err != nil {
+		test.Fatalf("delete: %v", err)
+	}
+
+	if removed, err := registry.DeleteStale(test.Context(), base); err != nil || removed != 1 {
+		test.Fatalf("expected 1 stale instance removed, got %d, %v", removed, err)
+	}
+
+	if got := mustList(test, registry, "orders"); len(got) != 0 {
+		test.Fatalf("expected no orders once both were removed, got %v", ids(got))
+	}
+
+	// The name works again once something registers under it.
+	mustCreate(test, registry, instance("d", "orders", base))
+
+	if got := mustList(test, registry, "orders"); !sameIDs(got, "d") {
+		test.Errorf("expected only the new orders instance, got %v", ids(got))
+	}
+
+	if got := mustList(test, registry, "payments"); !sameIDs(got, "c") {
+		test.Errorf("expected payments untouched, got %v", ids(got))
+	}
+
+	if got := page(test, registry, discovery.ListQuery{Name: "orders", After: "d"}); len(got) != 0 {
+		test.Errorf("expected nothing after the last orders ID, got %v", ids(got))
 	}
 }
 
