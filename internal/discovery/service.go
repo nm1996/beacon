@@ -30,7 +30,7 @@ type Config struct {
 	// MaxInstancesPerOwner is the most instances one caller may hold at
 	// once, so a single identity cannot take every place MaxInstances
 	// allows. Registrations beyond it get ErrOwnerQuotaExceeded. Zero means
-	// no limit per owner. It applies only to callers with a Name, that is
+	// no limit per owner. It applies only to callers with an ID, that is
 	// when the transport authenticates.
 	MaxInstancesPerOwner int
 }
@@ -121,7 +121,7 @@ func (service *Service) Register(ctx context.Context, registration Registration,
 		Name:          registration.Name,
 		Address:       registration.Address,
 		Port:          registration.Port,
-		Owner:         caller.Name,
+		Owner:         caller.ID,
 		RegisteredAt:  now,
 		LastHeartbeat: now,
 	}
@@ -188,8 +188,8 @@ func (service *Service) Unregister(ctx context.Context, id string, caller Caller
 	}
 
 	attributes := []slog.Attr{slog.String("id", id)}
-	if caller.Name != "" {
-		attributes = append(attributes, slog.String("by", caller.Name))
+	if caller.ID != "" {
+		attributes = append(attributes, slog.String("by", caller.ID))
 	}
 
 	service.logger.LogAttrs(ctx, slog.LevelInfo, "service unregistered", attributes...)

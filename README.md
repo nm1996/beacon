@@ -377,7 +377,8 @@ printf '%s' "$TOKEN" | beacon --hash-token
 ```toml
 # /etc/beacon/tokens.toml
 [[tokens]]
-name = "orders"
+id = "orders"                # optional; owns instances and quotas, defaults to name
+name = "orders (2026 token)"
 sha256 = "3f5c...e1a9"
 permissions = ["register", "discover"]
 
@@ -407,6 +408,7 @@ tokens_file = "/etc/beacon/tokens.toml"
 | `manage` | Together with `register`: heartbeats and unregistering for instances other callers registered. Never granted unless listed |
 
 - `name` identifies the token in logs and error messages. It is not secret, and must be unique across tokens and certificates.
+- `id` is optional. It is who owns the instances the entry registers, and who `registry.max_instances_per_owner` and the registration rate limit count. Without it, the ID is the `name`. Give entries an `id` so they can be renamed, or their token rotated under a new entry, without their instances changing owner. Entries that share an `id` share ownership and quota, for example a token and a certificate for one service. At most 255 printable ASCII characters without spaces, so a SPIFFE ID fits.
 - `sha256` is the hex hash printed by `beacon --hash-token`, in either case. Each token must be unique.
 - `permissions` is optional. Leave it out to allow `discover`, `register` and `metrics`. `manage` must always be listed, together with `register`, so a token written without a permission list can never touch another service's instances. An empty list is rejected, and so is `manage` without `register`.
 - Beacon refuses to start if the file is missing, contains an unknown key or an invalid entry, or lists neither tokens nor certificates. Changes take effect on the next [reload](#reloading-certificates-and-tokens), without a restart.
@@ -417,7 +419,7 @@ tokens_file = "/etc/beacon/tokens.toml"
 With authentication on, Beacon records which token or certificate registered each instance, by its `name`. Only that caller may send the instance's heartbeats or unregister it; anyone else with `register` gets `403` with the code `instance_not_owned`. Every caller with `discover` still sees every instance, since finding other services is the point of a registry.
 
 - An operator who needs to remove a stuck instance of another service uses an entry with `permissions = ["register", "manage"]`, alongside `discover` if it should also list instances.
-- The owner is the entry's `name`. Renaming an entry, or moving a service from a token to a certificate under another name, means its existing instances belong to the old name: their heartbeats get `403`, they expire after `registry.service_ttl`, and a [`Lease`](#go-client) then gets `404` and registers again under the new name.
+- The owner is the entry's `id`, or its `name` if it has none. Renaming an entry that has an `id`, or rotating its token under a new entry with the same `id`, changes nothing. Changing the `id`, or the `name` of an entry without one, means its existing instances belong to the old owner: their heartbeats get `403`, they expire after `registry.service_ttl`, and a [`Lease`](#go-client) then gets `404` and registers again under the new owner. Refused-request logs show both the `caller` name and the `caller_id`.
 - Owners appear in the `service registered` log line (`owner`), and whoever unregistered an instance in `service unregistered` (`by`). `GET /api/v1/services` does not show them.
 - `registry.max_instances_per_owner` limits how many instances each owner may hold at once, so one service, or one leaked token, cannot fill Beacon and lock everyone else out. Registrations beyond it get `429 quota_exceeded`, logged as `registration refused: owner quota reached` with the `caller`. Other owners are not affected.
 - Without authentication nothing is recorded or checked, and anyone may change any instance. The per-owner limit does not apply then; only `registry.max_instances` does.
@@ -761,7 +763,6 @@ Beacon is deliberately small. Before you depend on it, know that:
 - **It runs as a single node.** There is no clustering or replication.
 - **Authentication is off by default.** Until you turn on [authentication](#authentication), anyone who can reach the port can register, discover and remove instances. By default only the same machine can, since Beacon listens on `127.0.0.1`; see [Exposing Beacon to a network](#exposing-beacon-to-a-network). [TLS](#tls) encrypts the traffic but does not decide who may connect.
 - **Ownership is by name, not by service.** Every instance registered with the same token or certificate belongs to the same caller, so two services sharing one token can change each other's instances. Give each service its own token or certificate.
-- **The owner is the name in the tokens file.** Ownership and `registry.max_instances_per_owner` are keyed by the entry's `name`, which is also what logs show, so renaming an entry changes the owner; see [Instance ownership](#instance-ownership). A stable owner ID, kept apart from the name shown in logs, is planned.
 - **Client certificates are not checked for revocation.** Use short-lived certificates.
 - **A paused Beacon expires everything at once.** If the process is stopped for longer than `registry.service_ttl`, for example with `SIGSTOP` or a paused virtual machine, no heartbeats arrive meanwhile, and every instance expires when it resumes; their leases then register again. A suspended laptop does not count, since Beacon measures time with a clock that stops during suspend.
 

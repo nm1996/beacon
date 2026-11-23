@@ -15,9 +15,9 @@ import (
 var anyone = discovery.Caller{AnyInstance: true}
 
 var (
-	orders   = discovery.Caller{Name: "orders"}
-	payments = discovery.Caller{Name: "payments"}
-	operator = discovery.Caller{Name: "operator", AnyInstance: true}
+	orders   = discovery.Caller{ID: "orders"}
+	payments = discovery.Caller{ID: "payments"}
+	operator = discovery.Caller{ID: "operator", AnyInstance: true}
 )
 
 func TestRegisterRecordsTheCallerAsOwner(test *testing.T) {

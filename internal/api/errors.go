@@ -53,6 +53,7 @@ func (handler *Handler) writeDiscoveryError(writer http.ResponseWriter, request 
 		caller := handler.caller(request)
 		handler.logger.LogAttrs(request.Context(), slog.LevelWarn, "request refused",
 			slog.String("caller", caller.Name),
+			slog.String("caller_id", caller.ID),
 			slog.String("reason", "not_owner"),
 			slog.String("method", request.Method),
 			slog.String("path", request.URL.Path),
@@ -67,6 +68,7 @@ func (handler *Handler) writeDiscoveryError(writer http.ResponseWriter, request 
 		caller := handler.caller(request)
 		handler.logger.LogAttrs(request.Context(), slog.LevelWarn, "registration refused: owner quota reached",
 			slog.String("caller", caller.Name),
+			slog.String("caller_id", caller.ID),
 		)
 		handler.writeError(writer, http.StatusTooManyRequests, codeQuotaExceeded,
 			"This caller already holds its maximum number of instances; retry after some of them unregister or expire")

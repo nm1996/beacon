@@ -61,7 +61,7 @@ func clientNetwork(request *http.Request, proxies TrustedProxies) string {
 // caller, or the client network when authentication is off.
 func (handler *Handler) registrationKey(request *http.Request) string {
 	if identity, ok := identityFrom(request.Context()); ok {
-		return "caller:" + identity.Name
+		return "caller:" + identity.ID
 	}
 
 	return "network:" + clientNetwork(request, handler.config.TrustedProxies)

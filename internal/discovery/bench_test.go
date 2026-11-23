@@ -20,7 +20,7 @@ func BenchmarkServiceRegister(b *testing.B) {
 	}
 
 	registration := discovery.Registration{Name: "payment-service.v2", Address: "orders.default.svc.cluster.local", Port: 8080}
-	caller := discovery.Caller{Name: "orders"}
+	caller := discovery.Caller{ID: "orders"}
 
 	b.ReportAllocs()
 
@@ -39,7 +39,7 @@ func BenchmarkServiceHeartbeat(b *testing.B) {
 		b.Fatal(err)
 	}
 
-	caller := discovery.Caller{Name: "orders"}
+	caller := discovery.Caller{ID: "orders"}
 
 	instance, err := service.Register(b.Context(), registration("orders"), caller)
 	if err != nil {

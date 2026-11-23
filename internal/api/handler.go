@@ -177,7 +177,7 @@ func (handler *Handler) caller(request *http.Request) discovery.Caller {
 		return discovery.Caller{}
 	}
 
-	return discovery.Caller{Name: identity.Name, AnyInstance: identity.Allows(auth.PermissionManage)}
+	return discovery.Caller{ID: identity.ID, Name: identity.Name, AnyInstance: identity.Allows(auth.PermissionManage)}
 }
 
 // Health reports that the process is up and serving requests. It always

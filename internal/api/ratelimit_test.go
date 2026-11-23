@@ -386,3 +386,24 @@ func TestPanickingAuthenticationGivesItsReservationBack(t *testing.T) {
 		}()
 	}
 }
+
+func TestRegistrationLimitIsSharedByEntriesWithOneID(t *testing.T) {
+	rotated := auth.NewIdentity("orders (new token)", auth.PermissionRegister)
+	rotated.ID = "orders"
+
+	config := testConfig
+	config.Guard = NewGuard(fakeTokens{
+		"orders-token":  auth.NewIdentity("orders", auth.PermissionRegister),
+		"rotated-token": rotated,
+	}, discard, nil)
+	config.RegistrationLimit = ratelimit.New(1, 1, 0)
+	router := NewRouter(newDiscovery(t, testTTL), discard, config)
+
+	if recorder := registerFrom(router, "10.0.0.1:1000", "orders-token"); recorder.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", recorder.Code)
+	}
+
+	if recorder := registerFrom(router, "10.0.0.1:1000", "rotated-token"); recorder.Code != http.StatusTooManyRequests {
+		t.Errorf("expected a second token with the same ID to share the limit, got %d", recorder.Code)
+	}
+}

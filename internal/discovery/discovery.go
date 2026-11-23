@@ -40,8 +40,11 @@ var (
 // Caller is who asks to change an instance. Transports build it from
 // whatever identity they authenticated; discovery only compares names.
 type Caller struct {
-	// Name identifies the caller, and becomes the Owner of instances it
-	// registers. It is empty when the transport does not authenticate.
+	// ID identifies the caller, and becomes the Owner of instances it
+	// registers and the key of its quota. It is empty when the transport
+	// does not authenticate.
+	ID string
+	// Name is the caller's name for logs. It may change while ID stays.
 	Name string
 	// AnyInstance lets the caller change instances it did not register. A
 	// transport without authentication sets it, so everyone may change
@@ -51,7 +54,7 @@ type Caller struct {
 
 // check returns the OwnerCheck that limits caller's changes.
 func (caller Caller) check() OwnerCheck {
-	return OwnerCheck{Owner: caller.Name, Any: caller.AnyInstance}
+	return OwnerCheck{Owner: caller.ID, Any: caller.AnyInstance}
 }
 
 // Limits bounds what Registry.Create may store.

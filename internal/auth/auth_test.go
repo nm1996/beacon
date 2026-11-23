@@ -188,3 +188,55 @@ func TestHashToken(test *testing.T) {
 		}
 	}
 }
+
+func TestEntriesHaveStableIDs(test *testing.T) {
+	path := writeTokens(test, `
+[[tokens]]
+name = "orders (old token)"
+id = "svc-orders"
+sha256 = "`+mustHash(test, ordersToken)+`"
+
+[[tokens]]
+name = "prometheus"
+sha256 = "`+mustHash(test, scraperToken)+`"
+
+[[certificates]]
+name = "orders (certificate)"
+id = "svc-orders"
+uri = "spiffe://example.org/orders"
+`)
+
+	tokens, err := Load(path)
+	if err != nil {
+		test.Fatalf("load tokens: %v", err)
+	}
+
+	orders, _ := tokens.Authenticate(ordersToken)
+	if orders.ID != "svc-orders" || orders.Name != "orders (old token)" {
+		test.Errorf("expected the configured ID and the name apart, got %+v", orders)
+	}
+
+	scraper, _ := tokens.Authenticate(scraperToken)
+	if scraper.ID != "prometheus" {
+		test.Errorf("expected the ID to default to the name, got %q", scraper.ID)
+	}
+
+	if len(tokens.certificates) != 1 || tokens.certificates[0].identity.ID != "svc-orders" {
+		test.Errorf("expected the certificate to share the token's ID, got %+v", tokens.certificates)
+	}
+}
+
+func TestInvalidIDsAreRefused(test *testing.T) {
+	hash := mustHash(test, ordersToken)
+
+	for _, id := range []string{"has space", "tab\there", "ünïcode", strings.Repeat("x", 256)} {
+		_, err := Parse([]byte("[[tokens]]\nname = \"a\"\nid = \""+id+"\"\nsha256 = \""+hash+"\""), "tokens.toml")
+		if err == nil || !strings.Contains(err.Error(), `token "a": id must be`) {
+			test.Errorf("%q: expected an id error, got %v", id, err)
+		}
+	}
+
+	if _, err := Parse([]byte("[[tokens]]\nname = \"a\"\nid = \"spiffe://example.org/a\"\nsha256 = \""+hash+"\""), "tokens.toml"); err != nil {
+		test.Errorf("expected a SPIFFE ID to be accepted, got %v", err)
+	}
+}
