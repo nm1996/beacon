@@ -349,8 +349,8 @@ func (client *Client) do(ctx context.Context, method, path string, query url.Val
 
 // send sends one request with the extra header and body, if not nil, and
 // decodes the response into out, if not nil, when its status is one of
-// wants. Any other status becomes an *Error. It returns the response
-// headers.
+// wants. A 304 Not Modified has no body and leaves out alone. Any other
+// status becomes an *Error. It returns the response headers.
 func (client *Client) send(ctx context.Context, method, path string, query url.Values, header http.Header, body any, out any, wants ...int) (http.Header, error) {
 	target := *client.baseURL
 	target.Path += path
@@ -398,7 +398,7 @@ func (client *Client) send(ctx context.Context, method, path string, query url.V
 		return response.Header, decodeError(response.StatusCode, limited)
 	}
 
-	if out == nil {
+	if out == nil || response.StatusCode == http.StatusNotModified {
 		return response.Header, nil
 	}
 

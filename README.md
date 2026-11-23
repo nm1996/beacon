@@ -237,7 +237,10 @@ Request that URL to get the next page, until a response has no `Link` header. Th
 | Status | Meaning |
 |---|---|
 | `200 OK` | The instances, possibly with a `Link` header |
+| `304 Not Modified` | The `If-None-Match` header lists the current `ETag`: the instances are the same as before. No body |
 | `400 Bad Request` | `limit` or `cursor` is invalid; code `invalid_query` |
+
+Every response carries a weak `ETag`, such as `W/"5f2c..."`, over the instances' IDs, names, addresses and ports, and the next page link. It ignores `last_heartbeat`, which changes with every heartbeat without changing where to connect. A client that polls sends it back in `If-None-Match` and gets `304` with no body until an instance is added, removed or moved.
 
 ### `POST /api/v1/services/{id}/heartbeat`
 
@@ -622,9 +625,26 @@ if err != nil {
 }
 defer lease.Close(context.Background())
 
-// Find the instances of another service.
-instances, err := beacon.Discover(ctx, "payments")
+// Call another service: keep its instances in memory and pick one per call.
+payments, err := beacon.NewResolver(ctx, "payments")
+if err != nil {
+	return err
+}
+defer payments.Close()
+
+instance, err := payments.Pick() // no request to Beacon
 ```
+
+A `Resolver` is the client-side cache and load balancer most services want instead of calling `Discover` for every request:
+
+- **Startup:** `NewResolver` fetches the instances once and fails if that fails, so a wrong address or name shows at startup.
+- **Refresh:** a background goroutine refreshes every 5 seconds (`client.WithRefreshInterval`), with jitter. It sends the last `ETag`, so while nothing changes Beacon answers `304` with no body.
+- **Picking:** `Pick` chooses an instance without a request, in turn by default. `client.WithPicker(client.Random())` picks at random, and any type with a `Pick([]client.Instance) client.Instance` method plugs in, such as consistent hashing.
+- **While Beacon is down:** the `Resolver` keeps serving the instances it last saw and retries with backoff. After 5 minutes (`client.WithMaxStale`), `Pick` returns `client.ErrStale`, since routing on a picture that old is worse than failing.
+- **No instances:** `Pick` returns `client.ErrNoInstances`, so callers can tell an empty service from an unreachable Beacon.
+- **Close:** stops the refreshes. A picked instance may still have just gone away, so handle connection errors by picking again.
+
+`Discover` fetches the current instances on every call, for tools and one-off lookups.
 
 A `Lease` sends a heartbeat every third of the TTL Beacon reported, with a little jitter. If a heartbeat fails it retries after 1s, 2s, 4s and so on, never waiting longer than the normal interval, and keeps trying until `Close`. Each heartbeat or registration the lease sends gives up after a sixth of the TTL, so one stuck on a dead connection leaves time to retry on a new one before the instance expires, whatever timeout the `http.Client` has; with a TTL of 3s or less that cap is reached at once, so retries come at a steady third of the TTL. If Beacon no longer knows the instance, because it restarted or the instance expired, the lease registers it again under the same ID, so callers caching instances by ID see no change. Set `Registration.ID`, for example to the pod or host name, to choose the ID; otherwise the ID Beacon issued first is kept. Only if that ID has meanwhile been taken by another instance, or its heartbeats get `403` because another caller owns it, does the lease register under a new one, logging a warning once, and `lease.ID()` then returns the new ID. `Close` stops the background goroutine, waits for it and unregisters the instance. If its context ends first, or Beacon cannot be reached, `Close` returns the error and can simply be called again with a new context; the heartbeats stay stopped either way, and once the instance is unregistered further calls return `nil`. With `client.WithLogger`, retries and re-registrations are logged.
 
