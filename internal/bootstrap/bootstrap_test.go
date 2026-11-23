@@ -14,6 +14,7 @@ import (
 
 	"github.com/nm1996/beacon/internal/config"
 	"github.com/nm1996/beacon/internal/discovery"
+	"github.com/nm1996/beacon/internal/registry/postgres/postgrestest"
 	"github.com/nm1996/beacon/internal/tlstest"
 )
 
@@ -337,5 +338,41 @@ func TestNewRejectsUnusableTLSFiles(test *testing.T) {
 				test.Errorf("expected a TLS load error, got %v", err)
 			}
 		})
+	}
+}
+
+func TestNewWithPostgresKeepsInstancesAcrossServers(t *testing.T) {
+	url := postgrestest.URL(t)
+
+	settings := config.Default()
+	settings.Storage.Backend = config.StoragePostgres
+	settings.Storage.Postgres.URL = url
+
+	first, err := New(settings, slog.New(slog.DiscardHandler), "test")
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+
+	registration := discovery.Registration{ID: "bootstrap-postgres-test", Name: "orders", Address: "10.0.0.1", Port: 8081}
+
+	if _, _, err := first.Discovery.Register(t.Context(), registration, discovery.Caller{AnyInstance: true}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	first.Close()
+
+	// A second server, as after a restart or on another node, sees it.
+	second, err := New(settings, slog.New(slog.DiscardHandler), "test")
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	defer second.Close()
+
+	if _, created, err := second.Discovery.Register(t.Context(), registration, discovery.Caller{AnyInstance: true}); err != nil || created {
+		t.Errorf("expected the instance to survive, got created=%v, %v", created, err)
+	}
+
+	if err := second.Discovery.Unregister(t.Context(), registration.ID, discovery.Caller{AnyInstance: true}); err != nil {
+		t.Errorf("clean up: %v", err)
 	}
 }

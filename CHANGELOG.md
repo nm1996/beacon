@@ -49,6 +49,15 @@ Add an entry under **Unreleased** in the same pull request as the change.
   instances that `Resolver.Report` shows failing several times in a row are
   skipped for a while, never more than half of them nor the last one. See
   [design record 0005](docs/design/0005-client-cache-and-load-balancing.md).
+- PostgreSQL storage: `storage.backend = "postgres"` with
+  `storage.postgres.url` (`BEACON_STORAGE_POSTGRES_URL`) keeps instances
+  across restarts, shared by every Beacon process using the database.
+  Beacon creates and migrates its tables itself, and the instance limits
+  stay exact across processes. Built on `github.com/jackc/pgx/v5`, a new
+  direct dependency. See
+  [design record 0006](docs/design/0006-postgres-and-cache.md).
+- `registry.cache_ttl` (`BEACON_REGISTRY_CACHE_TTL`) caches lookup results
+  in each process for up to a third of the service TTL; off by default.
 - `client.Registration.ID` chooses the instance ID, and `client.ErrConflict`
   matches `instance_exists` and `idempotency_key_reused`.
 

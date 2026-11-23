@@ -130,7 +130,7 @@ func TestLoadFailures(t *testing.T) {
 		{name: "unknown log level", content: "[logging]\nlevel = \"verbose\"", wantErr: []string{"logging.level"}},
 		{name: "unknown log format", content: "[logging]\nformat = \"xml\"", wantErr: []string{"logging.format"}},
 		{name: "metrics flag is not a boolean", content: "[metrics]\nenabled = \"yes\"", wantErr: []string{"read config"}},
-		{name: "unknown storage backend", content: "[storage]\nbackend = \"redis\"", wantErr: []string{`storage.backend must be one of memory, got "redis"`}},
+		{name: "unknown storage backend", content: "[storage]\nbackend = \"redis\"", wantErr: []string{`storage.backend must be one of memory, postgres, got "redis"`}},
 		{name: "empty storage backend", content: "[storage]\nbackend = \"\"", wantErr: []string{"storage.backend"}},
 		{
 			name:    "cleanup interval longer than TTL",
@@ -292,5 +292,39 @@ func TestInvalidTrustedProxiesAreRefused(t *testing.T) {
 	err := settings.Validate()
 	if err == nil || !strings.Contains(err.Error(), "server.trusted_proxies") {
 		t.Errorf("expected a trusted_proxies error, got %v", err)
+	}
+}
+
+func TestPostgresNeedsAURL(t *testing.T) {
+	settings := Default()
+	settings.Storage.Backend = StoragePostgres
+
+	if err := settings.Validate(); err == nil || !strings.Contains(err.Error(), "storage.postgres.url is required") {
+		t.Errorf("expected the missing URL to be reported, got %v", err)
+	}
+
+	settings.Storage.Postgres.URL = "postgres://beacon@db/beacon"
+	if err := settings.Validate(); err != nil {
+		t.Errorf("expected a URL to be enough, got %v", err)
+	}
+}
+
+func TestCacheTTLIsAtMostAThirdOfTheServiceTTL(t *testing.T) {
+	settings := Default()
+
+	for _, tt := range []struct {
+		ttl time.Duration
+		ok  bool
+	}{
+		{ttl: 0, ok: true},
+		{ttl: 10 * time.Second, ok: true},
+		{ttl: 11 * time.Second, ok: false},
+		{ttl: -time.Second, ok: false},
+	} {
+		settings.Registry.CacheTTL = tt.ttl
+
+		if err := settings.Validate(); (err == nil) != tt.ok {
+			t.Errorf("cache_ttl %s with a 30s service TTL: expected ok=%v, got %v", tt.ttl, tt.ok, err)
+		}
 	}
 }

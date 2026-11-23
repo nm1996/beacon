@@ -99,6 +99,10 @@ max_instances = 10000
 # caller cannot take every place above. 0 means no limit per owner. It only
 # applies with authentication on, since callers are not told apart without it.
 max_instances_per_owner = 0
+# How long each node keeps lookup results before asking storage again, at
+# most a third of service_ttl. Worth it with storage.backend = "postgres";
+# "0s" is off.
+cache_ttl = "0s"
 
 [rate_limit]
 # Each limit is a token bucket: a steady rate per second, and a burst that
@@ -118,9 +122,16 @@ auth_failures_per_second = 1
 auth_failure_burst = 20
 
 [storage]
-# Where registered instances are kept. Only "memory" exists today: fast, and
-# everything is forgotten on restart, so clients register again.
+# Where registered instances are kept. "memory" is fast, and forgets
+# everything on restart, so clients register again. "postgres" keeps them
+# in PostgreSQL, across restarts and shared by several Beacon nodes.
 backend = "memory"
+
+[storage.postgres]
+# Connection string for backend = "postgres", such as
+# "postgres://beacon:secret@db:5432/beacon?sslmode=verify-full". It may
+# hold a password, so prefer BEACON_STORAGE_POSTGRES_URL.
+url = ""
 
 [metrics]
 # Serve Prometheus metrics at GET /metrics on the API port.

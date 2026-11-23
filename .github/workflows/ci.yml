@@ -16,6 +16,24 @@ jobs:
   check:
     name: Format, lint, test and build
     runs-on: ubuntu-latest
+    # The PostgreSQL backend's contract tests run against this database;
+    # without BEACON_TEST_POSTGRES_URL they are skipped.
+    services:
+      postgres:
+        image: postgres:18.6
+        env:
+          POSTGRES_USER: beacon
+          POSTGRES_DB: beacon_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U beacon"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
+    env:
+      BEACON_TEST_POSTGRES_URL: postgres://beacon@localhost:5432/beacon_test?sslmode=disable
     steps:
       - uses: actions/checkout@v7
 

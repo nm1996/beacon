@@ -199,7 +199,7 @@ func TestLoadEnvironmentFailures(test *testing.T) {
 		{
 			name:      "unknown storage backend",
 			variables: map[string]string{"BEACON_STORAGE_BACKEND": "redis"},
-			wantErr:   []string{"invalid config", `storage.backend must be one of memory, got "redis"`},
+			wantErr:   []string{"invalid config", `storage.backend must be one of memory, postgres, got "redis"`},
 		},
 		{
 			name:      "unknown log level",
@@ -225,5 +225,19 @@ func TestLoadEnvironmentFailures(test *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestPostgresURLFromTheEnvironment(test *testing.T) {
+	test.Setenv("BEACON_STORAGE_BACKEND", "postgres")
+	test.Setenv("BEACON_STORAGE_POSTGRES_URL", "postgres://beacon@db/beacon")
+
+	config, err := Load("")
+	if err != nil {
+		test.Fatalf("load: %v", err)
+	}
+
+	if config.Storage.Backend != StoragePostgres || config.Storage.Postgres.URL != "postgres://beacon@db/beacon" {
+		test.Errorf("expected the postgres backend and URL from the environment, got %+v", config.Storage)
 	}
 }

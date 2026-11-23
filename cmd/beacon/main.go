@@ -109,6 +109,8 @@ func run(settings config.Config, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	// Deferred first, so it runs last: after the server and workers stop.
+	defer components.Close()
 
 	server := components.Server
 
