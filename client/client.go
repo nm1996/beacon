@@ -12,12 +12,15 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -37,6 +40,14 @@ const (
 
 	// servicesPath is the API collection every service call goes to.
 	servicesPath = "/api/v1/services"
+
+	// registerAttempts is how many times Register tries before giving up on
+	// a Beacon it cannot reach.
+	registerAttempts = 3
+
+	// registerRetryDelay is how long Register waits before its first retry;
+	// each further retry waits twice as long.
+	registerRetryDelay = 200 * time.Millisecond
 
 	// discoverPageSize is how many instances Discover asks for per request.
 	discoverPageSize = 500
@@ -124,20 +135,84 @@ func New(baseURL string, options ...Option) (*Client, error) {
 	return client, nil
 }
 
-// Register adds a new instance and returns its ID and TTL. Calling it twice
-// creates two instances; Register is not retried for that reason.
+// Register adds an instance and returns its ID and TTL.
+//
+// It is safe to retry, and retries on its own: without registration.ID it
+// sends a random Idempotency-Key, the same on every attempt, so Beacon
+// finds the instance a lost response created instead of adding another.
+// It makes up to registerAttempts attempts when Beacon cannot be reached
+// or answers 502, 503 or 504, and never retries a definite answer.
+//
+// With registration.ID, registering again returns the same instance, as
+// long as it has the same name, address and port; another caller's ID, or
+// the same ID with other values, fails with an error matching ErrConflict.
 func (client *Client) Register(ctx context.Context, registration Registration) (Registered, error) {
-	var response registerResponse
-
-	err := client.do(ctx, http.MethodPost, servicesPath, nil, registerRequest(registration), http.StatusCreated, &response)
-	if err != nil {
-		return Registered{}, err
+	header := http.Header{}
+	if registration.ID == "" {
+		header.Set("Idempotency-Key", rand.Text())
 	}
 
-	return Registered{
-		ID:  response.ID,
-		TTL: time.Duration(response.TTLSeconds) * time.Second,
-	}, nil
+	var (
+		response registerResponse
+		err      error
+	)
+
+	for attempt := range registerAttempts {
+		if attempt > 0 {
+			if waitErr := sleep(ctx, registerRetryDelay<<(attempt-1)); waitErr != nil {
+				return Registered{}, fmt.Errorf("%w; gave up retrying: %w", err, waitErr)
+			}
+		}
+
+		_, err = client.send(ctx, http.MethodPost, servicesPath, nil, header, registerRequest(registration), &response,
+			http.StatusCreated, http.StatusOK)
+		if err == nil {
+			return Registered{
+				ID:  response.ID,
+				TTL: time.Duration(response.TTLSeconds) * time.Second,
+			}, nil
+		}
+
+		if !retryable(ctx, err) {
+			return Registered{}, err
+		}
+	}
+
+	return Registered{}, err
+}
+
+// retryable reports whether a request that failed with err may succeed if
+// sent again: Beacon could not be reached, or a proxy in front of it
+// reported it unavailable. A cancelled ctx is never retried.
+func retryable(ctx context.Context, err error) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+
+	var apiError *Error
+	if errors.As(err, &apiError) {
+		switch apiError.StatusCode {
+		case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+			return true
+		default:
+			return false
+		}
+	}
+
+	return true
+}
+
+// sleep waits for delay, or returns ctx's error if ctx ends first.
+func sleep(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // Heartbeat tells Beacon the instance with id is still alive. It returns an
@@ -148,7 +223,7 @@ func (client *Client) Heartbeat(ctx context.Context, id string) error {
 		return fmt.Errorf("%w: id is required", ErrInvalid)
 	}
 
-	return client.do(ctx, http.MethodPost, servicesPath+"/"+url.PathEscape(id)+"/heartbeat", nil, nil, http.StatusNoContent, nil)
+	return client.do(ctx, http.MethodPost, servicesPath+"/"+url.PathEscape(id)+"/heartbeat", nil, nil, http.StatusNoContent)
 }
 
 // Discover returns the instances registered under name, or every instance
@@ -177,7 +252,7 @@ func (client *Client) Discover(ctx context.Context, name string) ([]Instance, er
 	for pages := 1; ; pages++ {
 		var page []instanceResponse
 
-		header, err := client.send(ctx, http.MethodGet, servicesPath, query, nil, http.StatusOK, &page)
+		header, err := client.send(ctx, http.MethodGet, servicesPath, query, nil, nil, &page, http.StatusOK)
 		if err != nil {
 			return nil, err
 		}
@@ -251,29 +326,32 @@ func (client *Client) Unregister(ctx context.Context, id string) error {
 		return fmt.Errorf("%w: id is required", ErrInvalid)
 	}
 
-	return client.do(ctx, http.MethodDelete, servicesPath+"/"+url.PathEscape(id), nil, nil, http.StatusNoContent, nil)
+	return client.do(ctx, http.MethodDelete, servicesPath+"/"+url.PathEscape(id), nil, nil, http.StatusNoContent)
 }
 
 // Health reports whether Beacon is serving requests, and which version.
 func (client *Client) Health(ctx context.Context) (Health, error) {
 	var response Health
-	if err := client.do(ctx, http.MethodGet, "/health", nil, nil, http.StatusOK, &response); err != nil {
+	if err := client.do(ctx, http.MethodGet, "/health", nil, &response, http.StatusOK); err != nil {
 		return Health{}, err
 	}
 
 	return response, nil
 }
 
-// do sends one request and decodes the response into out when the status
-// is want. Any other status becomes an *Error.
-func (client *Client) do(ctx context.Context, method, path string, query url.Values, body any, want int, out any) error {
-	_, err := client.send(ctx, method, path, query, body, want, out)
+// do sends one request without a body and decodes the response into out,
+// if not nil, when the status is want. Any other status becomes an *Error.
+func (client *Client) do(ctx context.Context, method, path string, query url.Values, out any, want int) error {
+	_, err := client.send(ctx, method, path, query, nil, nil, out, want)
 
 	return err
 }
 
-// send is do that also returns the response headers.
-func (client *Client) send(ctx context.Context, method, path string, query url.Values, body any, want int, out any) (http.Header, error) {
+// send sends one request with the extra header and body, if not nil, and
+// decodes the response into out, if not nil, when its status is one of
+// wants. Any other status becomes an *Error. It returns the response
+// headers.
+func (client *Client) send(ctx context.Context, method, path string, query url.Values, header http.Header, body any, out any, wants ...int) (http.Header, error) {
 	target := *client.baseURL
 	target.Path += path
 	target.RawQuery = query.Encode()
@@ -304,6 +382,10 @@ func (client *Client) send(ctx context.Context, method, path string, query url.V
 		request.Header.Set("Content-Type", "application/json")
 	}
 
+	for key, values := range header {
+		request.Header[key] = values
+	}
+
 	response, err := client.httpClient.Do(request)
 	if err != nil {
 		return nil, fmt.Errorf("beacon: %s %s: %w", method, path, err)
@@ -312,7 +394,7 @@ func (client *Client) send(ctx context.Context, method, path string, query url.V
 
 	limited := io.LimitReader(response.Body, maxResponseBytes)
 
-	if response.StatusCode != want {
+	if !slices.Contains(wants, response.StatusCode) {
 		return response.Header, decodeError(response.StatusCode, limited)
 	}
 

@@ -36,6 +36,18 @@ Add an entry under **Unreleased** in the same pull request as the change.
   gets `422 idempotency_key_reused`. See
   [design record 0004](docs/design/0004-idempotency.md).
 - `beacon_registry_operations_total` has the result `exists`.
+- `client.Registration.ID` chooses the instance ID, and `client.ErrConflict`
+  matches `instance_exists` and `idempotency_key_reused`.
+
+### Changed
+
+- `client.Register` sends an `Idempotency-Key` and retries, up to three
+  attempts in all, when Beacon cannot be reached or a proxy answers `502`,
+  `503` or `504`. It used to fail on the first lost response, so `Announce`
+  could fail on one dropped packet.
+- A `Lease` registers again under the ID it had, so the instance keeps its
+  ID across Beacon restarts. Only if another instance took the ID meanwhile
+  does it register under a new one.
 
 ## [0.2.0] - 2026-11-13
 
