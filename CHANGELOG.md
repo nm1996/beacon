@@ -24,6 +24,18 @@ Add an entry under **Unreleased** in the same pull request as the change.
   that share an `id` share ownership. Without it the ID is the `name`, as
   before. Refused-request logs add `caller_id`. See
   [design record 0002](docs/design/0002-owner-id.md).
+- Registrations may name their instance `id`. Registering the same `id`
+  again with the same name, address and port answers `200 OK` with the same
+  instance, refreshed as by a heartbeat, so the ID survives Beacon restarts
+  and retries. Another caller's ID, or the same ID with a different name,
+  address or port, gets `409 instance_exists`. See
+  [design record 0003](docs/design/0003-stable-instance-ids.md).
+- The `Idempotency-Key` header makes repeating a registration safe: Beacon
+  derives the instance ID from the key and the caller, so a retry finds the
+  instance the first attempt created. The same key with a different body
+  gets `422 idempotency_key_reused`. See
+  [design record 0004](docs/design/0004-idempotency.md).
+- `beacon_registry_operations_total` has the result `exists`.
 
 ## [0.2.0] - 2026-11-13
 

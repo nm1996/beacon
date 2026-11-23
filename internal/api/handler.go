@@ -17,7 +17,7 @@ import (
 // it is used, so handlers depend only on these methods and tests can swap
 // in a fake. *discovery.Service satisfies it.
 type Discovery interface {
-	Register(ctx context.Context, registration discovery.Registration, caller discovery.Caller) (discovery.Instance, error)
+	Register(ctx context.Context, registration discovery.Registration, caller discovery.Caller) (discovery.Instance, bool, error)
 	Heartbeat(ctx context.Context, id string, caller discovery.Caller) error
 	List(ctx context.Context, query discovery.ListQuery) ([]discovery.Instance, error)
 	Unregister(ctx context.Context, id string, caller discovery.Caller) error
@@ -76,6 +76,10 @@ func NewHandler(discovery Discovery, logger *slog.Logger, config Config) *Handle
 // Register adds a new service instance and responds 201 with its ID and the
 // TTL within which it must send heartbeats. The Location header points at
 // the new instance. Malformed bodies or invalid fields get 400.
+//
+// A registration that repeats an earlier one, by naming the same id or
+// sending the same Idempotency-Key header, refreshes that instance and
+// responds 200 with the same body instead.
 func (handler *Handler) Register(writer http.ResponseWriter, request *http.Request) {
 	var input RegisterRequest
 
@@ -84,14 +88,22 @@ func (handler *Handler) Register(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 
-	instance, err := handler.discovery.Register(request.Context(), mapRegisterRequest(input), handler.caller(request))
+	registration := mapRegisterRequest(input)
+	registration.IdempotencyKey = request.Header.Get("Idempotency-Key")
+
+	instance, created, err := handler.discovery.Register(request.Context(), registration, handler.caller(request))
 	if err != nil {
 		handler.writeDiscoveryError(writer, request, err)
 		return
 	}
 
+	status := http.StatusCreated
+	if !created {
+		status = http.StatusOK
+	}
+
 	writer.Header().Set("Location", servicesPath+"/"+url.PathEscape(instance.ID))
-	handler.writeJSON(writer, http.StatusCreated, RegisterResponse{
+	handler.writeJSON(writer, status, RegisterResponse{
 		ID:         instance.ID,
 		TTLSeconds: int64(handler.discovery.TTL() / time.Second),
 	})

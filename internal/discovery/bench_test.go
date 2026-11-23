@@ -25,7 +25,7 @@ func BenchmarkServiceRegister(b *testing.B) {
 	b.ReportAllocs()
 
 	for b.Loop() {
-		if _, err := service.Register(b.Context(), registration, caller); err != nil {
+		if _, _, err := service.Register(b.Context(), registration, caller); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -41,7 +41,7 @@ func BenchmarkServiceHeartbeat(b *testing.B) {
 
 	caller := discovery.Caller{ID: "orders"}
 
-	instance, err := service.Register(b.Context(), registration("orders"), caller)
+	instance, _, err := service.Register(b.Context(), registration("orders"), caller)
 	if err != nil {
 		b.Fatal(err)
 	}

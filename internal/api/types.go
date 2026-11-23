@@ -4,6 +4,8 @@ import "time"
 
 // RegisterRequest is the body of POST /api/v1/services.
 type RegisterRequest struct {
+	// ID is optional: the instance ID to use, so registering again keeps it.
+	ID      string `json:"id,omitempty"`
 	Name    string `json:"name"`
 	Address string `json:"address"`
 	Port    int    `json:"port"`

@@ -53,7 +53,7 @@ func TestServiceNames(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			reg := registration(tt.name)
 
-			_, err := newService(t).Register(t.Context(), reg, anyone)
+			_, _, err := newService(t).Register(t.Context(), reg, anyone)
 
 			if tt.valid && err != nil {
 				t.Errorf("expected %q to be accepted, got %v", tt.name, err)
@@ -103,7 +103,7 @@ func TestAddresses(t *testing.T) {
 			reg := registration("orders")
 			reg.Address = tt.address
 
-			_, err := newService(t).Register(t.Context(), reg, anyone)
+			_, _, err := newService(t).Register(t.Context(), reg, anyone)
 
 			if tt.valid && err != nil {
 				t.Errorf("expected %q to be accepted, got %v", tt.address, err)
@@ -117,7 +117,7 @@ func TestAddresses(t *testing.T) {
 }
 
 func TestInvalidNameMessageExplainsTheRule(t *testing.T) {
-	_, err := newService(t).Register(t.Context(), registration("Orders"), anyone)
+	_, _, err := newService(t).Register(t.Context(), registration("Orders"), anyone)
 
 	if err == nil || !strings.Contains(err.Error(), "lowercase") || !strings.Contains(err.Error(), "63") ||
 		!strings.Contains(err.Error(), "in a row") {
@@ -145,18 +145,18 @@ func serviceWithLimits(t *testing.T, name, address int) *discovery.Service {
 func TestNameLengthIsConfigurable(t *testing.T) {
 	service := serviceWithLimits(t, 10, 0)
 
-	if _, err := service.Register(t.Context(), registration(strings.Repeat("a", 10)), anyone); err != nil {
+	if _, _, err := service.Register(t.Context(), registration(strings.Repeat("a", 10)), anyone); err != nil {
 		t.Errorf("expected a name at the limit to be accepted, got %v", err)
 	}
 
-	_, err := service.Register(t.Context(), registration(strings.Repeat("a", 11)), anyone)
+	_, _, err := service.Register(t.Context(), registration(strings.Repeat("a", 11)), anyone)
 	if !errors.Is(err, discovery.ErrInvalidRegistration) || !strings.Contains(err.Error(), "at most 10 characters") {
 		t.Errorf("expected a name over the limit to be rejected with the limit in the message, got %v", err)
 	}
 
 	// A raised limit lets in names longer than the default.
 	long := strings.Repeat("a", discovery.MaxLengthLimit)
-	if _, err := serviceWithLimits(t, discovery.MaxLengthLimit, 0).Register(t.Context(), registration(long), anyone); err != nil {
+	if _, _, err := serviceWithLimits(t, discovery.MaxLengthLimit, 0).Register(t.Context(), registration(long), anyone); err != nil {
 		t.Errorf("expected a %d character name to be accepted with a raised limit, got %v", len(long), err)
 	}
 }
@@ -176,7 +176,7 @@ func TestAddressLengthIsConfigurable(t *testing.T) {
 		reg := registration("orders")
 		reg.Address = tt.address
 
-		_, err := service.Register(t.Context(), reg, anyone)
+		_, _, err := service.Register(t.Context(), reg, anyone)
 
 		if tt.valid && err != nil {
 			t.Errorf("expected %q to be accepted, got %v", tt.address, err)

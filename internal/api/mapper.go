@@ -6,6 +6,7 @@ import "github.com/nm1996/beacon/internal/discovery"
 // discovery layer validates and stores.
 func mapRegisterRequest(dto RegisterRequest) discovery.Registration {
 	return discovery.Registration{
+		ID:      dto.ID,
 		Name:    dto.Name,
 		Address: dto.Address,
 		Port:    dto.Port,

@@ -77,7 +77,7 @@ func serve(router http.Handler, method, path, body string) *httptest.ResponseRec
 func mustRegister(t *testing.T, service *discovery.Service, name string, port int) string {
 	t.Helper()
 
-	instance, err := service.Register(t.Context(), discovery.Registration{
+	instance, _, err := service.Register(t.Context(), discovery.Registration{
 		Name:    name,
 		Address: "localhost",
 		Port:    port,
@@ -302,8 +302,8 @@ type failingDiscovery struct {
 }
 
 // Register always fails.
-func (fake failingDiscovery) Register(context.Context, discovery.Registration, discovery.Caller) (discovery.Instance, error) {
-	return discovery.Instance{}, fake.err
+func (fake failingDiscovery) Register(context.Context, discovery.Registration, discovery.Caller) (discovery.Instance, bool, error) {
+	return discovery.Instance{}, false, fake.err
 }
 
 // Heartbeat always fails.
