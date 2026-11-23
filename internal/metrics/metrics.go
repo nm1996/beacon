@@ -10,6 +10,7 @@ package metrics
 import (
 	"net/http"
 	"runtime"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -36,6 +37,8 @@ type Metrics struct {
 	credentialReloads *prometheus.CounterVec
 	rateLimited       *prometheus.CounterVec
 	clusterNodes      prometheus.Gauge
+	grpcRequests      *prometheus.CounterVec
+	grpcDuration      *prometheus.HistogramVec
 }
 
 // New returns Metrics with the Go runtime and process collectors and a
@@ -87,6 +90,17 @@ func New(version string) *Metrics {
 			Name:      "rate_limited_total",
 			Help:      "Requests refused by a rate limit, by limit (registrations or auth_failures).",
 		}, []string{"limit"}),
+		grpcRequests: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "grpc_requests_total",
+			Help:      "gRPC calls served, by full method name and status code.",
+		}, []string{"method", "code"}),
+		grpcDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: namespace,
+			Name:      "grpc_request_duration_seconds",
+			Help:      "Time spent serving gRPC calls, by full method name.",
+			Buckets:   prometheus.DefBuckets,
+		}, []string{"method"}),
 		clusterNodes: prometheus.NewGauge(prometheus.GaugeOpts{
 			Namespace: namespace,
 			Name:      "cluster_nodes",
@@ -115,6 +129,8 @@ func New(version string) *Metrics {
 		metrics.credentialReloads,
 		metrics.rateLimited,
 		metrics.clusterNodes,
+		metrics.grpcRequests,
+		metrics.grpcDuration,
 	)
 
 	return metrics
@@ -123,6 +139,13 @@ func New(version string) *Metrics {
 // AuthFailed counts one request refused by authentication for reason.
 func (metrics *Metrics) AuthFailed(reason string) {
 	metrics.authFailures.WithLabelValues(reason).Inc()
+}
+
+// GRPCCall records one gRPC call of method, the full method name the
+// server defines, that ended with code after duration.
+func (metrics *Metrics) GRPCCall(method, code string, duration time.Duration) {
+	metrics.grpcRequests.WithLabelValues(method, code).Inc()
+	metrics.grpcDuration.WithLabelValues(method).Observe(duration.Seconds())
 }
 
 // ClusterNodes reports how many nodes are live.

@@ -140,6 +140,11 @@ url = ""
 # third of registry.service_ttl; "0s" writes each at once.
 heartbeat_flush_interval = "1s"
 
+[grpc]
+# Port of the gRPC API, on server.host, with the same TLS, authentication and
+# rate limits as HTTP. 0 is off.
+port = 0
+
 [metrics]
 # Serve Prometheus metrics at GET /metrics on the API port.
 enabled = true

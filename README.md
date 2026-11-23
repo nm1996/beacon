@@ -32,6 +32,7 @@ Services register themselves, send heartbeats, and discover each other over a sm
 - [Running several nodes](#running-several-nodes)
 - [Reloading certificates and tokens](#reloading-certificates-and-tokens)
 - [Running in Docker](#running-in-docker)
+- [gRPC API](#grpc-api)
 - [Go client](#go-client)
 - [Metrics](#metrics)
 - [Exposing Beacon to a network](#exposing-beacon-to-a-network)
@@ -310,6 +311,7 @@ A file only needs the keys it changes, and no file is needed at all. [`configs/b
 | `server.reload_interval` | `BEACON_SERVER_RELOAD_INTERVAL` | `"0s"` | How often to check the TLS files and tokens file for changes; `0s` is off. See [Reloading](#reloading-certificates-and-tokens) |
 | `server.trusted_proxies` | `BEACON_SERVER_TRUSTED_PROXIES` (comma-separated) | `[]` | Addresses or CIDR ranges of proxies whose `X-Forwarded-For` gives the client address for [rate limits](#rate-limits) |
 | `server.node_id` | `BEACON_SERVER_NODE_ID` | `""` | Names this node among those sharing PostgreSQL, such as its pod name; empty picks a random ID at every start |
+| `grpc.port` | `BEACON_GRPC_PORT` | `0` | Port of the [gRPC API](#grpc-api), on `server.host`; `0` is off |
 | `tls.cert_file` | `BEACON_TLS_CERT_FILE` | `""` | PEM certificate chain to serve HTTPS with; see [TLS](#tls) |
 | `tls.key_file` | `BEACON_TLS_KEY_FILE` | `""` | PEM private key for `tls.cert_file` |
 | `tls.client_ca_file` | `BEACON_TLS_CLIENT_CA_FILE` | `""` | PEM bundle of CAs whose client certificates Beacon accepts; see [Client certificates (mTLS)](#client-certificates-mtls) |
@@ -656,6 +658,40 @@ To build and run locally with Compose, which also drops all capabilities and use
 docker compose -f deployments/compose/compose.yaml up --build
 ```
 
+## gRPC API
+
+Setting `grpc.port` serves the same registry over gRPC, for generated clients in any language. The contract is [`api/beacon/v1/registry.proto`](api/beacon/v1/registry.proto), and the generated Go code is in the same directory, importable as `github.com/nm1996/beacon/api/beacon/v1`.
+
+```toml
+[grpc]
+port = 9090
+```
+
+```go
+conn, err := grpc.NewClient("beacon:9090", grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{})))
+registry := beaconv1.NewRegistryServiceClient(conn)
+
+ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+token)
+registered, err := registry.Register(ctx, &beaconv1.RegisterRequest{Name: "orders", Address: "10.0.0.12", Port: 8081})
+```
+
+- `Register`, `Heartbeat`, `Unregister` and `ListInstances` behave as the HTTP endpoints do, including `id`, `idempotency_key` (the HTTP API's `Idempotency-Key`) and paging, here with `page_size` and `page_token`.
+- The listener uses the same TLS settings, and the same authentication: an `authorization: Bearer <token>` metadata entry, or a client certificate. Permissions, ownership and quotas apply the same way.
+- The rate limits are the HTTP API's own limiters, so a client has one budget across both transports. A gRPC peer is keyed by its connection's address; `server.trusted_proxies` does not apply.
+- Errors use the standard status codes and carry a `google.rpc.ErrorInfo` with domain `beacon` and, as `reason`, the HTTP API's error code, such as `instance_not_owned`:
+
+  | Code | Situation |
+  |---|---|
+  | `InvalidArgument` | Invalid input, or a reused idempotency key |
+  | `NotFound` | Unknown instance |
+  | `PermissionDenied` | Another caller's instance, or a missing permission |
+  | `AlreadyExists` | The `id` is another instance's |
+  | `ResourceExhausted` | Quotas, and rate limits, which also carry `google.rpc.RetryInfo` |
+  | `Unauthenticated` | Missing or unknown credentials |
+
+- The standard `grpc.health.v1` health service and server reflection are served without credentials, so `grpc_health_probe` and `grpcurl` work.
+- `mise run proto` regenerates the Go code after changing the `.proto`, and CI fails if the committed code is out of date.
+
 ## Go client
 
 The [`client`](client) package is a Go client for the HTTP API. It uses only the standard library, so it adds nothing else to your build.
@@ -788,6 +824,8 @@ scrape_configs:
 | `beacon_registry_operation_duration_seconds` | histogram | `operation` | Time spent in the storage backend |
 | `beacon_rate_limited_total` | counter | `limit` | Requests refused by a [rate limit](#rate-limits); `limit` is `registrations` or `auth_failures`. Only appears once a request has been refused |
 | `beacon_cluster_nodes` | gauge | | Live Beacon nodes sharing this node's storage, this one included; see [Running several nodes](#running-several-nodes) |
+| `beacon_grpc_requests_total` | counter | `method`, `code` | gRPC calls, by full method name and status code |
+| `beacon_grpc_request_duration_seconds` | histogram | `method` | Time spent serving gRPC calls |
 | `beacon_auth_failures_total` | counter | `reason` | Requests refused by [authentication](#authentication); `reason` is `missing`, `invalid` or `forbidden`. Only appears once a request has been refused |
 | `beacon_credential_reloads_total` | counter | `result` | Attempts to [reload](#reloading-certificates-and-tokens) the TLS files and tokens file while running; `result` is `ok` or `error`. Only appears after the first attempt |
 | `beacon_build_info` | gauge | `version`, `goversion` | Always `1`; describes the running build |
@@ -927,10 +965,12 @@ Every operation shares one lock: lookups can run side by side, but heartbeats an
 
 ```text
 .
+├── api/beacon/v1/           # gRPC contract (.proto) and its generated Go code
 ├── client/                  # Go client for the HTTP API
 ├── cmd/beacon/              # Entry point: flags, config, logging, signals, cleanup worker and shutdown
 ├── internal/
 │   ├── api/                 # HTTP transport: routes, request decoding, JSON errors, token and client certificate checks
+│   ├── grpcapi/             # gRPC transport: the same rules, credentials, limits and error reasons
 │   ├── auth/                # Tokens file: token hashes, client certificate names and permissions
 │   ├── discovery/           # Business rules: validation, IDs, TTL, cleanup; the Registry interface
 │   ├── metrics/             # Prometheus metrics around the HTTP handler and any Registry backend

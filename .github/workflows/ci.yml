@@ -43,6 +43,9 @@ jobs:
       - name: Check formatting
         run: mise run fmt-check
 
+      - name: Check the generated gRPC code is up to date
+        run: mise run proto-check
+
       - name: Vet
         run: mise run vet
 

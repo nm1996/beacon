@@ -72,6 +72,16 @@ Add an entry under **Unreleased** in the same pull request as the change.
 - Rate limits are divided by the number of live nodes, so behind a
   round-robin load balancer the cluster enforces about the configured
   limit. See [design record 0008](docs/design/0008-cluster-rate-limits.md).
+- A gRPC API on `grpc.port` (`BEACON_GRPC_PORT`), off by default:
+  `beacon.v1.RegistryService` with `Register`, `Heartbeat`, `Unregister`
+  and `ListInstances`, defined in `api/beacon/v1/registry.proto` with the
+  generated Go code next to it. It uses the HTTP API's TLS settings,
+  authentication, permissions and rate limiters, and reports errors with
+  standard codes and a `google.rpc.ErrorInfo` whose reason is the HTTP
+  error code. The health service and reflection are included, as are
+  `beacon_grpc_requests_total` and `beacon_grpc_request_duration_seconds`.
+  Adds `google.golang.org/grpc` and `google.golang.org/protobuf`. See
+  [design record 0009](docs/design/0009-grpc-api.md).
 - `client.Registration.ID` chooses the instance ID, and `client.ErrConflict`
   matches `instance_exists` and `idempotency_key_reused`.
 
