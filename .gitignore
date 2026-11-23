@@ -19,7 +19,9 @@ coverage.*
 # Internal project and AI agent documents (kept locally, not published)
 /AGENTS.md
 /CLAUDE.md
-/docs/
+/docs/*
+# Design records are published, so they can be reviewed with the code.
+!/docs/design/
 # Only CI workflows and Dependabot are published from .github/.
 /.github/*
 !/.github/workflows/
