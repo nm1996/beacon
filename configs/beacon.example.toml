@@ -46,6 +46,9 @@ max_request_body_bytes = 65536
 # checking off. Sending Beacon SIGHUP reloads them at once on Linux and macOS.
 # A reload that fails keeps the files Beacon already has.
 reload_interval = "0s"
+# Proxies, such as load balancers, whose X-Forwarded-For header gives the
+# client address rate limits use. Only list your own; empty trusts none.
+trusted_proxies = []
 
 [tls]
 # Serve HTTPS instead of plain HTTP. Set both files to turn TLS on, or leave

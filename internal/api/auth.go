@@ -47,6 +47,7 @@ type Guard struct {
 	failed         func(reason string)
 	failureLimit   *ratelimit.Limiter
 	failureLimited func()
+	proxies        TrustedProxies
 }
 
 // NewGuard returns a Guard that identifies callers with authenticator and
@@ -97,7 +98,7 @@ func (guard *Guard) Require(permission auth.Permission, next http.Handler) http.
 	}
 
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		network := clientNetwork(request)
+		network := clientNetwork(request, guard.proxies)
 
 		reservation, ok, wait := guard.failureLimit.Reserve(network)
 		if !ok {

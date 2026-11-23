@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -26,6 +27,7 @@ func environmentVariables(config *Config) []environmentVariable {
 		{name: "BEACON_SERVER_SHUTDOWN_TIMEOUT", apply: setDuration(&config.Server.ShutdownTimeout)},
 		{name: "BEACON_SERVER_MAX_REQUEST_BODY_BYTES", apply: setInt64(&config.Server.MaxRequestBodyBytes)},
 		{name: "BEACON_SERVER_RELOAD_INTERVAL", apply: setDuration(&config.Server.ReloadInterval)},
+		{name: "BEACON_SERVER_TRUSTED_PROXIES", apply: setList(&config.Server.TrustedProxies)},
 		{name: "BEACON_TLS_CERT_FILE", apply: setString(&config.TLS.CertFile)},
 		{name: "BEACON_TLS_KEY_FILE", apply: setString(&config.TLS.KeyFile)},
 		{name: "BEACON_TLS_CLIENT_CA_FILE", apply: setString(&config.TLS.ClientCAFile)},
@@ -71,6 +73,24 @@ func applyEnvironment(config *Config, lookup func(name string) (string, bool)) e
 func setString(target *string) func(string) error {
 	return func(value string) error {
 		*target = value
+		return nil
+	}
+}
+
+// setList sets target to the comma-separated entries of the value, without
+// empty ones.
+func setList(target *[]string) func(string) error {
+	return func(value string) error {
+		entries := []string{}
+
+		for entry := range strings.SplitSeq(value, ",") {
+			if entry = strings.TrimSpace(entry); entry != "" {
+				entries = append(entries, entry)
+			}
+		}
+
+		*target = entries
+
 		return nil
 	}
 }

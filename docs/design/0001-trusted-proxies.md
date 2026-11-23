@@ -16,11 +16,11 @@ To find the client address of a request:
 
 1. Start with the connection's address. If it is not in a trusted range, that is the client, and headers are ignored.
 2. Otherwise read `X-Forwarded-For` from right to left. Combine every instance of the header in order, as RFC 7230 requires. Skip each address in a trusted range. The first address that is not trusted is the client.
-3. If every address is trusted, or the header is missing or malformed, use the leftmost valid address, or the connection's address if there is none.
+3. If the header is missing, or an entry cannot be parsed before an untrusted address is reached, the connection's address is the client. If every entry is trusted, the leftmost one is: the request started inside the trusted network.
 
 This is the "rightmost untrusted" rule that nginx (`real_ip_recursive on`), Envoy (`xff_num_trusted_hops`, counted rather than matched) and AWS ALB use. Entries left of the first untrusted hop were written by the client and are never believed.
 
-The resulting address feeds `clientNetwork`, so the rate limit keys follow it, and it appears as `client` in refused-request logs. `RemoteAddr` is not rewritten, so nothing else changes meaning.
+The resulting address feeds `clientNetwork`, so the rate limit keys, and the `network` in refused-request logs, follow it. `RemoteAddr` is not rewritten, so nothing else changes meaning.
 
 ## Alternatives considered
 

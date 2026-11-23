@@ -1,6 +1,7 @@
 package config
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ func TestLoadAppliesEveryEnvironmentVariable(test *testing.T) {
 	test.Setenv("BEACON_SERVER_SHUTDOWN_TIMEOUT", "4s")
 	test.Setenv("BEACON_SERVER_MAX_REQUEST_BODY_BYTES", "1024")
 	test.Setenv("BEACON_SERVER_RELOAD_INTERVAL", "30s")
+	test.Setenv("BEACON_SERVER_TRUSTED_PROXIES", "10.0.0.0/8, ,fd00::/8")
 	test.Setenv("BEACON_TLS_CERT_FILE", "/etc/beacon/tls/cert.pem")
 	test.Setenv("BEACON_TLS_KEY_FILE", "/etc/beacon/tls/key.pem")
 	test.Setenv("BEACON_TLS_CLIENT_CA_FILE", "/etc/beacon/tls/clients.pem")
@@ -50,6 +52,7 @@ func TestLoadAppliesEveryEnvironmentVariable(test *testing.T) {
 			ShutdownTimeout:     4 * time.Second,
 			MaxRequestBodyBytes: 1024,
 			ReloadInterval:      30 * time.Second,
+			TrustedProxies:      []string{"10.0.0.0/8", "fd00::/8"},
 		},
 		TLS: TLSConfig{
 			CertFile:     "/etc/beacon/tls/cert.pem",
@@ -86,7 +89,7 @@ func TestLoadAppliesEveryEnvironmentVariable(test *testing.T) {
 		},
 	}
 
-	if config != want {
+	if !reflect.DeepEqual(config, want) {
 		test.Errorf("expected %+v, got %+v", want, config)
 	}
 }
@@ -108,7 +111,7 @@ read_timeout = "1m"
 	want.Server.Port = 7070
 	want.Server.ReadTimeout = time.Minute
 
-	if config != want {
+	if !reflect.DeepEqual(config, want) {
 		test.Errorf("expected %+v, got %+v", want, config)
 	}
 }

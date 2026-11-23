@@ -35,7 +35,7 @@ func TestClientNetwork(t *testing.T) {
 			request := httptest.NewRequest(http.MethodGet, "/", nil)
 			request.RemoteAddr = tt.remote
 
-			if got := clientNetwork(request); got != tt.want {
+			if got := clientNetwork(request, nil); got != tt.want {
 				t.Errorf("expected %q, got %q", tt.want, got)
 			}
 		})

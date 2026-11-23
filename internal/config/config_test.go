@@ -2,9 +2,11 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -35,7 +37,7 @@ func TestLoadWithoutPathReturnsDefaults(t *testing.T) {
 		t.Fatalf("load: %v", err)
 	}
 
-	if config != Default() {
+	if !reflect.DeepEqual(config, Default()) {
 		t.Errorf("expected defaults, got %+v", config)
 	}
 }
@@ -46,7 +48,7 @@ func TestExampleConfigMatchesDefaults(t *testing.T) {
 		t.Fatalf("load example config: %v", err)
 	}
 
-	if config != Default() {
+	if !reflect.DeepEqual(config, Default()) {
 		t.Errorf("example config and Default() have drifted apart:\nexample: %+v\ndefault: %+v", config, Default())
 	}
 }
@@ -79,7 +81,7 @@ format = "text"
 	want.Registry.MaxAddressLength = 120
 	want.Logging.Format = "text"
 
-	if config != want {
+	if !reflect.DeepEqual(config, want) {
 		t.Errorf("expected %+v, got %+v", want, config)
 	}
 }
@@ -90,7 +92,7 @@ func TestLoadEmptyFileReturnsDefaults(t *testing.T) {
 		t.Fatalf("load: %v", err)
 	}
 
-	if config != Default() {
+	if !reflect.DeepEqual(config, Default()) {
 		t.Errorf("expected defaults, got %+v", config)
 	}
 }
@@ -265,5 +267,30 @@ func TestZeroRateWithZeroBurstIsOff(t *testing.T) {
 
 	if _, err := Load(path); err != nil {
 		t.Errorf("expected a limit that is off not to need a burst, got %v", err)
+	}
+}
+
+func TestTrustedProxyRanges(t *testing.T) {
+	server := Default().Server
+	server.TrustedProxies = []string{"10.0.0.0/8", " 192.0.2.7 ", "2001:db8::/32", "fd00::1", "10.1.2.3/8"}
+
+	ranges, err := server.TrustedProxyRanges()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := fmt.Sprint(ranges)
+	if want := "[10.0.0.0/8 192.0.2.7/32 2001:db8::/32 fd00::1/128 10.0.0.0/8]"; got != want {
+		t.Errorf("expected %s, got %s", want, got)
+	}
+}
+
+func TestInvalidTrustedProxiesAreRefused(t *testing.T) {
+	settings := Default()
+	settings.Server.TrustedProxies = []string{"10.0.0.0/8", "proxy.internal"}
+
+	err := settings.Validate()
+	if err == nil || !strings.Contains(err.Error(), "server.trusted_proxies") {
+		t.Errorf("expected a trusted_proxies error, got %v", err)
 	}
 }

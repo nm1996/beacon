@@ -156,6 +156,10 @@ func run(settings config.Config, logger *slog.Logger) error {
 
 	logListening(logger, listener.Addr(), servesTLS, settings.Auth.Enabled, settings.Storage.Backend)
 
+	if proxies := settings.Server.TrustedProxies; len(proxies) > 0 {
+		logger.Info("trusting X-Forwarded-For from proxies", slog.Any("trusted_proxies", proxies))
+	}
+
 	select {
 	case err := <-serveErr:
 		if errors.Is(err, http.ErrServerClosed) {
