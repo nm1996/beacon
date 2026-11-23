@@ -22,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/nm1996/beacon/internal/cluster"
 	"github.com/nm1996/beacon/internal/discovery"
 	"github.com/nm1996/beacon/internal/registry/heartbeats"
 )
@@ -331,6 +332,59 @@ func (registry *PostgresRegistry) DeleteStale(ctx context.Context, cutoff time.T
 	}
 
 	return int(tag.RowsAffected()), nil
+}
+
+var _ cluster.Store = (*PostgresRegistry)(nil)
+
+// Beat records node in beacon_nodes, adding it if it is new.
+func (registry *PostgresRegistry) Beat(ctx context.Context, node cluster.Node) error {
+	_, err := registry.pool.Exec(ctx, `INSERT INTO beacon_nodes (id, address, version, started_at, last_seen)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (id) DO UPDATE SET address = $2, version = $3, last_seen = $5`,
+		node.ID, node.Address, node.Version, node.StartedAt, node.LastSeen)
+	if err != nil {
+		return fmt.Errorf("postgres: record node %s: %w", node.ID, err)
+	}
+
+	return nil
+}
+
+// Leave removes the node with id from beacon_nodes.
+func (registry *PostgresRegistry) Leave(ctx context.Context, id string) error {
+	if _, err := registry.pool.Exec(ctx, "DELETE FROM beacon_nodes WHERE id = $1", id); err != nil {
+		return fmt.Errorf("postgres: remove node %s: %w", id, err)
+	}
+
+	return nil
+}
+
+// Live returns the nodes seen at or after since, sorted by ID, and removes
+// those not seen for long, so nodes that crashed do not pile up.
+func (registry *PostgresRegistry) Live(ctx context.Context, since time.Time) ([]cluster.Node, error) {
+	if _, err := registry.pool.Exec(ctx, "DELETE FROM beacon_nodes WHERE last_seen < $1", since.Add(-time.Hour)); err != nil {
+		return nil, fmt.Errorf("postgres: forget old nodes: %w", err)
+	}
+
+	rows, err := registry.pool.Query(ctx,
+		"SELECT id, address, version, started_at, last_seen FROM beacon_nodes WHERE last_seen >= $1 ORDER BY id", since)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: list nodes: %w", err)
+	}
+
+	nodes, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (cluster.Node, error) {
+		var node cluster.Node
+
+		err := row.Scan(&node.ID, &node.Address, &node.Version, &node.StartedAt, &node.LastSeen)
+		node.StartedAt = node.StartedAt.UTC()
+		node.LastSeen = node.LastSeen.UTC()
+
+		return node, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("postgres: list nodes: %w", err)
+	}
+
+	return nodes, nil
 }
 
 // TouchMany sets the last heartbeat of every instance in heartbeats in one

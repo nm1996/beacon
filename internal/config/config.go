@@ -62,6 +62,10 @@ type ServerConfig struct {
 	// load balancers, whose X-Forwarded-For header gives the client address
 	// rate limits are keyed by. Empty, the default, trusts no proxy.
 	TrustedProxies []string `toml:"trusted_proxies"`
+	// NodeID names this process among the Beacon nodes sharing a storage
+	// backend, for example its pod name. Empty, the default, picks a
+	// random ID at every start.
+	NodeID string `toml:"node_id"`
 }
 
 // TrustedProxyRanges parses TrustedProxies. A plain address is a range of

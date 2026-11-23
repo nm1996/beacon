@@ -45,3 +45,12 @@ type ErrorDetail struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 }
+
+// Node is one live Beacon node, as GET /api/v1/nodes lists it.
+type Node struct {
+	ID        string    `json:"id"`
+	Address   string    `json:"address"`
+	Version   string    `json:"version"`
+	StartedAt time.Time `json:"started_at"`
+	LastSeen  time.Time `json:"last_seen"`
+}

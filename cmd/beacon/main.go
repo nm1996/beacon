@@ -94,8 +94,9 @@ func newLogger(output io.Writer, settings config.LoggingConfig) *slog.Logger {
 	return slog.New(slog.NewJSONHandler(output, options))
 }
 
-// run binds the listen address, starts the HTTP server, the cleanup worker
-// and, when TLS or authentication is on, the credentials reload worker,
+// run binds the listen address, joins the cluster of nodes sharing the
+// storage backend, starts the HTTP server, the membership and cleanup
+// workers and, when TLS or authentication is on, the credentials reload worker,
 // which reloads on SIGHUP and every server.reload_interval. It then blocks
 // until the server fails or the process gets SIGINT or SIGTERM. On a signal
 // it gives in-flight requests up to server.shutdown_timeout to finish; a
@@ -148,6 +149,16 @@ func run(settings config.Config, logger *slog.Logger) error {
 			<-flushed
 		}()
 	}
+
+	// Count this node in before serving, so the rate limits are divided
+	// from the first request.
+	if err := components.Membership.Join(ctx); err != nil {
+		return fmt.Errorf("join the cluster: %w", err)
+	}
+
+	workers.Go(func() {
+		components.Membership.Run(workerCtx)
+	})
 
 	workers.Go(func() {
 		if err := components.Discovery.RunCleanup(workerCtx); err != nil {

@@ -63,6 +63,15 @@ Add an entry under **Unreleased** in the same pull request as the change.
   statement per thousand instances.
 - `registry.cache_ttl` (`BEACON_REGISTRY_CACHE_TTL`) caches lookup results
   in each process for up to a third of the service TTL; off by default.
+- Several nodes over one PostgreSQL database: each node records itself in
+  `beacon_nodes` every 5 seconds and leaves on shutdown, every node runs
+  cleanup, and `GET /api/v1/nodes` (with `manage`) and the
+  `beacon_cluster_nodes` gauge list the live ones. `server.node_id`
+  (`BEACON_SERVER_NODE_ID`) names a node. See
+  [design record 0007](docs/design/0007-multiple-nodes.md).
+- Rate limits are divided by the number of live nodes, so behind a
+  round-robin load balancer the cluster enforces about the configured
+  limit. See [design record 0008](docs/design/0008-cluster-rate-limits.md).
 - `client.Registration.ID` chooses the instance ID, and `client.ErrConflict`
   matches `instance_exists` and `idempotency_key_reused`.
 
