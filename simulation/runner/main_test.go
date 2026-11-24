@@ -126,7 +126,7 @@ func runScenario(t *testing.T, beaconURL string, args ...string) (int, string, *
 
 	code := run(t.Context(), args, &stdout, &stderr)
 
-	files, err := filepath.Glob(filepath.Join(reports, "*.json"))
+	files, err := filepath.Glob(filepath.Join(reports, "*", "*.json"))
 	if err != nil || len(files) != 1 {
 		t.Fatalf("want one report, got %v (%v); stderr: %s", files, err, stderr.String())
 	}

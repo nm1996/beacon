@@ -17,7 +17,13 @@ import (
 // Report is what one run found. It is written as JSON, and holds no
 // tokens.
 type Report struct {
-	Scenario string    `json:"scenario"`
+	Scenario string `json:"scenario"`
+	// Run names the run.sh invocation the report belongs to, and Label
+	// the run.sh scenario within it, such as instance-killed. Both are
+	// empty when the runner is started by hand.
+	Run   string `json:"run,omitempty"`
+	Label string `json:"label,omitempty"`
+
 	Started  time.Time `json:"started"`
 	Finished time.Time `json:"finished"`
 	Passed   bool      `json:"passed"`
@@ -207,22 +213,22 @@ func milliseconds(duration time.Duration) float64 {
 	return math.Round(float64(duration.Microseconds())) / 1000
 }
 
-// write saves the report in directory, named after its start time and
-// scenario, and returns the file's path.
+// write saves the report in a folder of directory named after the day it
+// started, as HHMMSSZ-<scenario>.json, and returns the file's path.
 func (report *Report) write(directory string) (string, error) {
-	if err := os.MkdirAll(directory, 0o750); err != nil {
+	day := filepath.Join(directory, report.Started.Format(time.DateOnly))
+	if err := os.MkdirAll(day, 0o755); err != nil { //nolint:gosec // Reports are meant to be read, and committed.
 		return "", err
 	}
 
-	name := report.Started.Format("2006-01-02T150405Z") + "-" + report.Scenario + ".json"
-	path := filepath.Join(directory, name)
+	path := filepath.Join(day, report.Started.Format("150405Z")+"-"+report.Scenario+".json")
 
 	encoded, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
 		return "", err
 	}
 
-	return path, os.WriteFile(path, append(encoded, '\n'), 0o600)
+	return path, os.WriteFile(path, append(encoded, '\n'), 0o644) //nolint:gosec // As above.
 }
 
 // print writes a short human summary: each step, then the request counts.

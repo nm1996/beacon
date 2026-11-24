@@ -27,7 +27,8 @@ docker compose -f simulation/compose.yaml stop orders-1   # logs "unregistered"
 ```
 
 Then run a scenario. The runner prints each check and writes a JSON report
-to `simulation/reports/`, and exits non-zero if a check failed:
+to that day's folder in `simulation/reports/`, and exits non-zero if a
+check failed:
 
 ```sh
 RUNNER_UID=$(id -u) RUNNER_GID=$(id -g) \
@@ -67,7 +68,7 @@ The load profiles are not in the default list, since each runs for five
 minutes; name them, as in `LOAD_DURATION=2m simulation/run.sh load-large`.
 Their instances, of a service called `catalog`, all run in one container,
 each on its own port from 9000, with its own Lease. `run.sh` samples
-`docker stats` every 10s into the reports directory while they run.
+`docker stats` every 10s into the day's reports folder while they run.
 
 Authentication is off unless `BEACON_SIM_AUTH=true` is set for every
 Compose command; leave it unset, not `false`, to keep it off. `ownership`
@@ -164,8 +165,7 @@ runner ──► each instance's /work, picked through client.Resolver
   stable DNS name to register.
 - **runner**: a Go command, run with `docker compose run --rm runner -scenario <name>`.
   It writes a JSON report to `simulation/reports/`, which is mounted into
-  it and ignored by Git, prints a summary, and exits non-zero when a
-  check fails.
+  it, prints a summary, and exits non-zero when a check fails.
 - **run.sh**: drives the failure steps from the host with `docker compose
   stop`, `kill` and `start`, and calls the runner before and after each
   step.
@@ -342,11 +342,38 @@ memory two nodes need for 100 instances.
 
 ## Reports
 
-One JSON file per run, such as `simulation/reports/2026-11-24T180000Z-normal.json`,
-with the scenario, start and end time, the endpoints used, the instances
-expected and seen, every step with its result and timing, request and error
-totals, latency percentiles, recovery times, metric snapshots from both
-nodes before and after, and the overall result. No tokens.
+Reports are kept in Git, so anyone can read what a run found. Start with
+[reports/README.md](reports/README.md), which lists every day with its
+counts; each day's folder has a `README.md` with a table per `run.sh` run
+(when each check started, the `run.sh` scenario it belonged to, the
+result, what it measured and how long it took), the failed steps with
+their reasons, and the peak CPU and memory of every container during the
+load profiles.
+
+```text
+simulation/reports/
+├── README.md                  index of the days
+└── 2026-11-24/
+    ├── README.md              that day's runs
+    ├── 211910Z-gone.json      one report per runner check
+    └── 212701Z-load-100-stats.jsonl
+```
+
+Each JSON report holds the scenario, the `run.sh` run and scenario it
+belongs to, start and end time, the endpoints used, the instances expected
+and seen, every step with its result and timing, request and error totals,
+latency percentiles, recovery times, calls by instance, metric snapshots
+from both nodes before and after, and the overall result. No tokens.
+
+`run.sh` writes the summaries at the end of every run. To write them again
+by hand, for example after deleting a day:
+
+```sh
+docker compose -f simulation/compose.yaml run --rm --no-deps runner -summarize
+```
+
+Commit the reports of a run worth keeping, such as one that found or
+confirmed a bug, with the change it belongs to.
 
 ## What counts as done
 
