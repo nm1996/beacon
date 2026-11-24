@@ -34,12 +34,21 @@ const chunkSize = 1000
 // registered anew under the same ID by another owner is noticed.
 const recheckAfter = time.Minute
 
+// Heartbeat is one buffered heartbeat: the instance, its time, and the
+// owner check of the caller that sent it.
+type Heartbeat struct {
+	ID    string
+	At    time.Time
+	Check discovery.OwnerCheck
+}
+
 // Writer writes many heartbeats at once. The PostgreSQL backend is one.
 type Writer interface {
 	// TouchMany sets the LastHeartbeat of every instance in heartbeats to
-	// its time, unless it already holds a later one, and returns the IDs
-	// of the instances that no longer exist.
-	TouchMany(ctx context.Context, heartbeats map[string]time.Time) ([]string, error)
+	// its time, unless it already holds a later one, applying each owner
+	// check, and returns the IDs it did not change: instances that no
+	// longer exist, or whose owner the check refuses.
+	TouchMany(ctx context.Context, heartbeats []Heartbeat) ([]string, error)
 }
 
 // known is an instance a heartbeat has been checked against.
@@ -60,7 +69,7 @@ type Registry struct {
 
 	mu      sync.Mutex
 	known   map[string]known
-	pending map[string]time.Time
+	pending map[string]Heartbeat
 }
 
 var _ discovery.Registry = (*Registry)(nil)
@@ -74,7 +83,7 @@ func New(registry discovery.Registry, writer Writer, interval time.Duration, log
 		interval: interval,
 		logger:   logger,
 		known:    make(map[string]known),
-		pending:  make(map[string]time.Time),
+		pending:  make(map[string]Heartbeat),
 	}
 }
 
@@ -91,8 +100,8 @@ func (registry *Registry) Touch(ctx context.Context, id string, at time.Time, ch
 			return discovery.ErrInstanceNotOwned
 		}
 
-		if at.After(registry.pending[id]) {
-			registry.pending[id] = at
+		if at.After(registry.pending[id].At) {
+			registry.pending[id] = Heartbeat{ID: id, At: at, Check: check}
 		}
 
 		return nil
@@ -148,15 +157,24 @@ func (registry *Registry) forget(id string) {
 }
 
 // Flush writes every buffered heartbeat, chunkSize at a time, and forgets
-// the instances the writes found gone. Heartbeats of a chunk that fails
-// are kept for the next flush, unless a newer one arrived meanwhile.
+// the instances the writes did not change, gone or owned by someone else,
+// so their next heartbeat is checked with the registry. Heartbeats of a
+// chunk that fails are kept for the next flush, unless a newer one arrived
+// meanwhile. It also forgets instances checked too long ago, which keeps
+// the memory bound to the instances heartbeating through this node.
 func (registry *Registry) Flush(ctx context.Context) error {
 	registry.mu.Lock()
 	pending := registry.pending
-	registry.pending = make(map[string]time.Time, len(pending))
+	registry.pending = make(map[string]Heartbeat, len(pending))
+
+	for id, instance := range registry.known {
+		if time.Since(instance.checkedAt) >= recheckAfter {
+			delete(registry.known, id)
+		}
+	}
 	registry.mu.Unlock()
 
-	chunk := make(map[string]time.Time, min(len(pending), chunkSize))
+	chunk := make([]Heartbeat, 0, min(len(pending), chunkSize))
 
 	var firstErr error
 
@@ -174,11 +192,11 @@ func (registry *Registry) Flush(ctx context.Context) error {
 			registry.forget(id)
 		}
 
-		chunk = make(map[string]time.Time, chunkSize)
+		chunk = make([]Heartbeat, 0, chunkSize)
 	}
 
-	for id, at := range pending {
-		chunk[id] = at
+	for _, heartbeat := range pending {
+		chunk = append(chunk, heartbeat)
 		if len(chunk) == chunkSize {
 			write()
 		}
@@ -193,13 +211,13 @@ func (registry *Registry) Flush(ctx context.Context) error {
 
 // requeue puts heartbeats back to be written next time, keeping any newer
 // one that arrived meanwhile.
-func (registry *Registry) requeue(heartbeats map[string]time.Time) {
+func (registry *Registry) requeue(heartbeats []Heartbeat) {
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
 
-	for id, at := range heartbeats {
-		if at.After(registry.pending[id]) {
-			registry.pending[id] = at
+	for _, heartbeat := range heartbeats {
+		if heartbeat.At.After(registry.pending[heartbeat.ID].At) {
+			registry.pending[heartbeat.ID] = heartbeat
 		}
 	}
 }

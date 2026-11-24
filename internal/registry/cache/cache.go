@@ -22,9 +22,12 @@ import (
 // changes through other nodes show within the TTL.
 //
 // Heartbeats do not clear it, or a busy registry would never hit. A cached
-// LastHeartbeat may therefore be up to the TTL old, which is why the TTL
-// must stay well below the time between heartbeats; config enforces at most
-// a third of the service TTL.
+// LastHeartbeat may therefore be up to the TTL old, which is why config
+// keeps the TTL, together with any delay in writing heartbeats, within a
+// third of the service TTL.
+//
+// It holds at most maxEntries names; beyond that, expired entries are
+// dropped, and if that is not enough, everything.
 type Registry struct {
 	discovery.Registry
 
@@ -32,7 +35,14 @@ type Registry struct {
 
 	mu      sync.Mutex
 	entries map[string]entry
+	// generation counts the clears, so a lookup that started before one
+	// does not store what it read.
+	generation uint64
 }
+
+// maxEntries is the most names the cache holds, so lookups of ever new
+// names cannot grow it without bound.
+const maxEntries = 10_000
 
 // entry is every instance of one name, sorted by ID, as fetched at
 // fetchedAt.
@@ -86,6 +96,7 @@ func (registry *Registry) instances(ctx context.Context, name string) ([]discove
 
 	registry.mu.Lock()
 	cached, ok := registry.entries[name]
+	generation := registry.generation
 	registry.mu.Unlock()
 
 	if ok && now.Sub(cached.fetchedAt) < registry.ttl {
@@ -100,16 +111,42 @@ func (registry *Registry) instances(ctx context.Context, name string) ([]discove
 	fetched = slices.Clip(fetched)
 
 	registry.mu.Lock()
+	defer registry.mu.Unlock()
+
+	// A create or delete since the lookup started may not be in what it
+	// read: answer with it, but do not keep it.
+	if registry.generation != generation {
+		return fetched, nil
+	}
+
+	if len(registry.entries) >= maxEntries {
+		registry.evict(now)
+	}
+
 	registry.entries[name] = entry{instances: fetched, fetchedAt: now}
-	registry.mu.Unlock()
 
 	return fetched, nil
 }
 
-// clear forgets every cached lookup.
+// evict drops the entries that have expired by now, or every entry if none
+// has. The caller holds mu.
+func (registry *Registry) evict(now time.Time) {
+	for name, cached := range registry.entries {
+		if now.Sub(cached.fetchedAt) >= registry.ttl {
+			delete(registry.entries, name)
+		}
+	}
+
+	if len(registry.entries) >= maxEntries {
+		clear(registry.entries)
+	}
+}
+
+// clear forgets every cached lookup, including any being fetched.
 func (registry *Registry) clear() {
 	registry.mu.Lock()
 	clear(registry.entries)
+	registry.generation++
 	registry.mu.Unlock()
 }
 

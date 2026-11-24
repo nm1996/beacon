@@ -7,12 +7,13 @@ import (
 	"time"
 
 	"github.com/nm1996/beacon/internal/discovery"
+	"github.com/nm1996/beacon/internal/registry/heartbeats"
 	"github.com/nm1996/beacon/internal/registry/postgres/postgrestest"
 	"github.com/nm1996/beacon/internal/registry/registrytest"
 )
 
 // openEmpty opens a registry in a schema of its own.
-func openEmpty(t *testing.T) *Registry {
+func openEmpty(t *testing.T) *PostgresRegistry {
 	t.Helper()
 
 	registry, err := Open(t.Context(), postgrestest.URL(t))
@@ -96,10 +97,12 @@ func TestTouchManyWritesHeartbeatsInOneStatement(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	missing, err := registry.TouchMany(ctx, map[string]time.Time{
-		"a":    start.Add(time.Minute),
-		"b":    start.Add(time.Minute),
-		"gone": start.Add(time.Minute),
+	anyOwner := discovery.OwnerCheck{Any: true}
+
+	missing, err := registry.TouchMany(ctx, []heartbeats.Heartbeat{
+		{ID: "a", At: start.Add(time.Minute), Check: anyOwner},
+		{ID: "b", At: start.Add(time.Minute), Check: anyOwner},
+		{ID: "gone", At: start.Add(time.Minute), Check: anyOwner},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -114,5 +117,31 @@ func TestTouchManyWritesHeartbeatsInOneStatement(t *testing.T) {
 		if err != nil || !instance.LastHeartbeat.Equal(want) {
 			t.Errorf("%s: expected last heartbeat %s, got %s, %v", id, want, instance.LastHeartbeat, err)
 		}
+	}
+}
+
+func TestTouchManyChecksTheOwner(t *testing.T) {
+	registry := openEmpty(t)
+	ctx := t.Context()
+	start := time.Now().UTC().Truncate(time.Microsecond)
+
+	instance := discovery.Instance{ID: "pod-1", Name: "orders", Address: "10.0.0.1", Port: 8081, Owner: "bob", RegisteredAt: start, LastHeartbeat: start}
+	if err := registry.Create(ctx, instance, discovery.Limits{Total: 10}); err != nil {
+		t.Fatal(err)
+	}
+
+	unchanged, err := registry.TouchMany(ctx, []heartbeats.Heartbeat{
+		{ID: "pod-1", At: start.Add(time.Minute), Check: discovery.OwnerCheck{Owner: "alice"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(unchanged) != 1 {
+		t.Errorf("expected alice's heartbeat for bob's instance to be refused, got %v", unchanged)
+	}
+
+	if stored, _ := registry.Get(ctx, "pod-1"); !stored.LastHeartbeat.Equal(start) {
+		t.Errorf("expected bob's instance untouched, got %s", stored.LastHeartbeat)
 	}
 }

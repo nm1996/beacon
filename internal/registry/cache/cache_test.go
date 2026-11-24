@@ -169,3 +169,71 @@ func TestZeroTTLTurnsTheCacheOff(t *testing.T) {
 		t.Error("expected the backend itself without a TTL")
 	}
 }
+
+// slowRegistry's first List reads at once but returns only once release
+// is closed, as a slow query whose result is out of date by then.
+type slowRegistry struct {
+	discovery.Registry
+	started chan struct{}
+	release chan struct{}
+	calls   atomic.Int32
+}
+
+// List reads, and on the first call holds the result until release.
+func (registry *slowRegistry) List(ctx context.Context, query discovery.ListQuery) ([]discovery.Instance, error) {
+	instances, err := registry.Registry.List(ctx, query)
+
+	if registry.calls.Add(1) == 1 {
+		close(registry.started)
+		<-registry.release
+	}
+
+	return instances, err
+}
+
+func TestALookupInFlightDuringADeleteIsNotCached(t *testing.T) {
+	backend := memory.New()
+	create(t, backend, "a")
+
+	slow := &slowRegistry{Registry: backend, started: make(chan struct{}), release: make(chan struct{})}
+	cached := New(slow, time.Hour).(*Registry)
+	ctx := t.Context()
+
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		// Reads "a" before the delete below, returns after it.
+		_, _ = cached.List(ctx, discovery.ListQuery{Name: "orders"})
+	}()
+
+	<-slow.started
+
+	if err := cached.Delete(ctx, "a", discovery.OwnerCheck{Any: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	close(slow.release)
+	<-done
+
+	if got, _ := cached.List(ctx, discovery.ListQuery{Name: "orders"}); len(got) != 0 {
+		t.Errorf("expected the lookup that raced the delete not to be cached, got %s", ids(got))
+	}
+}
+
+func TestTheCacheHoldsABoundedNumberOfNames(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cached, _ := fixture(t, time.Second)
+
+		for index := range maxEntries + 10 {
+			if _, err := cached.List(t.Context(), discovery.ListQuery{Name: fmt.Sprintf("probe-%d", index)}); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		if got := len(cached.entries); got > maxEntries {
+			t.Errorf("expected at most %d names cached, got %d", maxEntries, got)
+		}
+	})
+}

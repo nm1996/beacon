@@ -359,3 +359,18 @@ func TestHeartbeatFlushIntervalOnlyMattersForPostgres(t *testing.T) {
 		t.Errorf("expected a short TTL to be fine with the memory backend, got %v", err)
 	}
 }
+
+func TestCacheAndFlushDelaysTogetherFitTheTTL(t *testing.T) {
+	settings := Default()
+	settings.Storage = StorageConfig{Backend: StoragePostgres, Postgres: PostgresConfig{URL: "postgres://beacon@db/beacon", HeartbeatFlushInterval: 5 * time.Second}}
+
+	settings.Registry.CacheTTL = 5 * time.Second
+	if err := settings.Validate(); err != nil {
+		t.Errorf("expected 5s + 5s within a 30s TTL to be fine, got %v", err)
+	}
+
+	settings.Registry.CacheTTL = 6 * time.Second
+	if err := settings.Validate(); err == nil || !strings.Contains(err.Error(), "together must be at most") {
+		t.Errorf("expected 6s + 5s to be refused, got %v", err)
+	}
+}

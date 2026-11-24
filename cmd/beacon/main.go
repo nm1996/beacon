@@ -131,11 +131,22 @@ func run(settings config.Config, logger *slog.Logger) error {
 	}()
 
 	if batched := components.Heartbeats; batched != nil {
-		// Stopped with the other workers after the server, so its last
-		// flush writes every heartbeat the server accepted.
-		workers.Go(func() {
-			batched.Run(workerCtx)
-		})
+		// Its own context, cancelled only when run returns, after the
+		// servers have stopped: its last flush then writes every heartbeat
+		// they accepted, including those of the shutdown drain. Deferred
+		// after components.Close, so it runs before it.
+		flushCtx, stopFlushing := context.WithCancel(context.WithoutCancel(ctx))
+		flushed := make(chan struct{})
+
+		go func() {
+			defer close(flushed)
+			batched.Run(flushCtx)
+		}()
+
+		defer func() {
+			stopFlushing()
+			<-flushed
+		}()
 	}
 
 	workers.Go(func() {

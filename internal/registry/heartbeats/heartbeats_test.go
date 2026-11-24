@@ -24,8 +24,9 @@ type memoryWriter struct {
 	fail    error
 }
 
-// TouchMany touches each instance and reports those not found.
-func (writer *memoryWriter) TouchMany(ctx context.Context, heartbeats map[string]time.Time) ([]string, error) {
+// TouchMany touches each instance with its owner check and reports those
+// it did not change.
+func (writer *memoryWriter) TouchMany(ctx context.Context, heartbeats []Heartbeat) ([]string, error) {
 	writer.mu.Lock()
 	defer writer.mu.Unlock()
 
@@ -35,15 +36,15 @@ func (writer *memoryWriter) TouchMany(ctx context.Context, heartbeats map[string
 
 	writer.batches = append(writer.batches, len(heartbeats))
 
-	var missing []string
+	var unchanged []string
 
-	for id, at := range heartbeats {
-		if err := writer.registry.Touch(ctx, id, at, discovery.OwnerCheck{Any: true}); errors.Is(err, discovery.ErrInstanceNotFound) {
-			missing = append(missing, id)
+	for _, heartbeat := range heartbeats {
+		if err := writer.registry.Touch(ctx, heartbeat.ID, heartbeat.At, heartbeat.Check); err != nil {
+			unchanged = append(unchanged, heartbeat.ID)
 		}
 	}
 
-	return missing, nil
+	return unchanged, nil
 }
 
 // fixture returns a batching registry over a memory registry holding one
@@ -335,6 +336,65 @@ func TestRunFlushesOnAnIntervalAndOnStop(t *testing.T) {
 
 		if !lastHeartbeat(t, backend, "a").Equal(last) {
 			t.Errorf("expected stopping to write what was buffered, batches %v", writer.batches)
+		}
+	})
+}
+
+func TestAnIDTakenOverElsewhereIsNoticedAtTheNextFlush(t *testing.T) {
+	batched, backend, _ := fixture(t)
+	ctx := t.Context()
+
+	if err := batched.Touch(ctx, "a", time.Now(), alice); err != nil {
+		t.Fatal(err)
+	}
+
+	// Through another node, alice's instance goes and bob registers the
+	// same ID.
+	if err := backend.Delete(ctx, "a", discovery.OwnerCheck{Any: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	create(t, backend, "a", "bob")
+
+	before := lastHeartbeat(t, backend, "a")
+
+	if err := batched.Touch(ctx, "a", time.Now().Add(time.Minute), alice); err != nil {
+		t.Fatalf("expected the buffer to take it until the next flush, got %v", err)
+	}
+
+	if err := batched.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	if !lastHeartbeat(t, backend, "a").Equal(before) {
+		t.Error("expected alice's buffered heartbeat not to keep bob's instance alive")
+	}
+
+	if err := batched.Touch(ctx, "a", time.Now(), alice); !errors.Is(err, discovery.ErrInstanceNotOwned) {
+		t.Errorf("expected alice refused after the flush, got %v", err)
+	}
+}
+
+func TestOldEntriesAreForgottenOnFlush(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		batched, _, _ := fixture(t)
+
+		if err := batched.Touch(t.Context(), "a", time.Now(), alice); err != nil {
+			t.Fatal(err)
+		}
+
+		// The instance stops heartbeating; nothing removes it here.
+		time.Sleep(recheckAfter)
+
+		if err := batched.Flush(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+
+		batched.mu.Lock()
+		defer batched.mu.Unlock()
+
+		if len(batched.known) != 0 {
+			t.Errorf("expected an instance silent for %s to be forgotten, got %d known", recheckAfter, len(batched.known))
 		}
 	})
 }

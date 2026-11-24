@@ -380,6 +380,15 @@ func (config Config) Validate() error {
 		"storage.postgres.heartbeat_flush_interval must be between 0s (write each heartbeat) and a third of registry.service_ttl (%s), got %s",
 		config.Registry.ServiceTTL/3, flush)
 
+	// A lookup may show a heartbeat as old as the cache, plus the time it
+	// waited to be written, plus the time between heartbeats (a third of
+	// the TTL). Keep the sum within the TTL with room for jitter.
+	if config.Storage.Backend == StoragePostgres && flush > 0 {
+		check(config.Registry.CacheTTL+flush <= config.Registry.ServiceTTL/3,
+			"registry.cache_ttl (%s) and storage.postgres.heartbeat_flush_interval (%s) together must be at most a third of registry.service_ttl (%s), or live instances can look expired in lookups",
+			config.Registry.CacheTTL, flush, config.Registry.ServiceTTL/3)
+	}
+
 	_, levelErr := config.Logging.SlogLevel()
 	check(levelErr == nil, "logging.level must be debug, info, warn or error, got %q", config.Logging.Level)
 	check(config.Logging.Format == "json" || config.Logging.Format == "text",

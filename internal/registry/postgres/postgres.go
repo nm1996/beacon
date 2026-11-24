@@ -23,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/nm1996/beacon/internal/discovery"
+	"github.com/nm1996/beacon/internal/registry/heartbeats"
 )
 
 // Advisory lock keys. They only have to differ from other users of the
@@ -37,20 +38,22 @@ const (
 //go:embed migrations/*.sql
 var migrations embed.FS
 
-// Registry stores instances in PostgreSQL. Use Open to create one, and
-// Close it when done. It is safe for concurrent use.
-type Registry struct {
+// PostgresRegistry stores instances in PostgreSQL. Use Open to create one,
+// and Close it when done. It is safe for concurrent use.
+//
+// The name repeats the package on purpose, as memory.MemoryRegistry's does.
+type PostgresRegistry struct { //nolint:revive // stutter accepted for clarity, as for memory.MemoryRegistry
 	pool *pgxpool.Pool
 }
 
-var _ discovery.Registry = (*Registry)(nil)
+var _ discovery.Registry = (*PostgresRegistry)(nil)
 
 // Open connects to the database at url, a PostgreSQL connection string
 // such as "postgres://beacon@db:5432/beacon", whose parameters include
 // pgx's pool settings such as pool_max_conns. It applies any migrations
 // not applied yet, under a lock so that nodes starting together apply each
 // once, and fails if the database cannot be reached.
-func Open(ctx context.Context, url string) (*Registry, error) {
+func Open(ctx context.Context, url string) (*PostgresRegistry, error) {
 	pool, err := pgxpool.New(ctx, url)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: %w", err)
@@ -66,11 +69,11 @@ func Open(ctx context.Context, url string) (*Registry, error) {
 		return nil, err
 	}
 
-	return &Registry{pool: pool}, nil
+	return &PostgresRegistry{pool: pool}, nil
 }
 
 // Close closes every connection.
-func (registry *Registry) Close() {
+func (registry *PostgresRegistry) Close() {
 	registry.pool.Close()
 }
 
@@ -178,7 +181,7 @@ func scanInstance(row pgx.Row) (discovery.Instance, error) {
 
 // Create stores instance unless its ID is taken or that would break
 // limits, checking and inserting under the Beacon-wide create lock.
-func (registry *Registry) Create(ctx context.Context, instance discovery.Instance, limits discovery.Limits) error {
+func (registry *PostgresRegistry) Create(ctx context.Context, instance discovery.Instance, limits discovery.Limits) error {
 	err := pgx.BeginFunc(ctx, registry.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", createLock); err != nil {
 			return err
@@ -227,7 +230,7 @@ func (registry *Registry) Create(ctx context.Context, instance discovery.Instanc
 
 // Touch sets the LastHeartbeat of the instance with id, if check allows it,
 // in one statement.
-func (registry *Registry) Touch(ctx context.Context, id string, at time.Time, check discovery.OwnerCheck) error {
+func (registry *PostgresRegistry) Touch(ctx context.Context, id string, at time.Time, check discovery.OwnerCheck) error {
 	tag, err := registry.pool.Exec(ctx,
 		"UPDATE beacon_instances SET last_heartbeat = $2 WHERE id = $1 AND ($3 OR owner = '' OR owner = $4)",
 		id, at, check.Any, check.Owner)
@@ -244,7 +247,7 @@ func (registry *Registry) Touch(ctx context.Context, id string, at time.Time, ch
 
 // Delete removes the instance with id, if check allows it, in one
 // statement.
-func (registry *Registry) Delete(ctx context.Context, id string, check discovery.OwnerCheck) error {
+func (registry *PostgresRegistry) Delete(ctx context.Context, id string, check discovery.OwnerCheck) error {
 	tag, err := registry.pool.Exec(ctx,
 		"DELETE FROM beacon_instances WHERE id = $1 AND ($2 OR owner = '' OR owner = $3)",
 		id, check.Any, check.Owner)
@@ -261,7 +264,7 @@ func (registry *Registry) Delete(ctx context.Context, id string, check discovery
 
 // missing explains why a guarded change to id affected no row: the
 // instance does not exist, or check refused it.
-func (registry *Registry) missing(ctx context.Context, id string) error {
+func (registry *PostgresRegistry) missing(ctx context.Context, id string) error {
 	var exists bool
 	if err := registry.pool.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM beacon_instances WHERE id = $1)", id).Scan(&exists); err != nil {
 		return fmt.Errorf("postgres: look up %s: %w", id, err)
@@ -276,7 +279,7 @@ func (registry *Registry) missing(ctx context.Context, id string) error {
 
 // List returns the instances query selects, sorted by ID. The database
 // applies the filters and the limit, using the index on name and ID.
-func (registry *Registry) List(ctx context.Context, query discovery.ListQuery) ([]discovery.Instance, error) {
+func (registry *PostgresRegistry) List(ctx context.Context, query discovery.ListQuery) ([]discovery.Instance, error) {
 	var limit any
 	if query.Limit > 0 {
 		limit = query.Limit
@@ -306,7 +309,7 @@ func (registry *Registry) List(ctx context.Context, query discovery.ListQuery) (
 }
 
 // Get returns the instance with id.
-func (registry *Registry) Get(ctx context.Context, id string) (discovery.Instance, error) {
+func (registry *PostgresRegistry) Get(ctx context.Context, id string) (discovery.Instance, error) {
 	instance, err := scanInstance(registry.pool.QueryRow(ctx, "SELECT "+instanceColumns+" FROM beacon_instances WHERE id = $1", id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return discovery.Instance{}, discovery.ErrInstanceNotFound
@@ -321,7 +324,7 @@ func (registry *Registry) Get(ctx context.Context, id string) (discovery.Instanc
 
 // DeleteStale removes every instance whose last heartbeat is before
 // cutoff. Several nodes may run it at once; each instance is removed once.
-func (registry *Registry) DeleteStale(ctx context.Context, cutoff time.Time) (int, error) {
+func (registry *PostgresRegistry) DeleteStale(ctx context.Context, cutoff time.Time) (int, error) {
 	tag, err := registry.pool.Exec(ctx, "DELETE FROM beacon_instances WHERE last_heartbeat < $1", cutoff)
 	if err != nil {
 		return 0, fmt.Errorf("postgres: delete stale: %w", err)
@@ -331,22 +334,28 @@ func (registry *Registry) DeleteStale(ctx context.Context, cutoff time.Time) (in
 }
 
 // TouchMany sets the last heartbeat of every instance in heartbeats in one
-// statement, keeping a later one if it holds it, and returns the IDs of the
-// instances that no longer exist.
-func (registry *Registry) TouchMany(ctx context.Context, heartbeats map[string]time.Time) ([]string, error) {
+// statement, keeping a later one if it holds it and applying each owner
+// check, and returns the IDs it did not change: instances that no longer
+// exist, or that another owner now holds.
+func (registry *PostgresRegistry) TouchMany(ctx context.Context, heartbeats []heartbeats.Heartbeat) ([]string, error) {
 	ids := make([]string, 0, len(heartbeats))
 	times := make([]time.Time, 0, len(heartbeats))
+	owners := make([]string, 0, len(heartbeats))
+	anyOwner := make([]bool, 0, len(heartbeats))
 
-	for id, at := range heartbeats {
-		ids = append(ids, id)
-		times = append(times, at)
+	for _, heartbeat := range heartbeats {
+		ids = append(ids, heartbeat.ID)
+		times = append(times, heartbeat.At)
+		owners = append(owners, heartbeat.Check.Owner)
+		anyOwner = append(anyOwner, heartbeat.Check.Any)
 	}
 
 	rows, err := registry.pool.Query(ctx, `UPDATE beacon_instances AS instance
 		SET last_heartbeat = GREATEST(instance.last_heartbeat, heartbeat.at)
-		FROM unnest($1::text[], $2::timestamptz[]) AS heartbeat(id, at)
+		FROM unnest($1::text[], $2::timestamptz[], $3::text[], $4::boolean[]) AS heartbeat(id, at, owner, any_owner)
 		WHERE instance.id = heartbeat.id
-		RETURNING instance.id`, ids, times)
+			AND (heartbeat.any_owner OR instance.owner = '' OR instance.owner = heartbeat.owner)
+		RETURNING instance.id`, ids, times, owners, anyOwner)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: touch many: %w", err)
 	}
@@ -356,18 +365,18 @@ func (registry *Registry) TouchMany(ctx context.Context, heartbeats map[string]t
 		return nil, fmt.Errorf("postgres: touch many: %w", err)
 	}
 
-	found := make(map[string]bool, len(touched))
+	changed := make(map[string]bool, len(touched))
 	for _, id := range touched {
-		found[id] = true
+		changed[id] = true
 	}
 
-	var missing []string
+	var unchanged []string
 
 	for _, id := range ids {
-		if !found[id] {
-			missing = append(missing, id)
+		if !changed[id] {
+			unchanged = append(unchanged, id)
 		}
 	}
 
-	return missing, nil
+	return unchanged, nil
 }
