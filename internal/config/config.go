@@ -32,6 +32,7 @@ type Config struct {
 	Registry  RegistryConfig  `toml:"registry"`
 	Storage   StorageConfig   `toml:"storage"`
 	RateLimit RateLimitConfig `toml:"rate_limit"`
+	GRPC      GRPCConfig      `toml:"grpc"`
 	Metrics   MetricsConfig   `toml:"metrics"`
 	Logging   LoggingConfig   `toml:"logging"`
 }
@@ -203,6 +204,14 @@ type RateLimitConfig struct {
 	AuthFailureBurst int `toml:"auth_failure_burst"`
 }
 
+// GRPCConfig controls the gRPC API.
+type GRPCConfig struct {
+	// Port is the TCP port of the gRPC API, on server.host; zero, the
+	// default, turns it off. It uses the same TLS, authentication and rate
+	// limits as the HTTP API.
+	Port int `toml:"port"`
+}
+
 // MetricsConfig controls the Prometheus endpoint.
 type MetricsConfig struct {
 	// Enabled serves Prometheus metrics at GET /metrics on the API port.
@@ -316,6 +325,8 @@ func (config Config) Validate() error {
 
 	server := config.Server
 	check(server.Port >= 1 && server.Port <= 65535, "server.port must be between 1 and 65535, got %d", server.Port)
+	check(config.GRPC.Port >= 0 && config.GRPC.Port <= 65535, "grpc.port must be 0 (off) or between 1 and 65535, got %d", config.GRPC.Port)
+	check(config.GRPC.Port == 0 || config.GRPC.Port != server.Port, "grpc.port must differ from server.port, both are %d", server.Port)
 	check(server.ReadTimeout > 0, "server.read_timeout must be positive, got %s", server.ReadTimeout)
 	check(server.WriteTimeout > 0, "server.write_timeout must be positive, got %s", server.WriteTimeout)
 	check(server.IdleTimeout > 0, "server.idle_timeout must be positive, got %s", server.IdleTimeout)

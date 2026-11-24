@@ -22,7 +22,7 @@ Many service fleets speak gRPC internally and want typed, generated clients in s
 - **Server:** in `internal/grpcapi`, on its own port, `grpc.port`, default `0` = off. It has the same TLS and client certificate settings and uses `google.golang.org/grpc`.
 - **Same rules:**
   - Authentication reads `authorization: Bearer <token>` metadata or the verified peer certificate, through the same `auth` identities, permissions and reloads as HTTP.
-  - The auth core moves out of the HTTP Guard into a transport-neutral function both transports call, together with the failed-authentication limit.
+  - The gRPC interceptor applies the same rules as the HTTP Guard, with the same identities, failed-authentication limiter and failure reasons. (Implementation note: the identify-and-reserve steps are mirrored in `internal/grpcapi` rather than extracted into a shared function; extracting them is a follow-up once a third transport would need them.)
   - Registration rate limits are the same limiter instances, so a client cannot double its budget by switching transports.
 - **Errors:** canonical status codes:
 

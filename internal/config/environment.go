@@ -29,6 +29,7 @@ func environmentVariables(config *Config) []environmentVariable {
 		{name: "BEACON_SERVER_RELOAD_INTERVAL", apply: setDuration(&config.Server.ReloadInterval)},
 		{name: "BEACON_SERVER_TRUSTED_PROXIES", apply: setList(&config.Server.TrustedProxies)},
 		{name: "BEACON_SERVER_NODE_ID", apply: setString(&config.Server.NodeID)},
+		{name: "BEACON_GRPC_PORT", apply: setInt(&config.GRPC.Port)},
 		{name: "BEACON_TLS_CERT_FILE", apply: setString(&config.TLS.CertFile)},
 		{name: "BEACON_TLS_KEY_FILE", apply: setString(&config.TLS.KeyFile)},
 		{name: "BEACON_TLS_CLIENT_CA_FILE", apply: setString(&config.TLS.ClientCAFile)},

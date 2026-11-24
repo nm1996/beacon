@@ -9,10 +9,16 @@ import (
 	"crypto/rand"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	grpccredentials "google.golang.org/grpc/credentials"
 
 	"github.com/nm1996/beacon/internal/api"
 	"github.com/nm1996/beacon/internal/auth"
@@ -20,6 +26,7 @@ import (
 	"github.com/nm1996/beacon/internal/config"
 	"github.com/nm1996/beacon/internal/credentials"
 	"github.com/nm1996/beacon/internal/discovery"
+	"github.com/nm1996/beacon/internal/grpcapi"
 	"github.com/nm1996/beacon/internal/metrics"
 	"github.com/nm1996/beacon/internal/ratelimit"
 	"github.com/nm1996/beacon/internal/registry/cache"
@@ -46,6 +53,12 @@ type Components struct {
 	// Heartbeats batches heartbeats for the storage backend, when it is
 	// PostgreSQL. The caller runs it until shutdown; it is nil otherwise.
 	Heartbeats *heartbeats.Registry
+
+	// GRPC serves the gRPC API, built but not started, on GRPCAddr. It is
+	// nil when grpc.port is 0.
+	GRPC     *grpc.Server
+	GRPCAddr string
+
 	// Membership records this node among those sharing the storage backend
 	// and divides the rate limits by their number. The caller joins it
 	// before serving and runs it until shutdown.
@@ -206,6 +219,11 @@ func New(settings config.Config, logger *slog.Logger, version string) (*Componen
 		server.TLSConfig = store.ServerTLSConfig()
 	}
 
+	var grpcServer *grpc.Server
+	if settings.GRPC.Port != 0 {
+		grpcServer = newGRPCServer(service, logger, store, settings, observer, failed, rateLimited, registrationLimit, failureLimit)
+	}
+
 	built = true
 
 	return &Components{
@@ -213,9 +231,50 @@ func New(settings config.Config, logger *slog.Logger, version string) (*Componen
 		Credentials: store,
 		Server:      server,
 		Heartbeats:  batched,
+		GRPC:        grpcServer,
+		GRPCAddr:    net.JoinHostPort(settings.Server.Host, strconv.Itoa(settings.GRPC.Port)),
 		Membership:  membership,
 		closers:     []func(){closeRegistry},
 	}, nil
+}
+
+// newGRPCServer builds the gRPC API over service with the HTTP API's
+// credentials, limiters and metrics, so both transports enforce one set of
+// rules and budgets.
+func newGRPCServer(
+	service *discovery.Service,
+	logger *slog.Logger,
+	store *credentials.Store,
+	settings config.Config,
+	observer *metrics.Metrics,
+	failed, rateLimited func(string),
+	registrationLimit, failureLimit *ratelimit.Limiter,
+) *grpc.Server {
+	config := grpcapi.Config{
+		RegistrationLimit: registrationLimit,
+		FailureLimit:      failureLimit,
+		RateLimited:       rateLimited,
+		AuthFailed:        failed,
+	}
+
+	if settings.Auth.Enabled {
+		config.Authenticator = store
+	}
+
+	if store != nil {
+		if tlsConfig := store.ServerTLSConfig(); tlsConfig != nil {
+			// NewTLS adds HTTP/2 to ALPN, per-handshake configs included.
+			config.TLS = grpccredentials.NewTLS(tlsConfig)
+		}
+	}
+
+	if observer != nil {
+		config.Observe = func(method string, code codes.Code, duration time.Duration) {
+			observer.GRPCCall(method, code.String(), duration)
+		}
+	}
+
+	return grpcapi.NewServer(service, logger, config)
 }
 
 // postgresOpenTimeout bounds connecting to PostgreSQL and migrating it at
