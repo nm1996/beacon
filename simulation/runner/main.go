@@ -36,6 +36,17 @@ type options struct {
 	timeout  time.Duration
 	rounds   int
 	token    string
+
+	// For the scenarios about one instance: which one, when it was
+	// killed, stopped or started, and how long the change may take.
+	service string
+	address string
+	since   time.Time
+	within  time.Duration
+	// oldID is the instance's ID before it was killed; back checks that it
+	// never returns. wantID is the ID it must come back with, if fixed.
+	oldID  string
+	wantID string
 }
 
 // scenario runs its steps against cluster, recording each in the report.
@@ -44,7 +55,12 @@ type scenario func(ctx context.Context, cluster *cluster, options options) error
 // scenarios maps each -scenario name to its implementation.
 var scenarios = map[string]scenario{
 	"normal": runNormal,
+	"gone":   runGone,
+	"back":   runBack,
 }
+
+// aboutOneInstance lists the scenarios that need -service and -address.
+var aboutOneInstance = []string{"gone", "back"}
 
 // main runs the scenario and exits 1 if it failed, 2 if it could not run.
 func main() {
@@ -112,6 +128,7 @@ func parseOptions(args []string) (options, error) {
 		parsed   options
 		nodes    string
 		expected string
+		since    string
 	)
 
 	flags.StringVar(&parsed.scenario, "scenario", "normal", "scenario to run: "+strings.Join(scenarioNames(), ", "))
@@ -121,6 +138,12 @@ func parseOptions(args []string) (options, error) {
 	flags.DurationVar(&parsed.timeout, "timeout", time.Minute, "how long to wait for the cluster to reach the expected state")
 	flags.IntVar(&parsed.rounds, "rounds", 20, "how many times to repeat each lookup and call, for latency")
 	flags.StringVar(&parsed.token, "token", os.Getenv("RUNNER_TOKEN"), "bearer token for Beacon; defaults to $RUNNER_TOKEN")
+	flags.StringVar(&parsed.service, "service", "", "gone, back: the service of the instance to watch")
+	flags.StringVar(&parsed.address, "address", "", "gone, back: the address of the instance to watch, such as orders-2, or host:port")
+	flags.StringVar(&since, "since", "", "gone, back: when the instance was killed, stopped or started, as Unix seconds or RFC 3339; empty is now")
+	flags.DurationVar(&parsed.within, "within", 9*time.Second, "gone, back: how long after -since the change may take")
+	flags.StringVar(&parsed.oldID, "old-id", "", "back: the ID the instance had before; it must not return")
+	flags.StringVar(&parsed.wantID, "want-id", "", "back: the ID the instance must come back with")
 
 	if err := flags.Parse(args); err != nil {
 		return options{}, err
@@ -140,8 +163,42 @@ func parseOptions(args []string) (options, error) {
 		return options{}, err
 	}
 
-	if parsed.rounds < 1 || parsed.timeout <= 0 {
-		return options{}, errors.New("-rounds and -timeout must be positive")
+	if parsed.rounds < 1 || parsed.timeout <= 0 || parsed.within <= 0 {
+		return options{}, errors.New("-rounds, -timeout and -within must be positive")
+	}
+
+	if parsed.since, err = parseSince(since); err != nil {
+		return options{}, err
+	}
+
+	if slices.Contains(aboutOneInstance, parsed.scenario) {
+		if parsed.service == "" || parsed.address == "" {
+			return options{}, fmt.Errorf("-scenario %s needs -service and -address", parsed.scenario)
+		}
+
+		if _, ok := parsed.expected[parsed.service]; !ok {
+			return options{}, fmt.Errorf("-service %s is not in -expect", parsed.service)
+		}
+	}
+
+	return parsed, nil
+}
+
+// parseSince parses -since: Unix seconds with an optional fraction, as
+// date +%s.%N prints them, or RFC 3339. Empty means now.
+func parseSince(value string) (time.Time, error) {
+	if value == "" {
+		return time.Now(), nil
+	}
+
+	if seconds, err := strconv.ParseFloat(value, 64); err == nil {
+		whole := int64(seconds)
+		return time.Unix(whole, int64((seconds-float64(whole))*float64(time.Second))), nil
+	}
+
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("-since %q is neither Unix seconds nor RFC 3339", value)
 	}
 
 	return parsed, nil

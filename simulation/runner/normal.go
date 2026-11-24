@@ -114,5 +114,5 @@ func (cluster *cluster) callOnce(ctx context.Context, instance client.Instance) 
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 
-	return cluster.work(ctx, instance)
+	return cluster.work(ctx, instance, "work")
 }

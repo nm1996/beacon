@@ -26,6 +26,8 @@ type Report struct {
 	Endpoints map[string]string `json:"endpoints"`
 	// Expected is how many instances of each service should be registered.
 	Expected map[string]int `json:"expected,omitempty"`
+	// Target is the instance a scenario about one instance watched.
+	Target *Target `json:"target,omitempty"`
 	// Seen is what each node returned for each service at the last look.
 	Seen map[string]map[string][]Seen `json:"seen,omitempty"`
 
@@ -36,6 +38,13 @@ type Report struct {
 
 	mu       sync.Mutex
 	requests map[string]*tally
+}
+
+// Target names the instance a scenario watched, with the ID it last had.
+type Target struct {
+	Service string `json:"service"`
+	Address string `json:"address"`
+	ID      string `json:"id,omitempty"`
 }
 
 // Seen is one instance as a node returned it.
@@ -239,7 +248,7 @@ func (report *Report) print(out io.Writer) {
 
 	for _, kind := range kinds {
 		summary := report.Requests[kind]
-		fmt.Fprintf(out, "  %-10s %5d requests, %d errors, p50 %.1fms p95 %.1fms p99 %.1fms\n",
+		fmt.Fprintf(out, "  %-26s %5d requests, %d errors, p50 %.1fms p95 %.1fms p99 %.1fms\n",
 			kind, summary.Total, summary.Errors, summary.P50, summary.P95, summary.P99)
 	}
 
@@ -252,5 +261,10 @@ func (report *Report) print(out io.Writer) {
 
 	if len(timings) > 0 {
 		fmt.Fprintln(out, "  timings: "+strings.Join(timings, " "))
+	}
+
+	// run.sh reads this line to pass the ID on to the next scenario.
+	if report.Target != nil && report.Target.ID != "" {
+		fmt.Fprintln(out, "  target id: "+report.Target.ID)
 	}
 }

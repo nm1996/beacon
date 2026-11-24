@@ -34,6 +34,26 @@ RUNNER_UID=$(id -u) RUNNER_GID=$(id -g) \
   docker compose -f simulation/compose.yaml run --rm runner -scenario normal
 ```
 
+The scenarios that stop, kill and start containers run from the host, with
+`run.sh`. It starts the project, runs scenario A before each of them, and
+leaves the project running:
+
+```sh
+simulation/run.sh                    # A, then B and D in their variants
+simulation/run.sh instance-killed    # one scenario
+```
+
+| `run.sh` scenario | Plan | Runner check |
+|---|---|---|
+| `normal` | A | `-scenario normal` |
+| `instance-killed` | B, killed | `-scenario gone -within 9s` |
+| `instance-stopped` | B, stopped | `-scenario gone -within 1s` |
+| `instance-back` | D | `gone`, then `back -old-id <its ID>` |
+| `instance-back-same-id` | D with `Registration.ID` | `back -want-id orders-2` |
+
+`run.sh` takes the time just before each step and passes it as `-since`;
+the containers share the host's clock.
+
 `--wait` returns once every health check passes. The ports are published on
 loopback only. `down --volumes` also deletes the database, so the next run
 starts clean.

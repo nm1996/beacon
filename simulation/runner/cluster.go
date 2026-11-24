@@ -109,13 +109,13 @@ type work struct {
 	Time       time.Time `json:"time"`
 }
 
-// work calls instance's GET /work and checks that the instance that
-// answered is the one Beacon returned.
-func (cluster *cluster) work(ctx context.Context, instance client.Instance) error {
+// work calls instance's GET /work, recording the request under kind, and
+// checks that the instance that answered is the one Beacon returned.
+func (cluster *cluster) work(ctx context.Context, instance client.Instance, kind string) error {
 	address := "http://" + net.JoinHostPort(instance.Address, strconv.Itoa(instance.Port)) + "/work"
 
 	var answered work
-	if err := cluster.getJSON(ctx, address, "work", &answered); err != nil {
+	if err := cluster.getJSON(ctx, address, kind, &answered); err != nil {
 		return err
 	}
 

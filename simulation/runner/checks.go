@@ -41,6 +41,14 @@ func (cluster *cluster) look(ctx context.Context, services []string) (view, erro
 	return seen, nil
 }
 
+// setTarget records the instance a scenario watches, and the ID it was
+// last seen with.
+func (cluster *cluster) setTarget(service, address, id string) {
+	cluster.report.mu.Lock()
+	cluster.report.Target = &Target{Service: service, Address: address, ID: id}
+	cluster.report.mu.Unlock()
+}
+
 // record stores seen in the report as the last look.
 func (cluster *cluster) record(seen view) {
 	recorded := map[string]map[string][]Seen{}
