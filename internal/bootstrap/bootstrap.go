@@ -100,16 +100,24 @@ func New(settings config.Config, logger *slog.Logger, version string) (*Componen
 		}
 	}()
 
-	// A backend that can write many heartbeats at once gets them batched.
-	var batched *heartbeats.Registry
-	if writer, ok := registry.(heartbeats.Writer); ok && settings.Storage.Postgres.HeartbeatFlushInterval > 0 {
-		batched = heartbeats.New(registry, writer, settings.Storage.Postgres.HeartbeatFlushInterval, logger)
-		registry = batched
-	}
-
 	var observer *metrics.Metrics
 	if settings.Metrics.Enabled {
 		observer = metrics.New(version)
+	}
+
+	// A backend that can write many heartbeats at once gets them batched.
+	var batched *heartbeats.Registry
+	if writer, ok := registry.(heartbeats.Writer); ok && settings.Storage.Postgres.HeartbeatFlushInterval > 0 {
+		var flushed func(result string)
+		if observer != nil {
+			flushed = observer.HeartbeatsFlushed
+		}
+
+		batched = heartbeats.New(registry, writer, settings.Storage.Postgres.HeartbeatFlushInterval, logger, flushed)
+		registry = batched
+	}
+
+	if observer != nil {
 		// Count instances straight from the backend, so scrapes do not show
 		// up in the registry operation metrics they report.
 		observer.WatchInstances(registry.List)

@@ -70,7 +70,8 @@ and the lookup cache are all off until configured. The Go client's
   statement per thousand instances. When no write has succeeded for two
   intervals, a process stops buffering and sends each heartbeat to the
   database, so it answers with an error instead of acknowledging heartbeats
-  it cannot store.
+  it cannot store. `beacon_heartbeat_flushes_total{result}` counts the
+  writes.
 - `registry.cache_ttl` (`BEACON_REGISTRY_CACHE_TTL`) caches lookup results
   in each process for up to a third of the service TTL; off by default.
 - Several nodes over one PostgreSQL database: each node records itself in
