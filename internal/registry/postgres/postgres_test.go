@@ -102,8 +102,9 @@ func TestNodesAreRecordedAndForgotten(t *testing.T) {
 		}
 	}
 
-	// Recording again updates rather than duplicates.
-	if err := registry.Beat(ctx, cluster.Node{ID: "a", Address: "10.0.0.9:8080", Version: "v0.3.1", StartedAt: now, LastSeen: now}); err != nil {
+	// Recording again updates rather than duplicates, start time included,
+	// as when a node restarts under the same ID.
+	if err := registry.Beat(ctx, cluster.Node{ID: "a", Address: "10.0.0.9:8080", Version: "v0.3.1", StartedAt: now.Add(time.Second), LastSeen: now}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -112,7 +113,8 @@ func TestNodesAreRecordedAndForgotten(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(live) != 2 || live[0].ID != "a" || live[0].Address != "10.0.0.9:8080" || live[1].ID != "b" || !live[1].LastSeen.Equal(now) {
+	if len(live) != 2 || live[0].ID != "a" || live[0].Address != "10.0.0.9:8080" || !live[0].StartedAt.Equal(now.Add(time.Second)) ||
+		live[1].ID != "b" || !live[1].LastSeen.Equal(now) {
 		t.Errorf("expected a, updated, and b, got %+v", live)
 	}
 

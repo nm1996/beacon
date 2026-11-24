@@ -336,11 +336,12 @@ func (registry *PostgresRegistry) DeleteStale(ctx context.Context, cutoff time.T
 
 var _ cluster.Store = (*PostgresRegistry)(nil)
 
-// Beat records node in beacon_nodes, adding it if it is new.
+// Beat records node in beacon_nodes, adding it if it is new. A node that
+// restarts under the same ID gets its new start time.
 func (registry *PostgresRegistry) Beat(ctx context.Context, node cluster.Node) error {
 	_, err := registry.pool.Exec(ctx, `INSERT INTO beacon_nodes (id, address, version, started_at, last_seen)
 		VALUES ($1, $2, $3, $4, $5)
-		ON CONFLICT (id) DO UPDATE SET address = $2, version = $3, last_seen = $5`,
+		ON CONFLICT (id) DO UPDATE SET address = $2, version = $3, started_at = $4, last_seen = $5`,
 		node.ID, node.Address, node.Version, node.StartedAt, node.LastSeen)
 	if err != nil {
 		return fmt.Errorf("postgres: record node %s: %w", node.ID, err)
