@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -46,18 +47,21 @@ func startBeacon(t *testing.T) string {
 	return server.URL
 }
 
-// startInstance registers an instance of service with Beacon, served by
-// a /work handler that answers with answerAs, or with its own ID when
-// answerAs is empty. It returns the registration.
-func startInstance(t *testing.T, beaconURL, service, answerAs string) client.Registration {
+// serveWork serves /work for an instance of service, answering with
+// answerAs, or, when answerAs is empty, with the ID passed to the returned
+// function once the instance is registered. It returns the registration
+// to make, without an ID.
+func serveWork(t *testing.T, service, answerAs string) (client.Registration, func(id string)) {
 	t.Helper()
 
-	var id string
+	var id atomic.Pointer[string]
 
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
-		answered := id
-		if answerAs != "" {
-			answered = answerAs
+		answered := answerAs
+		if answered == "" {
+			if current := id.Load(); current != nil {
+				answered = *current
+			}
 		}
 
 		_ = json.NewEncoder(writer).Encode(work{Service: service, InstanceID: answered, Time: time.Now()})
@@ -74,20 +78,30 @@ func startInstance(t *testing.T, beaconURL, service, answerAs string) client.Reg
 		t.Fatal(err)
 	}
 
+	return client.Registration{Name: service, Address: host, Port: portNumber}, func(registered string) { id.Store(&registered) }
+}
+
+// startInstance registers an instance of service with Beacon, served by
+// a /work handler that answers with answerAs, or with its own ID when
+// answerAs is empty. It returns the registration.
+func startInstance(t *testing.T, beaconURL, service, answerAs string) client.Registration {
+	t.Helper()
+
+	registration, setID := serveWork(t, service, answerAs)
+
 	beacon, err := client.New(beaconURL)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	registration := client.Registration{Name: service, Address: host, Port: portNumber}
+	// The ID Beacon will choose is not known before registering, so the
+	// instance names its own, as the simulation's applications may.
+	registration.ID = "instance-" + strconv.Itoa(registration.Port)
+	setID(registration.ID)
 
-	registered, err := beacon.Register(t.Context(), registration)
-	if err != nil {
+	if _, err := beacon.Register(t.Context(), registration); err != nil {
 		t.Fatal(err)
 	}
-
-	id = registered.ID
-	registration.ID = registered.ID
 
 	return registration
 }
@@ -362,5 +376,56 @@ func TestGoneFailsWhenTheInstanceLeavesLate(t *testing.T) {
 
 	if code != 1 || !strings.Contains(output, "bound 200ms") {
 		t.Fatalf("exit %d, want 1 with the instance late:\n%s", code, output)
+	}
+}
+
+func TestBackWaitsForAFutureSince(t *testing.T) {
+	beaconURL := startBeacon(t)
+	since := time.Now().Add(time.Second)
+
+	target, setID := serveWork(t, "orders", "")
+	target.ID = "late-orders"
+	setID(target.ID)
+
+	beacon, err := client.New(beaconURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	registered := make(chan error, 1)
+
+	time.AfterFunc(1500*time.Millisecond, func() {
+		_, err := beacon.Register(context.Background(), target)
+		registered <- err
+	})
+
+	code, output, report := runScenario(t, beaconURL,
+		"-scenario", "back", "-expect", "orders=1", "-service", "orders", "-address", hostPort(target),
+		"-since", strconv.FormatFloat(float64(since.UnixMicro())/1e6, 'f', 6, 64), "-within", "2s")
+
+	if err := <-registered; err != nil {
+		t.Fatal(err)
+	}
+
+	if code != 0 || !strings.Contains(output, "ok   the runner is ready before -since") {
+		t.Fatalf("exit %d, want 0 having waited:\n%s", code, output)
+	}
+
+	// Measured from -since, not from the runner's start a second earlier.
+	if after := report.Timings["back_beacon-a"]; after < 300 || after > 1500 {
+		t.Errorf("back after %vms, want about 500ms after -since", after)
+	}
+}
+
+func TestOthersAnsweredCountsFailedPicks(t *testing.T) {
+	caller := &traffic{calls: map[string]int{"orders-1:9000": 3}, failures: map[string]int{}, pickFailures: 2}
+
+	if err := othersAnswered(caller, ""); err == nil || !strings.Contains(err.Error(), "could not pick an instance 2 times") {
+		t.Fatalf("othersAnswered = %v, want the failed picks named", err)
+	}
+
+	caller.pickFailures = 0
+	if err := othersAnswered(caller, ""); err != nil {
+		t.Fatalf("othersAnswered = %v with every call answered", err)
 	}
 }

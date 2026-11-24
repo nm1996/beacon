@@ -43,6 +43,10 @@ type options struct {
 	address string
 	since   time.Time
 	within  time.Duration
+	// sinceAhead is set when -since was still to come as the runner
+	// started: run.sh then acts at that moment, and the runner must be
+	// ready by then.
+	sinceAhead bool
 	// oldID is the instance's ID before it was killed; back checks that it
 	// never returns. wantID is the ID it must come back with, if fixed.
 	oldID  string
@@ -140,7 +144,7 @@ func parseOptions(args []string) (options, error) {
 	flags.StringVar(&parsed.token, "token", os.Getenv("RUNNER_TOKEN"), "bearer token for Beacon; defaults to $RUNNER_TOKEN")
 	flags.StringVar(&parsed.service, "service", "", "gone, back: the service of the instance to watch")
 	flags.StringVar(&parsed.address, "address", "", "gone, back: the address of the instance to watch, such as orders-2, or host:port")
-	flags.StringVar(&since, "since", "", "gone, back: when the instance was killed, stopped or started, as Unix seconds or RFC 3339; empty is now")
+	flags.StringVar(&since, "since", "", "gone, back: when the instance is or was killed, stopped or started, as Unix seconds or RFC 3339; empty is now. A time to come is waited for")
 	flags.DurationVar(&parsed.within, "within", 9*time.Second, "gone, back: how long after -since the change may take")
 	flags.StringVar(&parsed.oldID, "old-id", "", "back: the ID the instance had before; it must not return")
 	flags.StringVar(&parsed.wantID, "want-id", "", "back: the ID the instance must come back with")
@@ -170,6 +174,8 @@ func parseOptions(args []string) (options, error) {
 	if parsed.since, err = parseSince(since); err != nil {
 		return options{}, err
 	}
+
+	parsed.sinceAhead = parsed.since.After(time.Now())
 
 	if slices.Contains(aboutOneInstance, parsed.scenario) {
 		if parsed.service == "" || parsed.address == "" {

@@ -46,6 +46,37 @@ now() {
 	echo "$value"
 }
 
+# lead is how many seconds the runner gets to start and get ready before a
+# step. A runner that needed longer fails its scenario and says so.
+lead=10
+
+# sleep_until waits until the Unix time $1.
+sleep_until() {
+	local left
+	left="$(awk -v until="$1" -v now="$(now)" 'BEGIN { left = until - now; printf "%.3f", left > 0 ? left : 0 }')"
+	sleep "$left"
+}
+
+# watch starts the runner with the arguments in runner_args and -since
+# $lead seconds ahead, runs "$@" at that moment, and waits for the runner.
+# The runner is ready and watching by then, so its timings start at the
+# step itself rather than at its own start. Its output is printed, and
+# kept in watched for target_id.
+watch() {
+	local since output pid status=0
+	since="$(awk -v now="$(now)" -v lead="$lead" 'BEGIN { printf "%.6f", now + lead }')"
+	output="$(mktemp)"
+	runner "${runner_args[@]}" -since "$since" >"$output" 2>&1 &
+	pid=$!
+	sleep_until "$since"
+	"$@"
+	wait "$pid" || status=$?
+	watched="$(cat "$output")"
+	rm -f "$output"
+	echo "$watched"
+	return "$status"
+}
+
 # target_id prints the ID the runner reported for its target, from the
 # output in $1.
 target_id() {
@@ -73,53 +104,46 @@ normal() {
 
 instance_killed() {
 	expect_normal
-	local since
-	since="$(now)"
-	compose kill orders-2
 	local status=0
-	runner -scenario gone -service orders -address orders-2 -since "$since" -within "$ttl" || status=$?
+	runner_args=(-scenario gone -service orders -address orders-2 -within "$ttl")
+	watch compose kill orders-2 || status=$?
 	compose start orders-2
 	return "$status"
 }
 
 instance_stopped() {
 	expect_normal
-	local since
-	since="$(now)"
-	compose stop orders-2
 	local status=0
-	# Unregistering is immediate; one second covers the polls.
-	runner -scenario gone -service orders -address orders-2 -since "$since" -within 1s || status=$?
+	# Unregistering is immediate; one second covers the stop and the polls.
+	runner_args=(-scenario gone -service orders -address orders-2 -within 1s)
+	watch compose stop orders-2 || status=$?
 	compose start orders-2
 	return "$status"
 }
 
 instance_back() {
 	expect_normal
-	local output since status=0
-	since="$(now)"
-	compose kill orders-2
-	output="$(runner -scenario gone -service orders -address orders-2 -since "$since" -within "$ttl")" || status=$?
-	echo "$output"
-	if [[ "$status" -ne 0 ]]; then
+	runner_args=(-scenario gone -service orders -address orders-2 -within "$ttl")
+	if ! watch compose kill orders-2; then
 		compose start orders-2
-		return "$status"
+		return 1
 	fi
-	local old
-	old="$(target_id "$output")"
-	since="$(now)"
+	runner_args=(-scenario back -service orders -address orders-2 -within 10s -old-id "$(target_id "$watched")")
+	watch compose start orders-2
+}
+
+# kill_and_start kills orders-2 and starts it again at once.
+kill_and_start() {
+	compose kill orders-2
 	compose start orders-2
-	runner -scenario back -service orders -address orders-2 -since "$since" -within 10s -old-id "$old"
 }
 
 instance_back_same_id() {
 	ORDERS_2_ID=orders-2 up
 	expect_normal
-	compose kill orders-2
-	local since status=0
-	since="$(now)"
-	compose start orders-2
-	runner -scenario back -service orders -address orders-2 -since "$since" -within 10s -want-id orders-2 || status=$?
+	local status=0
+	runner_args=(-scenario back -service orders -address orders-2 -within 10s -want-id orders-2)
+	watch kill_and_start || status=$?
 	# Put orders-2 back as the other scenarios expect it, without a fixed ID.
 	up
 	return "$status"

@@ -28,11 +28,16 @@ type traffic struct {
 	// failures counts failed calls by host:port, and calls every call.
 	failures map[string]int
 	calls    map[string]int
+	// pickFailures counts the times the Resolver had no instance to give.
+	pickFailures int
+	// firstFailure holds the first error of each address that failed.
+	firstFailure map[string]error
 }
 
 // startTraffic calls service through target every interval until the
 // returned traffic is stopped. Each call is recorded in the report as
-// "resolved <host:port>", and a failed pick as "resolved".
+// "resolved <host:port>", and each pick the Resolver could not make as
+// "pick".
 func (cluster *cluster) startTraffic(ctx context.Context, target node, service string, interval time.Duration) (*traffic, error) {
 	resolver, err := target.client.NewResolver(ctx, service,
 		client.WithRefreshInterval(time.Second),
@@ -44,12 +49,13 @@ func (cluster *cluster) startTraffic(ctx context.Context, target node, service s
 
 	ctx, stop := context.WithCancel(ctx)
 	caller := &traffic{
-		cluster:  cluster,
-		resolver: resolver,
-		stop:     stop,
-		done:     make(chan struct{}),
-		failures: map[string]int{},
-		calls:    map[string]int{},
+		cluster:      cluster,
+		resolver:     resolver,
+		stop:         stop,
+		done:         make(chan struct{}),
+		failures:     map[string]int{},
+		calls:        map[string]int{},
+		firstFailure: map[string]error{},
 	}
 
 	go caller.run(ctx, interval)
@@ -73,7 +79,12 @@ func (caller *traffic) run(ctx context.Context, interval time.Duration) {
 
 		instance, err := caller.resolver.Pick()
 		if err != nil {
-			caller.cluster.report.observe("resolved", 0, failureKind(err))
+			caller.cluster.report.observe("pick", 0, err.Error())
+
+			caller.mu.Lock()
+			caller.pickFailures++
+			caller.mu.Unlock()
+
 			continue
 		}
 
@@ -90,6 +101,10 @@ func (caller *traffic) run(ctx context.Context, interval time.Duration) {
 		caller.calls[address]++
 		if err != nil {
 			caller.failures[address]++
+
+			if _, ok := caller.firstFailure[address]; !ok {
+				caller.firstFailure[address] = err
+			}
 		}
 		caller.mu.Unlock()
 	}
@@ -102,8 +117,9 @@ func (caller *traffic) close() {
 	caller.resolver.Close()
 }
 
-// counts returns the calls and failures so far, by host:port.
-func (caller *traffic) counts() (calls, failures map[string]int) {
+// counts returns the calls and failures so far, by host:port, and the
+// failed picks.
+func (caller *traffic) counts() (calls, failures map[string]int, pickFailures int) {
 	caller.mu.Lock()
 	defer caller.mu.Unlock()
 
@@ -117,5 +133,13 @@ func (caller *traffic) counts() (calls, failures map[string]int) {
 		failures[address] = count
 	}
 
-	return calls, failures
+	return calls, failures, caller.pickFailures
+}
+
+// failureOf returns the first error a call to address failed with.
+func (caller *traffic) failureOf(address string) error {
+	caller.mu.Lock()
+	defer caller.mu.Unlock()
+
+	return caller.firstFailure[address]
 }

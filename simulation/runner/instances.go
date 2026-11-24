@@ -160,6 +160,11 @@ func runGone(ctx context.Context, cluster *cluster, options options) error {
 		return fmt.Errorf("start calling %s: %w", options.service, err)
 	}
 
+	if err := cluster.awaitSince(ctx, options); err != nil {
+		caller.close()
+		return err
+	}
+
 	gone := newChange()
 	deadline := options.since.Add(options.within + observeGrace)
 
@@ -187,8 +192,8 @@ func runGone(ctx context.Context, cluster *cluster, options options) error {
 			}
 		}
 
-		if err := sleep(ctx, pollInterval); err != nil {
-			return err
+		if sleep(ctx, pollInterval) != nil {
+			break
 		}
 	}
 
@@ -208,7 +213,7 @@ func runGone(ctx context.Context, cluster *cluster, options options) error {
 	cluster.report.check("lookups succeed throughout", now, countErr(lookErrs, "lookups failed"))
 	cluster.report.check("every other instance answers throughout", now, othersAnswered(caller, options.address))
 
-	return nil
+	return ctx.Err()
 }
 
 // runBack is scenario D: an instance was started again at options.since.
@@ -217,6 +222,10 @@ func runGone(ctx context.Context, cluster *cluster, options options) error {
 // set, and must answer as itself. The ID it had before, options.oldID,
 // must never be returned again.
 func runBack(ctx context.Context, cluster *cluster, options options) error {
+	if err := cluster.awaitSince(ctx, options); err != nil {
+		return err
+	}
+
 	services := sortedKeys(options.expected)
 	nodes := nodeNames(cluster.nodes)
 	back := newChange()
@@ -300,11 +309,16 @@ func runBack(ctx context.Context, cluster *cluster, options options) error {
 }
 
 // othersAnswered fails if any call to an instance other than the one at
-// address failed, or if none was made.
+// address failed, if the Resolver could not pick an instance, or if no
+// call was made.
 func othersAnswered(caller *traffic, address string) error {
-	calls, failures := caller.counts()
+	calls, failures, pickFailures := caller.counts()
 
 	var problems []string
+
+	if pickFailures > 0 {
+		problems = append(problems, fmt.Sprintf("the Resolver could not pick an instance %d times", pickFailures))
+	}
 
 	made := 0
 
@@ -316,7 +330,8 @@ func othersAnswered(caller *traffic, address string) error {
 		made += calls[other]
 
 		if failures[other] > 0 {
-			problems = append(problems, fmt.Sprintf("%d of %d calls to %s failed", failures[other], calls[other], other))
+			problems = append(problems, fmt.Sprintf("%d of %d calls to %s failed, first with %v",
+				failures[other], calls[other], other, caller.failureOf(other)))
 		}
 	}
 
@@ -361,6 +376,27 @@ func countErr(count int, what string) error {
 	}
 
 	return nil
+}
+
+// awaitSince waits until options.since when it was still to come as the
+// runner started, recording whether the runner got ready in time: run.sh
+// acts at that moment, so whatever the runner set up after it would miss
+// the start of what it measures.
+func (cluster *cluster) awaitSince(ctx context.Context, options options) error {
+	if !options.sinceAhead {
+		return nil
+	}
+
+	now := time.Now()
+
+	var late error
+	if left := options.since.Sub(now); left < 0 {
+		late = fmt.Errorf("ready %s after -since; give run.sh more lead", (-left).Round(time.Millisecond))
+	}
+
+	cluster.report.check("the runner is ready before -since", now, late)
+
+	return sleep(ctx, options.since.Sub(now))
 }
 
 // sleep waits for delay or until ctx ends.

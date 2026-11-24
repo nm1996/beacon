@@ -110,21 +110,49 @@ type work struct {
 }
 
 // work calls instance's GET /work, recording the request under kind, and
-// checks that the instance that answered is the one Beacon returned.
+// checks that the instance that answered is the one Beacon returned. An
+// answer from another instance counts as a failed request.
 func (cluster *cluster) work(ctx context.Context, instance client.Instance, kind string) error {
+	started := time.Now()
+	err := cluster.callWork(ctx, instance)
+	cluster.report.observe(kind, time.Since(started), failureKind(err))
+
+	return err
+}
+
+// callWork does the work of work, without recording it.
+func (cluster *cluster) callWork(ctx context.Context, instance client.Instance) error {
 	address := "http://" + net.JoinHostPort(instance.Address, strconv.Itoa(instance.Port)) + "/work"
 
-	var answered work
-	if err := cluster.getJSON(ctx, address, kind, &answered); err != nil {
+	body, err := cluster.fetch(ctx, address)
+	if err != nil {
 		return err
 	}
 
+	var answered work
+	if err := json.Unmarshal(body, &answered); err != nil {
+		return fmt.Errorf("decode %s: %w", address, err)
+	}
+
 	if answered.InstanceID != instance.ID || answered.Service != instance.Name {
-		return fmt.Errorf("%s answered as %s %s, Beacon returned %s %s",
-			instance.Address, answered.Service, answered.InstanceID, instance.Name, instance.ID)
+		return &wrongInstanceError{instance: instance, answered: answered}
 	}
 
 	return nil
+}
+
+// wrongInstanceError is an answer from another instance than the one
+// Beacon returned for the address.
+type wrongInstanceError struct {
+	instance client.Instance
+	answered work
+}
+
+// Error names both instances.
+func (wrongErr *wrongInstanceError) Error() string {
+	return fmt.Sprintf("%s:%d answered as %s %s, Beacon returned %s %s",
+		wrongErr.instance.Address, wrongErr.instance.Port, wrongErr.answered.Service, wrongErr.answered.InstanceID,
+		wrongErr.instance.Name, wrongErr.instance.ID)
 }
 
 // metrics returns the lines of target's /metrics that carry Beacon
@@ -255,6 +283,11 @@ func failureKind(err error) string {
 	var statusErr *statusError
 	if errors.As(err, &statusErr) {
 		return "status " + strconv.Itoa(statusErr.status)
+	}
+
+	var wrongErr *wrongInstanceError
+	if errors.As(err, &wrongErr) {
+		return "wrong instance"
 	}
 
 	var urlError *url.Error

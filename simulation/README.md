@@ -51,8 +51,11 @@ simulation/run.sh instance-killed    # one scenario
 | `instance-back` | D | `gone`, then `back -old-id <its ID>` |
 | `instance-back-same-id` | D with `Registration.ID` | `back -want-id orders-2` |
 
-`run.sh` takes the time just before each step and passes it as `-since`;
-the containers share the host's clock.
+For each step, `run.sh` starts the runner first with `-since` 10 seconds
+ahead, then stops, kills or starts the container at that moment, so the
+runner is already watching and its timings start at the step itself. A
+runner that was not ready by then fails with "the runner is ready before
+-since". The containers share the host's clock.
 
 `--wait` returns once every health check passes. The ports are published on
 loopback only. `down --volumes` also deletes the database, so the next run
