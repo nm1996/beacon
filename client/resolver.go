@@ -296,6 +296,38 @@ func (resolver *Resolver) Report(instance Instance, err error) {
 		slog.String("name", resolver.name), slog.String("id", instance.ID), slog.Int("ejections", state.ejections))
 }
 
+// pruneOutliers forgets what outlier detection tracked about instances no
+// longer in the service, so a long-lived Resolver of a service whose
+// instances come and go does not grow without bound.
+func (resolver *Resolver) pruneOutliers(instances []Instance) {
+	resolver.outliersMu.Lock()
+	defer resolver.outliersMu.Unlock()
+
+	if len(resolver.outliers) == 0 {
+		return
+	}
+
+	present := make(map[string]bool, len(instances))
+	for _, instance := range instances {
+		present[instance.ID] = true
+	}
+
+	for id := range resolver.outliers {
+		if !present[id] {
+			delete(resolver.outliers, id)
+		}
+	}
+
+	ejected := resolver.liveEjections(time.Now())
+	for id := range ejected {
+		if !present[id] {
+			delete(ejected, id)
+		}
+	}
+
+	resolver.ejected.Store(&ejected)
+}
+
 // liveEjections returns a copy of the ejections that have not ended by
 // now. The caller holds outliersMu.
 func (resolver *Resolver) liveEjections(now time.Time) map[string]time.Time {
@@ -373,6 +405,7 @@ func (resolver *Resolver) run(ctx context.Context) {
 		switch {
 		case err == nil:
 			resolver.current.Store(latest)
+			resolver.pruneOutliers(latest.instances)
 			failures = 0
 		case ctx.Err() == nil:
 			failures++
