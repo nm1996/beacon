@@ -54,6 +54,7 @@ simulation/run.sh instance-killed    # one scenario
 | `node-stopped-retry-post`, `node-killed-retry-post` | C, nginx with `non_idempotent` | the same |
 | `storage-down` | E | `storage-down -outage 20s -recover 15s -within 4s` |
 | `ownership` | F | `ownership -service orders -attacker-token-file /auth/payments.token`, before and right after `beacon-b` restarts |
+| `load-small`, `load-medium`, `load-large` | Load | `load -service catalog`, for `$LOAD_DURATION` (5m) |
 
 For each step, `run.sh` starts the runner first with `-since` 10 seconds
 ahead, then stops, kills or starts the container at that moment, so the
@@ -61,6 +62,12 @@ runner is already watching and its timings start at the step itself. A
 runner that was not ready by then fails with "the runner is ready before
 -since". The containers share the host's clock. For `storage-down` the
 runner also sends heartbeats through both nodes before PostgreSQL stops.
+
+The load profiles are not in the default list, since each runs for five
+minutes; name them, as in `LOAD_DURATION=2m simulation/run.sh load-large`.
+Their instances, of a service called `catalog`, all run in one container,
+each on its own port from 9000, with its own Lease. `run.sh` samples
+`docker stats` every 10s into the reports directory while they run.
 
 Authentication is off unless `BEACON_SIM_AUTH=true` is set for every
 Compose command; leave it unset, not `false`, to keep it off. `ownership`
@@ -396,3 +403,8 @@ What runs have shown so far, and what became of it.
   instance_not_owned` on every heartbeat and unregister of `orders`'
   instances through both nodes, also right after `beacon-b` restarted. A
   token with `manage`, as a check that the scenario can fail, removed them.
+- **The large load profile kept every instance**, in the same local setup
+  and for 45s instead of 5 minutes: 100 `catalog` instances plus the four
+  others, 50 lookups and 200 calls a second, no instance missing at any
+  check and no request failed. Each node used about 26 MB of memory and 3%
+  of a CPU.

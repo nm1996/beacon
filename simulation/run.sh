@@ -22,6 +22,10 @@
 #   ownership            F: with authentication on, payments' token must
 #                        not change orders' instances, also right after
 #                        beacon-b restarts
+#   load-small, load-medium, load-large
+#                        10, 50 or 100 more instances under lookups and
+#                        calls, for $LOAD_DURATION (5m by default); not
+#                        part of the default list
 #
 # The project is left running; stop it with
 #   docker compose -f simulation/compose.yaml down --volumes
@@ -229,7 +233,7 @@ auth_files() {
 	local dir="$here/auth"
 	local tokens="$dir/tokens.toml.new"
 	: >"$tokens"
-	for caller in orders payments inventory runner; do
+	for caller in orders payments inventory catalog runner; do
 		local token permissions='["register", "discover"]'
 		token="$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')"
 		printf '%s\n' "$token" >"$dir/$caller.token"
@@ -270,6 +274,44 @@ ownership() {
 	return "$status"
 }
 
+# load runs a load profile: $1 extra instances of catalog, $2 lookups and
+# $3 calls a second, for $LOAD_DURATION. Every 10s it samples docker stats
+# for every container into the reports directory.
+load() {
+	local instances="$1" status=0 sampler stats
+	stats="$here/reports/$(date -u +%Y-%m-%dT%H%M%SZ)-load-$instances-stats.jsonl"
+	LOAD_INSTANCES="$instances" compose --profile load up --detach --wait catalog
+	expect_normal
+	(
+		while true; do
+			# shellcheck disable=SC2046 # one argument per container ID
+			docker stats --no-stream --format '{{json .}}' $(compose ps --quiet) >>"$stats"
+			sleep 10
+		done
+	) &
+	sampler=$!
+	runner -scenario load -expect "orders=2,payments=1,inventory=1,catalog=$instances" -service catalog \
+		-lookup-rate "$2" -call-rate "$3" -duration "${LOAD_DURATION:-5m}" -timeout 2m || status=$?
+	kill "$sampler"
+	wait "$sampler" 2>/dev/null || true
+	compose --profile load stop catalog
+	compose --profile load rm --force catalog
+	echo "docker stats: $stats"
+	return "$status"
+}
+
+load_small() {
+	load 10 5 20
+}
+
+load_medium() {
+	load 50 20 100
+}
+
+load_large() {
+	load 100 50 200
+}
+
 main() {
 	local scenarios=("$@")
 	if [[ ${#scenarios[@]} -eq 0 ]]; then
@@ -286,7 +328,7 @@ main() {
 		case "$scenario" in
 		normal | instance-killed | instance-stopped | instance-back | instance-back-same-id | \
 			node-stopped | node-killed | node-stopped-retry-post | node-killed-retry-post | \
-			storage-down | ownership)
+			storage-down | ownership | load-small | load-medium | load-large)
 			"${scenario//-/_}" || failed+=("$scenario")
 			;;
 		*)

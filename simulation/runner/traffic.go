@@ -36,8 +36,8 @@ type traffic struct {
 
 // startTraffic calls service through target every interval until the
 // returned traffic is stopped. Each call is recorded in the report as
-// "resolved <host:port>", and each pick the Resolver could not make as
-// "pick".
+// "resolved", and each pick the Resolver could not make as "pick"; close
+// adds the counts by address.
 func (cluster *cluster) startTraffic(ctx context.Context, target node, service string, interval time.Duration) (*traffic, error) {
 	resolver, err := target.client.NewResolver(ctx, service,
 		client.WithRefreshInterval(time.Second),
@@ -92,7 +92,7 @@ func (caller *traffic) run(ctx context.Context, interval time.Duration) {
 		// shows up as a failed call.
 		callCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), trafficCallTimeout)
 		address := net.JoinHostPort(instance.Address, strconv.Itoa(instance.Port))
-		err = caller.cluster.work(callCtx, instance, "resolved "+address)
+		err = caller.cluster.work(callCtx, instance, "resolved")
 
 		cancel()
 		caller.resolver.Report(instance, err)
@@ -110,11 +110,26 @@ func (caller *traffic) run(ctx context.Context, interval time.Duration) {
 	}
 }
 
-// close stops the calls and the Resolver, and waits for both.
+// close stops the calls and the Resolver, waits for both, and adds the
+// calls and failures by address to the report.
 func (caller *traffic) close() {
 	caller.stop()
 	<-caller.done
 	caller.resolver.Close()
+
+	calls, failures, _ := caller.counts()
+	report := caller.cluster.report
+
+	report.mu.Lock()
+	defer report.mu.Unlock()
+
+	if report.Calls == nil {
+		report.Calls = map[string]CallCount{}
+	}
+
+	for address, count := range calls {
+		report.Calls[address] = CallCount{Calls: count, Failures: failures[address]}
+	}
 }
 
 // counts returns the calls and failures so far, by host:port, and the

@@ -64,6 +64,12 @@ type options struct {
 
 	// attackerToken is, for ownership, another service's token.
 	attackerToken string
+
+	// For load: how long to run, and how many lookups and calls to make
+	// each second.
+	duration   time.Duration
+	lookupRate int
+	callRate   int
 }
 
 // scenario runs its steps against cluster, recording each in the report.
@@ -78,6 +84,7 @@ var scenarios = map[string]scenario{
 	"node-down":    runNodeDown,
 	"storage-down": runStorageDown,
 	"ownership":    runOwnership,
+	"load":         runLoad,
 }
 
 // aboutOneInstance lists the scenarios that need -service and -address.
@@ -184,7 +191,10 @@ func parseOptions(args []string) (options, error) {
 	flags.StringVar(&attackerFile, "attacker-token-file", "", "ownership: file holding another service's token, which must not be able to change -service's instances")
 	flags.DurationVar(&parsed.outage, "outage", 20*time.Second, "storage-down: how long after -since PostgreSQL is started again")
 	flags.DurationVar(&parsed.recover, "recover", 15*time.Second, "storage-down: how long after PostgreSQL starts every node must serve again")
-	flags.StringVar(&parsed.service, "service", "", "gone, back: the service of the instance to watch; ownership: the service whose instances to attack")
+	flags.DurationVar(&parsed.duration, "duration", 5*time.Minute, "load: how long to run")
+	flags.IntVar(&parsed.lookupRate, "lookup-rate", 5, "load: lookups per second, spread over the nodes and services")
+	flags.IntVar(&parsed.callRate, "call-rate", 20, "load: calls per second to -service's instances")
+	flags.StringVar(&parsed.service, "service", "", "gone, back: the service of the instance to watch; ownership: the service whose instances to attack; load: the service to call")
 	flags.StringVar(&parsed.address, "address", "", "gone, back: the address of the instance to watch, such as orders-2, or host:port")
 	flags.StringVar(&since, "since", "", "gone, back, node-down: when the instance or node is or was killed, stopped or started, as Unix seconds or RFC 3339; empty is now. A time to come is waited for")
 	flags.DurationVar(&parsed.within, "within", 9*time.Second, "gone, back: how long after -since the change may take")
@@ -241,6 +251,16 @@ func parseOptions(args []string) (options, error) {
 
 	if parsed.scenario == "storage-down" && (parsed.outage <= 0 || parsed.recover <= 0) {
 		return options{}, errors.New("-outage and -recover must be positive")
+	}
+
+	if parsed.scenario == "load" {
+		if parsed.duration <= 0 || parsed.lookupRate < 1 || parsed.callRate < 1 {
+			return options{}, errors.New("-duration, -lookup-rate and -call-rate must be positive")
+		}
+
+		if _, ok := parsed.expected[parsed.service]; !ok {
+			return options{}, errors.New("-scenario load needs a -service listed in -expect")
+		}
 	}
 
 	if parsed.scenario == "node-down" && (parsed.down == "" || parsed.watch <= 0) {
