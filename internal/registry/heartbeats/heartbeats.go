@@ -11,6 +11,11 @@
 // an instance gone, because it expired or another node removed it, the
 // instance is forgotten, and its next heartbeat gets ErrInstanceNotFound.
 //
+// Buffering needs flushes that work. When none has succeeded for two
+// intervals, heartbeats go to the registry again and get its answer, an
+// error if it cannot be reached, so a node cut off from the database does
+// not keep answering for instances that other nodes have meanwhile expired.
+//
 // Heartbeats buffered when a node dies are lost, as an instance whose node
 // died needs to register again anyway; an interval well below the TTL
 // keeps that from expiring any instance.
@@ -70,6 +75,9 @@ type Registry struct {
 	mu      sync.Mutex
 	known   map[string]known
 	pending map[string]Heartbeat
+	// flushedAt is when the last flush that did not fail started. While it
+	// is more than two intervals old, heartbeats are not buffered.
+	flushedAt time.Time
 }
 
 var _ discovery.Registry = (*Registry)(nil)
@@ -84,16 +92,22 @@ func New(registry discovery.Registry, writer Writer, interval time.Duration, log
 		logger:   logger,
 		known:    make(map[string]known),
 		pending:  make(map[string]Heartbeat),
+		// Counted from the start, so the first heartbeats can be buffered.
+		flushedAt: time.Now(),
 	}
 }
 
 // Touch buffers the heartbeat of a known instance, or checks an unknown one
-// with the registry, which records it at once.
+// with the registry, which records it at once. While flushes fail, every
+// heartbeat goes to the registry, so none is acknowledged without being
+// written.
 func (registry *Registry) Touch(ctx context.Context, id string, at time.Time, check discovery.OwnerCheck) error {
 	registry.mu.Lock()
 
 	instance, isKnown := registry.known[id]
-	if isKnown && time.Since(instance.checkedAt) < recheckAfter {
+	writing := time.Since(registry.flushedAt) <= 2*registry.interval
+
+	if isKnown && writing && time.Since(instance.checkedAt) < recheckAfter {
 		defer registry.mu.Unlock()
 
 		if !check.Allows(instance.owner) {
@@ -163,6 +177,8 @@ func (registry *Registry) forget(id string) {
 // meanwhile. It also forgets instances checked too long ago, which keeps
 // the memory bound to the instances heartbeating through this node.
 func (registry *Registry) Flush(ctx context.Context) error {
+	started := time.Now()
+
 	registry.mu.Lock()
 	pending := registry.pending
 	registry.pending = make(map[string]Heartbeat, len(pending))
@@ -204,6 +220,15 @@ func (registry *Registry) Flush(ctx context.Context) error {
 
 	if len(chunk) > 0 {
 		write()
+	}
+
+	if firstErr == nil {
+		registry.mu.Lock()
+		// A slower flush that started earlier must not move it back.
+		if started.After(registry.flushedAt) {
+			registry.flushedAt = started
+		}
+		registry.mu.Unlock()
 	}
 
 	return firstErr

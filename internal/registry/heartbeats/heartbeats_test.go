@@ -219,6 +219,80 @@ func TestAFailedFlushKeepsTheHeartbeats(t *testing.T) {
 	}
 }
 
+func TestHeartbeatsAreNotAcknowledgedWhileFlushesFail(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		batched, backend, writer := fixture(t)
+		ctx := t.Context()
+
+		for range 2 {
+			if err := batched.Touch(ctx, "a", time.Now(), alice); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		writer.fail = errors.New("database down")
+
+		// Another node, which can still write, expires the instance whose
+		// heartbeats this node only buffers.
+		time.Sleep(3 * time.Second)
+
+		if err := batched.Flush(ctx); err == nil {
+			t.Fatal("expected the flush to fail")
+		}
+
+		if _, err := backend.DeleteStale(ctx, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := batched.Touch(ctx, "a", time.Now(), alice); !errors.Is(err, discovery.ErrInstanceNotFound) {
+			t.Fatalf("expected the heartbeat to reach the registry and find the instance gone, got %v", err)
+		}
+	})
+}
+
+func TestBufferingResumesAfterAFlushSucceeds(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		batched, backend, writer := fixture(t)
+		ctx := t.Context()
+
+		for range 2 {
+			if err := batched.Touch(ctx, "a", time.Now(), alice); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		writer.fail = errors.New("database down")
+		time.Sleep(3 * time.Second)
+
+		if err := batched.Flush(ctx); err == nil {
+			t.Fatal("expected the flush to fail")
+		}
+
+		during := time.Now()
+		if err := batched.Touch(ctx, "a", during, alice); err != nil {
+			t.Fatal(err)
+		}
+
+		if !lastHeartbeat(t, backend, "a").Equal(during) {
+			t.Fatal("expected a heartbeat after a failed flush to reach the registry at once")
+		}
+
+		writer.fail = nil
+		if err := batched.Flush(ctx); err != nil {
+			t.Fatal(err)
+		}
+
+		flushed := lastHeartbeat(t, backend, "a")
+		if err := batched.Touch(ctx, "a", during.Add(time.Second), alice); err != nil {
+			t.Fatal(err)
+		}
+
+		if !lastHeartbeat(t, backend, "a").Equal(flushed) {
+			t.Error("expected heartbeats to be buffered again once a flush succeeded")
+		}
+	})
+}
+
 func TestCleanupSeesTheBufferedHeartbeats(t *testing.T) {
 	batched, _, _ := fixture(t)
 	ctx := t.Context()
