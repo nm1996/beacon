@@ -244,6 +244,7 @@ func TestParseOptionsRejectsBadInput(t *testing.T) {
 		{"-rounds", "0"},
 		{"-scenario", "gone", "-service", "orders"},
 		{"-scenario", "back", "-service", "nope", "-address", "x"},
+		{"-scenario", "node-down"},
 	} {
 		if _, err := parseOptions(args); err == nil {
 			t.Errorf("parseOptions(%q) succeeded", args)
@@ -427,5 +428,61 @@ func TestOthersAnsweredCountsFailedPicks(t *testing.T) {
 	caller.pickFailures = 0
 	if err := othersAnswered(caller, ""); err != nil {
 		t.Fatalf("othersAnswered = %v with every call answered", err)
+	}
+}
+
+// unreachableURL returns the URL of a server that has already stopped.
+func unreachableURL(t *testing.T) string {
+	t.Helper()
+
+	server := httptest.NewServer(http.NotFoundHandler())
+	server.Close()
+
+	return server.URL
+}
+
+func TestNodeDownPassesWhileTheOtherNodeServes(t *testing.T) {
+	beaconURL := startBeacon(t)
+	startInstance(t, beaconURL, "orders", "")
+
+	code, output, report := runScenario(t, beaconURL,
+		"-nodes", "beacon-a="+beaconURL+",beacon-b="+unreachableURL(t),
+		"-scenario", "node-down", "-down", "beacon-b", "-expect", "orders=1", "-within", "1s", "-watch", "1s")
+
+	if code != 0 {
+		t.Fatalf("exit %d, want 0:\n%s", code, output)
+	}
+
+	if _, ok := report.Timings["unlisted_beacon-a"]; !ok {
+		t.Errorf("no unlisting time in %v", report.Timings)
+	}
+}
+
+func TestNodeDownFailsWhenAnInstanceExpires(t *testing.T) {
+	beaconURL := startBeacon(t)
+	startInstance(t, beaconURL, "orders", "")
+	leaving := startInstance(t, beaconURL, "orders", "")
+	unregisterAfter(t, beaconURL, leaving, 300*time.Millisecond)
+
+	code, output, _ := runScenario(t, beaconURL,
+		"-nodes", "beacon-a="+beaconURL+",beacon-b="+unreachableURL(t),
+		"-scenario", "node-down", "-down", "beacon-b", "-expect", "orders=2", "-within", "1s", "-watch", "1s")
+
+	if code != 1 || !strings.Contains(output, "FAIL every instance stays registered for 1s: beacon-a returns 1 orders") {
+		t.Fatalf("exit %d, want 1 with an instance gone:\n%s", code, output)
+	}
+}
+
+func TestNodeDownFailsWhileTheNodeIsListed(t *testing.T) {
+	beaconURL := startBeacon(t)
+	startInstance(t, beaconURL, "orders", "")
+
+	// The node really is beacon-a, so it keeps listing beacon-a.
+	code, output, _ := runScenario(t, beaconURL,
+		"-nodes", "beacon-a="+unreachableURL(t)+",beacon-b="+beaconURL,
+		"-scenario", "node-down", "-down", "beacon-a", "-expect", "orders=1", "-within", "1s", "-watch", "1s")
+
+	if code != 1 || !strings.Contains(output, "FAIL the other nodes stop listing beacon-a within 1s") {
+		t.Fatalf("exit %d, want 1 with beacon-a still listed:\n%s", code, output)
 	}
 }

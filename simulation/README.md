@@ -50,6 +50,8 @@ simulation/run.sh instance-killed    # one scenario
 | `instance-stopped` | B, stopped | `-scenario gone -within 1s` |
 | `instance-back` | D | `gone`, then `back -old-id <its ID>` |
 | `instance-back-same-id` | D with `Registration.ID` | `back -want-id orders-2` |
+| `node-stopped`, `node-killed` | C | `node-down -within 1s` or `15s`, then `normal` |
+| `node-stopped-retry-post`, `node-killed-retry-post` | C, nginx with `non_idempotent` | the same |
 
 For each step, `run.sh` starts the runner first with `-since` 10 seconds
 ahead, then stops, kills or starts the container at that moment, so the
@@ -360,3 +362,20 @@ Each phase is one pull request, and each one is run before the next starts.
   load balancer alone covers.
 - Is `GET /health` not checking PostgreSQL acceptable for orchestrators that
   restart unhealthy containers? Scenario E will show what an operator sees.
+
+## Findings
+
+What runs have shown so far, and what became of it.
+
+- **A load balancer that neither retries POSTs nor stops sending to a
+  dead node loses instances when a node goes away.** Seen while building
+  scenario C, with the nodes and applications run as local processes and a
+  stand-in load balancer with neither behavior: one instance expired 7.2s
+  after `beacon-a` stopped. Every heartbeat it sent had an even chance of
+  reaching the dead node, and the Lease's retries, after 1s, 2s, then
+  every 3s, did not land on the live one within the TTL. With the stand-in
+  retrying POSTs on the other node, nothing expired, after a stop or a
+  kill. The nginx configuration here does both: it stops sending to a node
+  for 2s after one failure, and the `-retry-post` scenarios also retry
+  POSTs. The Compose runs will show whether the first alone is enough.
+  This is what the open question on client-side failover is about.

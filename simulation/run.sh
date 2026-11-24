@@ -13,6 +13,11 @@
 #   instance-back        D: orders-2 is killed, expires, starts again
 #   instance-back-same-id D: orders-2 with a fixed ID is killed and started
 #                        again before it expires
+#   node-stopped         C: beacon-a is stopped; nothing may expire
+#   node-killed          C: beacon-a is killed; nothing may expire
+#   node-stopped-retry-post, node-killed-retry-post
+#                        C again, with the load balancer also passing
+#                        failed POSTs on to the other node
 #
 # The project is left running; stop it with
 #   docker compose -f simulation/compose.yaml down --volumes
@@ -153,10 +158,54 @@ instance_back_same_id() {
 	return "$status"
 }
 
+# lb_mode recreates the load balancer with $1 as its proxy_next_upstream.
+lb_mode() {
+	LB_NEXT_UPSTREAM="$1" compose up --detach --wait --no-deps lb
+}
+
+# node_down stops beacon-a with docker compose $1 (stop or kill), watches
+# the instances for more than three TTLs, then starts it again and checks
+# that it serves the same instances. $2 bounds how long beacon-b may keep
+# listing it: at once after a stop, 15s after a kill.
+node_down() {
+	expect_normal
+	local status=0
+	runner_args=(-scenario node-down -down beacon-a -within "$2" -watch 30s)
+	watch compose "$1" beacon-a || status=$?
+	compose up --detach --wait --no-deps beacon-a
+	runner -scenario normal || status=$?
+	return "$status"
+}
+
+node_stopped() {
+	node_down stop 1s
+}
+
+node_killed() {
+	node_down kill 15s
+}
+
+node_stopped_retry_post() {
+	local status=0
+	lb_mode "error timeout non_idempotent"
+	node_down stop 1s || status=$?
+	lb_mode "error timeout"
+	return "$status"
+}
+
+node_killed_retry_post() {
+	local status=0
+	lb_mode "error timeout non_idempotent"
+	node_down kill 15s || status=$?
+	lb_mode "error timeout"
+	return "$status"
+}
+
 main() {
 	local scenarios=("$@")
 	if [[ ${#scenarios[@]} -eq 0 ]]; then
-		scenarios=(normal instance-killed instance-stopped instance-back instance-back-same-id)
+		scenarios=(normal instance-killed instance-stopped instance-back instance-back-same-id
+			node-stopped node-killed node-stopped-retry-post node-killed-retry-post)
 	fi
 
 	up
@@ -165,7 +214,8 @@ main() {
 	for scenario in "${scenarios[@]}"; do
 		echo "== $scenario"
 		case "$scenario" in
-		normal | instance-killed | instance-stopped | instance-back | instance-back-same-id)
+		normal | instance-killed | instance-stopped | instance-back | instance-back-same-id | \
+			node-stopped | node-killed | node-stopped-retry-post | node-killed-retry-post)
 			"${scenario//-/_}" || failed+=("$scenario")
 			;;
 		*)
