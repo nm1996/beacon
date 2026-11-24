@@ -33,4 +33,4 @@ Option 3, on the PostgreSQL backend (0006).
 
 ## Open questions
 
-- Batch heartbeats per node, a write-behind of about one second, to cut database writes by the node count? Default: not until measured. It weakens the guarantee that an accepted heartbeat is durable.
+- Heartbeats are batched per node, decided in review; see 0006. An accepted heartbeat is durable within one flush interval, which is enough for liveness.

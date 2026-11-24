@@ -5,9 +5,12 @@
 package bootstrap
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
+	"time"
 
 	"github.com/nm1996/beacon/internal/api"
 	"github.com/nm1996/beacon/internal/auth"
@@ -16,7 +19,10 @@ import (
 	"github.com/nm1996/beacon/internal/discovery"
 	"github.com/nm1996/beacon/internal/metrics"
 	"github.com/nm1996/beacon/internal/ratelimit"
+	"github.com/nm1996/beacon/internal/registry/cache"
+	"github.com/nm1996/beacon/internal/registry/heartbeats"
 	"github.com/nm1996/beacon/internal/registry/memory"
+	"github.com/nm1996/beacon/internal/registry/postgres"
 )
 
 // Components are the connected parts of a Beacon server.
@@ -33,6 +39,21 @@ type Components struct {
 	// is set when settings.TLS is enabled, and nil otherwise; every
 	// handshake takes its certificate from Credentials.
 	Server *http.Server
+
+	// Heartbeats batches heartbeats for the storage backend, when it is
+	// PostgreSQL. The caller runs it until shutdown; it is nil otherwise.
+	Heartbeats *heartbeats.Registry
+
+	// closers release what New opened, such as database connections.
+	closers []func()
+}
+
+// Close releases what New opened, such as database connections. Call it
+// once the server and workers have stopped.
+func (components *Components) Close() {
+	for _, closer := range slices.Backward(components.closers) {
+		closer()
+	}
 }
 
 // New builds the registry backend chosen by settings.Storage, with metrics
@@ -46,9 +67,24 @@ type Components struct {
 // server's own internal errors are reported to logger, and version is what
 // GET /health reports.
 func New(settings config.Config, logger *slog.Logger, version string) (*Components, error) {
-	registry, err := newRegistry(settings.Storage)
+	registry, closeRegistry, err := newRegistry(settings.Storage)
 	if err != nil {
 		return nil, err
+	}
+
+	// Close the registry if building anything after it fails.
+	built := false
+	defer func() {
+		if !built {
+			closeRegistry()
+		}
+	}()
+
+	// A backend that can write many heartbeats at once gets them batched.
+	var batched *heartbeats.Registry
+	if writer, ok := registry.(heartbeats.Writer); ok && settings.Storage.Postgres.HeartbeatFlushInterval > 0 {
+		batched = heartbeats.New(registry, writer, settings.Storage.Postgres.HeartbeatFlushInterval, logger)
+		registry = batched
 	}
 
 	var observer *metrics.Metrics
@@ -59,6 +95,9 @@ func New(settings config.Config, logger *slog.Logger, version string) (*Componen
 		observer.WatchInstances(registry.List)
 		registry = observer.InstrumentRegistry(registry)
 	}
+
+	// Outside the metrics, so they count the lookups that reach the backend.
+	registry = cache.New(registry, settings.Registry.CacheTTL)
 
 	var reloaded func(result string)
 	if observer != nil {
@@ -141,17 +180,40 @@ func New(settings config.Config, logger *slog.Logger, version string) (*Componen
 		server.TLSConfig = store.ServerTLSConfig()
 	}
 
-	return &Components{Discovery: service, Credentials: store, Server: server}, nil
+	built = true
+
+	return &Components{
+		Discovery:   service,
+		Credentials: store,
+		Server:      server,
+		Heartbeats:  batched,
+		closers:     []func(){closeRegistry},
+	}, nil
 }
 
-// newRegistry builds the registry backend named by settings.Backend. Adding a
-// backend means adding a case here and its name in internal/config.
-func newRegistry(settings config.StorageConfig) (discovery.Registry, error) {
+// postgresOpenTimeout bounds connecting to PostgreSQL and migrating it at
+// startup.
+const postgresOpenTimeout = 30 * time.Second
+
+// newRegistry builds the registry backend named by settings.Backend, and a
+// function that releases it. Adding a backend means adding a case here and
+// its name in internal/config.
+func newRegistry(settings config.StorageConfig) (discovery.Registry, func(), error) {
 	switch settings.Backend {
 	case config.StorageMemory:
-		return memory.New(), nil
+		return memory.New(), func() {}, nil
+	case config.StoragePostgres:
+		ctx, cancel := context.WithTimeout(context.Background(), postgresOpenTimeout)
+		defer cancel()
+
+		registry, err := postgres.Open(ctx, settings.Postgres.URL)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		return registry, registry.Close, nil
 	default:
-		return nil, fmt.Errorf("unknown storage backend %q", settings.Backend)
+		return nil, nil, fmt.Errorf("unknown storage backend %q", settings.Backend)
 	}
 }
 
