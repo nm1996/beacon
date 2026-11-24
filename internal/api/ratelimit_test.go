@@ -28,6 +28,8 @@ func TestClientNetwork(t *testing.T) {
 		{remote: "[2001:db8:1:3::1]:5000", want: "2001:db8:1:3::/64"},
 		{remote: "[fe80::1%eth0]:5000", want: "fe80::/64"},
 		{remote: "@", want: "@"},
+		{remote: "beacon.internal:5000", want: "beacon.internal"},
+		{remote: "beacon.internal:5001", want: "beacon.internal"},
 	}
 
 	for _, tt := range tests {
@@ -35,7 +37,7 @@ func TestClientNetwork(t *testing.T) {
 			request := httptest.NewRequest(http.MethodGet, "/", nil)
 			request.RemoteAddr = tt.remote
 
-			if got := clientNetwork(request); got != tt.want {
+			if got := clientNetwork(request, nil); got != tt.want {
 				t.Errorf("expected %q, got %q", tt.want, got)
 			}
 		})
@@ -382,5 +384,26 @@ func TestPanickingAuthenticationGivesItsReservationBack(t *testing.T) {
 
 			listFrom(router, "10.0.0.1:1000", "Bearer anything")
 		}()
+	}
+}
+
+func TestRegistrationLimitIsSharedByEntriesWithOneID(t *testing.T) {
+	rotated := auth.NewIdentity("orders (new token)", auth.PermissionRegister)
+	rotated.ID = "orders"
+
+	config := testConfig
+	config.Guard = NewGuard(fakeTokens{
+		"orders-token":  auth.NewIdentity("orders", auth.PermissionRegister),
+		"rotated-token": rotated,
+	}, discard, nil)
+	config.RegistrationLimit = ratelimit.New(1, 1, 0)
+	router := NewRouter(newDiscovery(t, testTTL), discard, config)
+
+	if recorder := registerFrom(router, "10.0.0.1:1000", "orders-token"); recorder.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", recorder.Code)
+	}
+
+	if recorder := registerFrom(router, "10.0.0.1:1000", "rotated-token"); recorder.Code != http.StatusTooManyRequests {
+		t.Errorf("expected a second token with the same ID to share the limit, got %d", recorder.Code)
 	}
 }

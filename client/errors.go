@@ -41,6 +41,12 @@ var (
 	// error format, such as one from a proxy. Retrying later can succeed; a
 	// Lease keeps retrying on its own.
 	ErrRateLimited = errors.New("beacon: rate limited")
+
+	// ErrConflict matches a registration refused because its ID belongs to
+	// another instance: another caller's, or one with a different name,
+	// address or port. It also matches an idempotency key reused with a
+	// different registration.
+	ErrConflict = errors.New("beacon: conflicting registration")
 )
 
 // Error is a response Beacon answered with an unexpected status. Code holds
@@ -62,7 +68,7 @@ func (apiError *Error) Error() string {
 }
 
 // Is lets errors.Is match an *Error against ErrNotFound, ErrInvalid,
-// ErrNotOwned, ErrQuotaExceeded and ErrRateLimited by its error code, and against ErrUnauthorized and
+// ErrNotOwned, ErrQuotaExceeded, ErrRateLimited and ErrConflict by its error code, and against ErrUnauthorized and
 // ErrForbidden by its status code, so a 401 or 403 from a proxy in front of
 // Beacon matches too.
 func (apiError *Error) Is(target error) bool {
@@ -79,6 +85,8 @@ func (apiError *Error) Is(target error) bool {
 		return apiError.Code == "instance_not_owned"
 	case ErrQuotaExceeded:
 		return apiError.Code == "quota_exceeded"
+	case ErrConflict:
+		return apiError.Code == "instance_exists" || apiError.Code == "idempotency_key_reused"
 	case ErrRateLimited:
 		return apiError.Code == "rate_limited" || (apiError.StatusCode == http.StatusTooManyRequests && apiError.Code == "")
 	default:

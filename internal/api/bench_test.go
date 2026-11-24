@@ -26,7 +26,7 @@ func benchmarkRouter(b *testing.B, size int) http.Handler {
 
 	for index := range size {
 		registration := discovery.Registration{Name: "orders", Address: "10.0.0.1", Port: 1 + index%65535}
-		if _, err := service.Register(b.Context(), registration, discovery.Caller{AnyInstance: true}); err != nil {
+		if _, _, err := service.Register(b.Context(), registration, discovery.Caller{AnyInstance: true}); err != nil {
 			b.Fatal(err)
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -26,6 +27,9 @@ func environmentVariables(config *Config) []environmentVariable {
 		{name: "BEACON_SERVER_SHUTDOWN_TIMEOUT", apply: setDuration(&config.Server.ShutdownTimeout)},
 		{name: "BEACON_SERVER_MAX_REQUEST_BODY_BYTES", apply: setInt64(&config.Server.MaxRequestBodyBytes)},
 		{name: "BEACON_SERVER_RELOAD_INTERVAL", apply: setDuration(&config.Server.ReloadInterval)},
+		{name: "BEACON_SERVER_TRUSTED_PROXIES", apply: setList(&config.Server.TrustedProxies)},
+		{name: "BEACON_SERVER_NODE_ID", apply: setString(&config.Server.NodeID)},
+		{name: "BEACON_GRPC_PORT", apply: setInt(&config.GRPC.Port)},
 		{name: "BEACON_TLS_CERT_FILE", apply: setString(&config.TLS.CertFile)},
 		{name: "BEACON_TLS_KEY_FILE", apply: setString(&config.TLS.KeyFile)},
 		{name: "BEACON_TLS_CLIENT_CA_FILE", apply: setString(&config.TLS.ClientCAFile)},
@@ -37,7 +41,10 @@ func environmentVariables(config *Config) []environmentVariable {
 		{name: "BEACON_REGISTRY_MAX_ADDRESS_LENGTH", apply: setInt(&config.Registry.MaxAddressLength)},
 		{name: "BEACON_REGISTRY_MAX_INSTANCES", apply: setInt(&config.Registry.MaxInstances)},
 		{name: "BEACON_REGISTRY_MAX_INSTANCES_PER_OWNER", apply: setInt(&config.Registry.MaxInstancesPerOwner)},
+		{name: "BEACON_REGISTRY_CACHE_TTL", apply: setDuration(&config.Registry.CacheTTL)},
 		{name: "BEACON_STORAGE_BACKEND", apply: setString(&config.Storage.Backend)},
+		{name: "BEACON_STORAGE_POSTGRES_URL", apply: setString(&config.Storage.Postgres.URL)},
+		{name: "BEACON_STORAGE_POSTGRES_HEARTBEAT_FLUSH_INTERVAL", apply: setDuration(&config.Storage.Postgres.HeartbeatFlushInterval)},
 		{name: "BEACON_RATE_LIMIT_REGISTRATIONS_PER_SECOND", apply: setFloat(&config.RateLimit.RegistrationsPerSecond)},
 		{name: "BEACON_RATE_LIMIT_REGISTRATION_BURST", apply: setInt(&config.RateLimit.RegistrationBurst)},
 		{name: "BEACON_RATE_LIMIT_AUTH_FAILURES_PER_SECOND", apply: setFloat(&config.RateLimit.AuthFailuresPerSecond)},
@@ -71,6 +78,24 @@ func applyEnvironment(config *Config, lookup func(name string) (string, bool)) e
 func setString(target *string) func(string) error {
 	return func(value string) error {
 		*target = value
+		return nil
+	}
+}
+
+// setList sets target to the comma-separated entries of the value, without
+// empty ones.
+func setList(target *[]string) func(string) error {
+	return func(value string) error {
+		entries := []string{}
+
+		for entry := range strings.SplitSeq(value, ",") {
+			if entry = strings.TrimSpace(entry); entry != "" {
+				entries = append(entries, entry)
+			}
+		}
+
+		*target = entries
+
 		return nil
 	}
 }

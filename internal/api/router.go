@@ -14,6 +14,9 @@ import (
 // servicesPath is the collection every versioned service route lives under.
 const servicesPath = "/api/v1/services"
 
+// nodesPath lists the live Beacon nodes.
+const nodesPath = "/api/v1/nodes"
+
 // NewRouter returns a handler that serves the registry API backed by
 // discovery:
 //
@@ -21,6 +24,7 @@ const servicesPath = "/api/v1/services"
 //	GET    /api/v1/services?name=orders     list instances
 //	POST   /api/v1/services/{id}/heartbeat  keep an instance alive
 //	DELETE /api/v1/services/{id}            unregister an instance
+//	GET    /api/v1/nodes                    live Beacon nodes, with manage
 //	GET    /health                          liveness check, not versioned
 //
 // Requests with an unsupported method get 405 and unknown paths get 404,
@@ -39,6 +43,10 @@ func NewRouter(discovery Discovery, logger *slog.Logger, config Config) http.Han
 	mux.Handle("POST "+servicesPath+"/{id}/heartbeat", guard.Require(auth.PermissionRegister, http.HandlerFunc(handler.Heartbeat)))
 	mux.Handle("DELETE "+servicesPath+"/{id}", guard.Require(auth.PermissionRegister, http.HandlerFunc(handler.Unregister)))
 	mux.HandleFunc("GET /health", handler.Health)
+
+	if config.Nodes != nil {
+		mux.Handle("GET "+nodesPath, guard.Require(auth.PermissionManage, http.HandlerFunc(handler.GetNodes)))
+	}
 
 	return handler.withJSONErrors(mux)
 }

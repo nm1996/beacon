@@ -45,6 +45,16 @@ description = "Open the pull request that merges stage into prod, for the releas
 tools = { gh = "2.103.3" }
 run = "scripts/promote.sh stage prod"
 
+[tasks.proto]
+description = "Regenerate the Go code for the gRPC API from api/**/*.proto"
+tools = { protoc = "36.1" }
+run = "scripts/proto.sh"
+
+[tasks.proto-check]
+description = "Fail if the generated gRPC code is out of date"
+tools = { protoc = "36.1" }
+run = "scripts/proto.sh --check"
+
 [tasks.vuln]
 description = "Scan dependencies and code for known vulnerabilities"
 run = "go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./..."

@@ -2,9 +2,11 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -35,7 +37,7 @@ func TestLoadWithoutPathReturnsDefaults(t *testing.T) {
 		t.Fatalf("load: %v", err)
 	}
 
-	if config != Default() {
+	if !reflect.DeepEqual(config, Default()) {
 		t.Errorf("expected defaults, got %+v", config)
 	}
 }
@@ -46,7 +48,7 @@ func TestExampleConfigMatchesDefaults(t *testing.T) {
 		t.Fatalf("load example config: %v", err)
 	}
 
-	if config != Default() {
+	if !reflect.DeepEqual(config, Default()) {
 		t.Errorf("example config and Default() have drifted apart:\nexample: %+v\ndefault: %+v", config, Default())
 	}
 }
@@ -79,7 +81,7 @@ format = "text"
 	want.Registry.MaxAddressLength = 120
 	want.Logging.Format = "text"
 
-	if config != want {
+	if !reflect.DeepEqual(config, want) {
 		t.Errorf("expected %+v, got %+v", want, config)
 	}
 }
@@ -90,7 +92,7 @@ func TestLoadEmptyFileReturnsDefaults(t *testing.T) {
 		t.Fatalf("load: %v", err)
 	}
 
-	if config != Default() {
+	if !reflect.DeepEqual(config, Default()) {
 		t.Errorf("expected defaults, got %+v", config)
 	}
 }
@@ -128,7 +130,7 @@ func TestLoadFailures(t *testing.T) {
 		{name: "unknown log level", content: "[logging]\nlevel = \"verbose\"", wantErr: []string{"logging.level"}},
 		{name: "unknown log format", content: "[logging]\nformat = \"xml\"", wantErr: []string{"logging.format"}},
 		{name: "metrics flag is not a boolean", content: "[metrics]\nenabled = \"yes\"", wantErr: []string{"read config"}},
-		{name: "unknown storage backend", content: "[storage]\nbackend = \"redis\"", wantErr: []string{`storage.backend must be one of memory, got "redis"`}},
+		{name: "unknown storage backend", content: "[storage]\nbackend = \"redis\"", wantErr: []string{`storage.backend must be one of memory, postgres, got "redis"`}},
 		{name: "empty storage backend", content: "[storage]\nbackend = \"\"", wantErr: []string{"storage.backend"}},
 		{
 			name:    "cleanup interval longer than TTL",
@@ -265,5 +267,110 @@ func TestZeroRateWithZeroBurstIsOff(t *testing.T) {
 
 	if _, err := Load(path); err != nil {
 		t.Errorf("expected a limit that is off not to need a burst, got %v", err)
+	}
+}
+
+func TestTrustedProxyRanges(t *testing.T) {
+	server := Default().Server
+	server.TrustedProxies = []string{"10.0.0.0/8", " 192.0.2.7 ", "2001:db8::/32", "fd00::1", "10.1.2.3/8"}
+
+	ranges, err := server.TrustedProxyRanges()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := fmt.Sprint(ranges)
+	if want := "[10.0.0.0/8 192.0.2.7/32 2001:db8::/32 fd00::1/128 10.0.0.0/8]"; got != want {
+		t.Errorf("expected %s, got %s", want, got)
+	}
+}
+
+func TestInvalidTrustedProxiesAreRefused(t *testing.T) {
+	settings := Default()
+	settings.Server.TrustedProxies = []string{"10.0.0.0/8", "proxy.internal"}
+
+	err := settings.Validate()
+	if err == nil || !strings.Contains(err.Error(), "server.trusted_proxies") {
+		t.Errorf("expected a trusted_proxies error, got %v", err)
+	}
+}
+
+func TestPostgresNeedsAURL(t *testing.T) {
+	settings := Default()
+	settings.Storage.Backend = StoragePostgres
+
+	if err := settings.Validate(); err == nil || !strings.Contains(err.Error(), "storage.postgres.url is required") {
+		t.Errorf("expected the missing URL to be reported, got %v", err)
+	}
+
+	settings.Storage.Postgres.URL = "postgres://beacon@db/beacon"
+	if err := settings.Validate(); err != nil {
+		t.Errorf("expected a URL to be enough, got %v", err)
+	}
+}
+
+func TestCacheTTLIsAtMostAThirdOfTheServiceTTL(t *testing.T) {
+	settings := Default()
+
+	for _, tt := range []struct {
+		ttl time.Duration
+		ok  bool
+	}{
+		{ttl: 0, ok: true},
+		{ttl: 10 * time.Second, ok: true},
+		{ttl: 11 * time.Second, ok: false},
+		{ttl: -time.Second, ok: false},
+	} {
+		settings.Registry.CacheTTL = tt.ttl
+
+		if err := settings.Validate(); (err == nil) != tt.ok {
+			t.Errorf("cache_ttl %s with a 30s service TTL: expected ok=%v, got %v", tt.ttl, tt.ok, err)
+		}
+	}
+}
+
+func TestHeartbeatFlushIntervalIsAtMostAThirdOfTheServiceTTL(t *testing.T) {
+	settings := Default()
+	settings.Storage = StorageConfig{Backend: StoragePostgres, Postgres: PostgresConfig{URL: "postgres://beacon@db/beacon"}}
+
+	for _, tt := range []struct {
+		interval time.Duration
+		ok       bool
+	}{
+		{interval: 0, ok: true},
+		{interval: 10 * time.Second, ok: true},
+		{interval: 11 * time.Second, ok: false},
+		{interval: -time.Second, ok: false},
+	} {
+		settings.Storage.Postgres.HeartbeatFlushInterval = tt.interval
+
+		if err := settings.Validate(); (err == nil) != tt.ok {
+			t.Errorf("flush interval %s with a 30s service TTL: expected ok=%v, got %v", tt.interval, tt.ok, err)
+		}
+	}
+}
+
+func TestHeartbeatFlushIntervalOnlyMattersForPostgres(t *testing.T) {
+	settings := Default()
+	settings.Registry.ServiceTTL = time.Second
+	settings.Registry.CleanupInterval = time.Second
+
+	if err := settings.Validate(); err != nil {
+		t.Errorf("expected a short TTL to be fine with the memory backend, got %v", err)
+	}
+}
+
+func TestCacheAndFlushDelaysTogetherFitTheTTL(t *testing.T) {
+	settings := Default()
+	settings.Storage = StorageConfig{Backend: StoragePostgres, Postgres: PostgresConfig{URL: "postgres://beacon@db/beacon", HeartbeatFlushInterval: 5 * time.Second}}
+
+	settings.Registry.CacheTTL = 5 * time.Second
+	if err := settings.Validate(); err != nil {
+		t.Errorf("expected 5s + 5s within a 30s TTL to be fine, got %v", err)
+	}
+
+	settings.Registry.CacheTTL = 6 * time.Second
+	if err := settings.Validate(); err == nil || !strings.Contains(err.Error(), "together must be at most") {
+		t.Errorf("expected 6s + 5s to be refused, got %v", err)
 	}
 }

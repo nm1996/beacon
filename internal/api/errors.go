@@ -21,6 +21,8 @@ const (
 	codeNotFound           = "not_found"
 	codeMethodNotAllowed   = "method_not_allowed"
 	codeInternalError      = "internal_error"
+	codeInstanceExists     = "instance_exists"
+	codeIdempotencyReused  = "idempotency_key_reused"
 )
 
 // writeError sends an error response in the shared JSON format.
@@ -53,12 +55,19 @@ func (handler *Handler) writeDiscoveryError(writer http.ResponseWriter, request 
 		caller := handler.caller(request)
 		handler.logger.LogAttrs(request.Context(), slog.LevelWarn, "request refused",
 			slog.String("caller", caller.Name),
+			slog.String("caller_id", caller.ID),
 			slog.String("reason", "not_owner"),
 			slog.String("method", request.Method),
 			slog.String("path", request.URL.Path),
 		)
 		handler.writeError(writer, http.StatusForbidden, codeInstanceNotOwned,
 			"This instance was registered by another caller; only it, or a caller with the manage permission, may change it")
+	case errors.Is(err, discovery.ErrInstanceConflict):
+		handler.writeError(writer, http.StatusConflict, codeInstanceExists,
+			"Another instance has this ID: registered by another caller, or with a different name, address or port")
+	case errors.Is(err, discovery.ErrIdempotencyKeyReused):
+		handler.writeError(writer, http.StatusUnprocessableEntity, codeIdempotencyReused,
+			"This Idempotency-Key was used for a registration with a different name, address or port")
 	case errors.Is(err, discovery.ErrRegistryFull):
 		handler.logger.WarnContext(request.Context(), "registration refused: registry is full")
 		handler.writeError(writer, http.StatusTooManyRequests, codeQuotaExceeded,
@@ -67,6 +76,7 @@ func (handler *Handler) writeDiscoveryError(writer http.ResponseWriter, request 
 		caller := handler.caller(request)
 		handler.logger.LogAttrs(request.Context(), slog.LevelWarn, "registration refused: owner quota reached",
 			slog.String("caller", caller.Name),
+			slog.String("caller_id", caller.ID),
 		)
 		handler.writeError(writer, http.StatusTooManyRequests, codeQuotaExceeded,
 			"This caller already holds its maximum number of instances; retry after some of them unregister or expire")

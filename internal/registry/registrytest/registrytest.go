@@ -148,8 +148,8 @@ func createThenList(test *testing.T, registry discovery.Registry) {
 func createRejectsDuplicateID(test *testing.T, registry discovery.Registry) {
 	mustCreate(test, registry, instance("a", "orders", base))
 
-	if err := registry.Create(test.Context(), instance("a", "payments", base), noLimit); err == nil {
-		test.Fatal("expected creating a second instance with the same ID to fail")
+	if err := registry.Create(test.Context(), instance("a", "payments", base), noLimit); !errors.Is(err, discovery.ErrInstanceExists) {
+		test.Fatalf("expected creating a second instance with the same ID to fail with ErrInstanceExists, got %v", err)
 	}
 
 	if got := mustList(test, registry, "orders"); !sameIDs(got, "a") {

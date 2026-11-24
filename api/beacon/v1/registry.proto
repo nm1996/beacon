@@ -1,0 +1,108 @@
+// Beacon's registry API over gRPC. It mirrors the HTTP API under
+// /api/v1/services: the same rules, permissions, limits and error reasons.
+syntax = "proto3";
+
+package beacon.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/nm1996/beacon/api/beacon/v1;beaconv1";
+
+// RegistryService registers, renews, lists and removes service instances.
+//
+// With authentication on, every call needs the "authorization" metadata
+// set to "Bearer <token>", or a client certificate Beacon trusts. Errors
+// carry a google.rpc.ErrorInfo whose reason is the HTTP API's error code,
+// such as "instance_not_owned", with domain "beacon".
+service RegistryService {
+  // Register adds an instance, or refreshes it when the request repeats
+  // an earlier one by id or idempotency_key. Needs the register permission.
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+
+  // Heartbeat records that an instance is still alive. Needs register.
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+
+  // Unregister removes an instance. Needs register.
+  rpc Unregister(UnregisterRequest) returns (UnregisterResponse);
+
+  // ListInstances returns live instances, one page at a time, sorted by
+  // ID. Needs the discover permission.
+  rpc ListInstances(ListInstancesRequest) returns (ListInstancesResponse);
+}
+
+// Instance is one registered, live copy of a service.
+message Instance {
+  // The instance ID.
+  string id = 1;
+  // The service name, such as "orders".
+  string name = 2;
+  // The host name or IP address the instance is reachable at.
+  string address = 3;
+  // The TCP port the instance listens on.
+  int32 port = 4;
+  // When Beacon last heard from the instance.
+  google.protobuf.Timestamp last_heartbeat = 5;
+}
+
+// RegisterRequest describes the instance to register.
+message RegisterRequest {
+  // Optional. The instance ID to use; registering the same ID again with
+  // the same name, address and port returns the same instance.
+  string id = 1;
+  // Required. The service name, under the HTTP API's rules.
+  string name = 2;
+  // Required. A host name or IP address, without scheme, port or path.
+  string address = 3;
+  // Required. Between 1 and 65535.
+  int32 port = 4;
+  // Optional. Makes retrying safe: a repeat with the same key finds the
+  // instance the first attempt created. Cannot be combined with id.
+  string idempotency_key = 5;
+}
+
+// RegisterResponse identifies the registered instance.
+message RegisterResponse {
+  // The instance ID, for heartbeats and unregistering.
+  string id = 1;
+  // How long the instance may go without a heartbeat.
+  google.protobuf.Duration ttl = 2;
+  // False when the request repeated an earlier registration.
+  bool created = 3;
+}
+
+// HeartbeatRequest names the instance that is still alive.
+message HeartbeatRequest {
+  // The instance ID.
+  string id = 1;
+}
+
+// HeartbeatResponse is empty.
+message HeartbeatResponse {}
+
+// UnregisterRequest names the instance to remove.
+message UnregisterRequest {
+  // The instance ID.
+  string id = 1;
+}
+
+// UnregisterResponse is empty.
+message UnregisterResponse {}
+
+// ListInstancesRequest selects instances and a page of them.
+message ListInstancesRequest {
+  // Optional. Only instances with this name.
+  string name = 1;
+  // Optional. At most this many instances, up to 1000; 0 means 500.
+  int32 page_size = 2;
+  // Optional. The next_page_token of the previous page.
+  string page_token = 3;
+}
+
+// ListInstancesResponse is one page of instances.
+message ListInstancesResponse {
+  // The instances, sorted by ID.
+  repeated Instance instances = 1;
+  // Fetches the next page; empty on the last one.
+  string next_page_token = 2;
+}

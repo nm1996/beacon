@@ -58,14 +58,19 @@ const MinTokenLength = 16
 
 // Identity is the caller a token or certificate belongs to.
 type Identity struct {
-	// Name names the entry in logs and error messages. It is not secret.
+	// ID is the stable identity that owns instances and quotas. Entries
+	// that share an ID share ownership. It defaults to the Name.
+	ID string
+	// Name names the entry in logs and error messages. It is not secret,
+	// and renaming an entry that has an ID changes nothing else.
 	Name        string
 	permissions []Permission
 }
 
-// NewIdentity returns an identity called name that holds permissions.
+// NewIdentity returns an identity called name, with name as its ID, that
+// holds permissions.
 func NewIdentity(name string, permissions ...Permission) Identity {
-	return Identity{Name: name, permissions: slices.Clone(permissions)}
+	return Identity{ID: name, Name: name, permissions: slices.Clone(permissions)}
 }
 
 // Allows reports whether the identity holds permission.
@@ -105,6 +110,7 @@ type identitiesFile struct {
 // missing list, meaning defaultPermissions (everything except manage), can
 // be told apart from an empty one, which is rejected.
 type tokenEntry struct {
+	ID          string    `toml:"id"`
 	Name        string    `toml:"name"`
 	SHA256      string    `toml:"sha256"`
 	Permissions *[]string `toml:"permissions"`
@@ -112,6 +118,7 @@ type tokenEntry struct {
 
 // certificateEntry is one [[certificates]] table.
 type certificateEntry struct {
+	ID          string    `toml:"id"`
 	Name        string    `toml:"name"`
 	DNS         string    `toml:"dns"`
 	URI         string    `toml:"uri"`
@@ -185,6 +192,18 @@ func newIdentities(file identitiesFile) (*Identities, error) {
 		names[name] = true
 	}
 
+	// identityOf builds the identity of an entry, checking its ID. Entries
+	// may share an ID on purpose, to share ownership.
+	identityOf := func(label, id, name string, permissions []Permission) Identity {
+		if id == "" {
+			id = name
+		} else if err := checkID(id); err != nil {
+			report(label, err)
+		}
+
+		return Identity{ID: id, Name: name, permissions: permissions}
+	}
+
 	identities := &Identities{}
 
 	hashes := make(map[[sha256.Size]byte]bool)
@@ -208,7 +227,7 @@ func newIdentities(file identitiesFile) (*Identities, error) {
 		}
 
 		identities.tokens = append(identities.tokens, tokenIdentity{
-			identity: Identity{Name: item.Name, permissions: permissions},
+			identity: identityOf(label, item.ID, item.Name, permissions),
 			hash:     hash,
 		})
 	}
@@ -233,7 +252,7 @@ func newIdentities(file identitiesFile) (*Identities, error) {
 			report(label, err)
 		}
 
-		subject.identity = Identity{Name: item.Name, permissions: permissions}
+		subject.identity = identityOf(label, item.ID, item.Name, permissions)
 		identities.certificates = append(identities.certificates, subject)
 	}
 
@@ -242,6 +261,26 @@ func newIdentities(file identitiesFile) (*Identities, error) {
 	}
 
 	return identities, nil
+}
+
+// maxIDLength is the longest ID an entry may have.
+const maxIDLength = 255
+
+// checkID reports whether id can be an entry's ID: at most maxIDLength
+// printable ASCII characters without spaces, so a SPIFFE ID or a service
+// name fits and the ID reads unambiguously in logs.
+func checkID(id string) error {
+	if len(id) > maxIDLength {
+		return fmt.Errorf("id must be at most %d characters", maxIDLength)
+	}
+
+	for _, character := range id {
+		if character <= ' ' || character > '~' {
+			return errors.New("id must be printable ASCII without spaces")
+		}
+	}
+
+	return nil
 }
 
 // entryLabel names an entry in error messages: by its name when it has one,

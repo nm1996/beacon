@@ -17,6 +17,7 @@ RUN --mount=type=cache,target=/go/pkg/mod go mod download
 
 COPY cmd ./cmd
 COPY internal ./internal
+COPY api ./api
 
 ARG TARGETOS
 ARG TARGETARCH

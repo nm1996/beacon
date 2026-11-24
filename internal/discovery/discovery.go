@@ -35,13 +35,31 @@ var (
 	// its owner already holds the configured maximum number of instances.
 	// Registry implementations return it, unwrapped or wrapped, from Create.
 	ErrOwnerQuotaExceeded = errors.New("owner holds its maximum number of instances")
+
+	// ErrInstanceExists reports that an instance already has the ID being
+	// created. Registry implementations return it, unwrapped or wrapped,
+	// from Create.
+	ErrInstanceExists = errors.New("instance already exists")
+
+	// ErrInstanceConflict reports that a registration names the ID of an
+	// existing instance that it does not match: another owner's, or one with
+	// a different name, address or port.
+	ErrInstanceConflict = errors.New("another instance has this ID")
+
+	// ErrIdempotencyKeyReused reports that a registration repeats an
+	// idempotency key with a different name, address or port than the
+	// registration that first used it.
+	ErrIdempotencyKeyReused = errors.New("idempotency key was used for a different registration")
 )
 
 // Caller is who asks to change an instance. Transports build it from
 // whatever identity they authenticated; discovery only compares names.
 type Caller struct {
-	// Name identifies the caller, and becomes the Owner of instances it
-	// registers. It is empty when the transport does not authenticate.
+	// ID identifies the caller, and becomes the Owner of instances it
+	// registers and the key of its quota. It is empty when the transport
+	// does not authenticate.
+	ID string
+	// Name is the caller's name for logs. It may change while ID stays.
 	Name string
 	// AnyInstance lets the caller change instances it did not register. A
 	// transport without authentication sets it, so everyone may change
@@ -51,7 +69,7 @@ type Caller struct {
 
 // check returns the OwnerCheck that limits caller's changes.
 func (caller Caller) check() OwnerCheck {
-	return OwnerCheck{Owner: caller.Name, Any: caller.AnyInstance}
+	return OwnerCheck{Owner: caller.ID, Any: caller.AnyInstance}
 }
 
 // Limits bounds what Registry.Create may store.
@@ -100,6 +118,13 @@ func (check OwnerCheck) Allows(owner string) bool {
 
 // Registration is what a service sends to announce one of its instances.
 type Registration struct {
+	// ID, if not empty, is the ID the instance should have, so registering
+	// again keeps it. Without it, Register generates one.
+	ID string
+	// IdempotencyKey, if not empty, makes repeating the registration safe:
+	// the instance ID is derived from it and the caller, so a repeat finds
+	// the instance the first attempt created. It cannot be combined with ID.
+	IdempotencyKey string
 	// Name groups instances of the same service, such as "orders".
 	Name string
 	// Address is the host name or IP address where the instance is reachable.

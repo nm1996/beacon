@@ -44,7 +44,7 @@ func TestConcurrentRegisterGivesUniqueIDs(t *testing.T) {
 
 	runConcurrently(workers, func(worker int) {
 		for op := range opsPerWorker {
-			instance, err := service.Register(t.Context(), registration(fmt.Sprintf("service-%d", op%8)), anyone)
+			instance, _, err := service.Register(t.Context(), registration(fmt.Sprintf("service-%d", op%8)), anyone)
 			if err != nil {
 				t.Errorf("worker %d: register: %v", worker, err)
 				return

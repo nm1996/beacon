@@ -41,9 +41,14 @@ const (
 // Limiter either. Keys it already tracks are always counted, and so stay
 // protected; at most 2 * maxKeys keys have attempts in progress.
 type Limiter struct {
+	// limit and burst are what each bucket gets: the configured values
+	// divided by the share, see SetShare.
 	limit   rate.Limit
 	burst   int
 	maxKeys int
+
+	configuredLimit rate.Limit
+	configuredBurst int
 
 	mu      sync.Mutex
 	buckets map[string]*rate.Limiter
@@ -65,11 +70,13 @@ func New(perSecond float64, burst, maxKeys int) *Limiter {
 	}
 
 	return &Limiter{
-		limit:   rate.Limit(perSecond),
-		burst:   burst,
-		maxKeys: maxKeys,
-		buckets: make(map[string]*rate.Limiter),
-		pending: make(map[string]int),
+		limit:           rate.Limit(perSecond),
+		burst:           burst,
+		configuredLimit: rate.Limit(perSecond),
+		configuredBurst: burst,
+		maxKeys:         maxKeys,
+		buckets:         make(map[string]*rate.Limiter),
+		pending:         make(map[string]int),
 	}
 }
 
@@ -209,6 +216,32 @@ func (limiter *Limiter) waitFor(available float64) time.Duration {
 	}
 
 	return time.Duration((1 - available) / float64(limiter.limit) * float64(time.Second))
+}
+
+// SetShare makes the limiter enforce one of nodes equal parts of its
+// configured rate and burst, for when that many Beacon nodes behind a load
+// balancer each see about 1/nodes of every client's requests: the rate is
+// divided, and the burst too, rounded down but never below one. Buckets
+// already tracked change at once, keeping the tokens they have up to the
+// new burst. nodes below one counts as one.
+func (limiter *Limiter) SetShare(nodes int) {
+	if limiter == nil {
+		return
+	}
+
+	nodes = max(nodes, 1)
+
+	limiter.mu.Lock()
+	defer limiter.mu.Unlock()
+
+	limiter.limit = limiter.configuredLimit / rate.Limit(nodes)
+	limiter.burst = max(limiter.configuredBurst/nodes, min(limiter.configuredBurst, 1))
+
+	now := time.Now()
+	for _, bucket := range limiter.buckets {
+		bucket.SetLimitAt(now, limiter.limit)
+		bucket.SetBurstAt(now, limiter.burst)
+	}
 }
 
 // Keys reports how many keys the limiter tracks.

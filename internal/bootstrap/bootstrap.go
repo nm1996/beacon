@@ -5,18 +5,34 @@
 package bootstrap
 
 import (
+	"context"
+	"crypto/rand"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"slices"
+	"strconv"
+	"strings"
+	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	grpccredentials "google.golang.org/grpc/credentials"
 
 	"github.com/nm1996/beacon/internal/api"
 	"github.com/nm1996/beacon/internal/auth"
+	"github.com/nm1996/beacon/internal/cluster"
 	"github.com/nm1996/beacon/internal/config"
 	"github.com/nm1996/beacon/internal/credentials"
 	"github.com/nm1996/beacon/internal/discovery"
+	"github.com/nm1996/beacon/internal/grpcapi"
 	"github.com/nm1996/beacon/internal/metrics"
 	"github.com/nm1996/beacon/internal/ratelimit"
+	"github.com/nm1996/beacon/internal/registry/cache"
+	"github.com/nm1996/beacon/internal/registry/heartbeats"
 	"github.com/nm1996/beacon/internal/registry/memory"
+	"github.com/nm1996/beacon/internal/registry/postgres"
 )
 
 // Components are the connected parts of a Beacon server.
@@ -33,6 +49,31 @@ type Components struct {
 	// is set when settings.TLS is enabled, and nil otherwise; every
 	// handshake takes its certificate from Credentials.
 	Server *http.Server
+
+	// Heartbeats batches heartbeats for the storage backend, when it is
+	// PostgreSQL. The caller runs it until shutdown; it is nil otherwise.
+	Heartbeats *heartbeats.Registry
+
+	// GRPC serves the gRPC API, built but not started, on GRPCAddr. It is
+	// nil when grpc.port is 0.
+	GRPC     *grpc.Server
+	GRPCAddr string
+
+	// Membership records this node among those sharing the storage backend
+	// and divides the rate limits by their number. The caller joins it
+	// before serving and runs it until shutdown.
+	Membership *cluster.Membership
+
+	// closers release what New opened, such as database connections.
+	closers []func()
+}
+
+// Close releases what New opened, such as database connections. Call it
+// once the server and workers have stopped.
+func (components *Components) Close() {
+	for _, closer := range slices.Backward(components.closers) {
+		closer()
+	}
 }
 
 // New builds the registry backend chosen by settings.Storage, with metrics
@@ -46,19 +87,45 @@ type Components struct {
 // server's own internal errors are reported to logger, and version is what
 // GET /health reports.
 func New(settings config.Config, logger *slog.Logger, version string) (*Components, error) {
-	registry, err := newRegistry(settings.Storage)
+	registry, nodes, closeRegistry, err := newRegistry(settings.Storage)
 	if err != nil {
 		return nil, err
 	}
 
+	// Close the registry if building anything after it fails.
+	built := false
+	defer func() {
+		if !built {
+			closeRegistry()
+		}
+	}()
+
 	var observer *metrics.Metrics
 	if settings.Metrics.Enabled {
 		observer = metrics.New(version)
+	}
+
+	// A backend that can write many heartbeats at once gets them batched.
+	var batched *heartbeats.Registry
+	if writer, ok := registry.(heartbeats.Writer); ok && settings.Storage.Postgres.HeartbeatFlushInterval > 0 {
+		var flushed func(result string)
+		if observer != nil {
+			flushed = observer.HeartbeatsFlushed
+		}
+
+		batched = heartbeats.New(registry, writer, settings.Storage.Postgres.HeartbeatFlushInterval, logger, flushed)
+		registry = batched
+	}
+
+	if observer != nil {
 		// Count instances straight from the backend, so scrapes do not show
 		// up in the registry operation metrics they report.
 		observer.WatchInstances(registry.List)
 		registry = observer.InstrumentRegistry(registry)
 	}
+
+	// Outside the metrics, so they count the lookups that reach the backend.
+	registry = cache.New(registry, settings.Registry.CacheTTL)
 
 	var reloaded func(result string)
 	if observer != nil {
@@ -94,10 +161,36 @@ func New(settings config.Config, logger *slog.Logger, version string) (*Componen
 
 	limits := settings.RateLimit
 
+	// Load has validated the ranges already.
+	ranges, err := settings.Server.TrustedProxyRanges()
+	if err != nil {
+		return nil, fmt.Errorf("trusted proxies: %w", err)
+	}
+
+	proxies := api.TrustedProxies(ranges)
+
+	registrationLimit := ratelimit.New(limits.RegistrationsPerSecond, limits.RegistrationBurst, 0)
+	failureLimit := ratelimit.New(limits.AuthFailuresPerSecond, limits.AuthFailureBurst, 0)
+
+	membership := cluster.New(nodes, cluster.Node{
+		ID:        nodeID(settings.Server.NodeID),
+		Address:   settings.Server.Addr(),
+		Version:   version,
+		StartedAt: time.Now(),
+	}, logger, func(live int) {
+		// Each node sees about 1/live of every client's requests.
+		registrationLimit.SetShare(live)
+		failureLimit.SetShare(live)
+
+		if observer != nil {
+			observer.ClusterNodes(live)
+		}
+	})
+
 	var guard *api.Guard
 	if settings.Auth.Enabled {
-		guard = api.NewGuard(store, logger, failed, api.WithFailureLimit(
-			ratelimit.New(limits.AuthFailuresPerSecond, limits.AuthFailureBurst, 0),
+		guard = api.NewGuard(store, logger, failed, api.WithTrustedProxies(proxies), api.WithFailureLimit(
+			failureLimit,
 			func() {
 				if rateLimited != nil {
 					rateLimited(api.LimitAuthFailures)
@@ -110,8 +203,10 @@ func New(settings config.Config, logger *slog.Logger, version string) (*Componen
 		MaxRequestBodyBytes: settings.Server.MaxRequestBodyBytes,
 		Version:             version,
 		Guard:               guard,
-		RegistrationLimit:   ratelimit.New(limits.RegistrationsPerSecond, limits.RegistrationBurst, 0),
+		RegistrationLimit:   registrationLimit,
 		RateLimited:         rateLimited,
+		TrustedProxies:      proxies,
+		Nodes:               nodeLister(membership),
 	})
 
 	if observer != nil {
@@ -132,17 +227,117 @@ func New(settings config.Config, logger *slog.Logger, version string) (*Componen
 		server.TLSConfig = store.ServerTLSConfig()
 	}
 
-	return &Components{Discovery: service, Credentials: store, Server: server}, nil
+	var grpcServer *grpc.Server
+	if settings.GRPC.Port != 0 {
+		grpcServer = newGRPCServer(service, logger, store, settings, observer, failed, rateLimited, registrationLimit, failureLimit)
+	}
+
+	built = true
+
+	return &Components{
+		Discovery:   service,
+		Credentials: store,
+		Server:      server,
+		Heartbeats:  batched,
+		GRPC:        grpcServer,
+		GRPCAddr:    net.JoinHostPort(settings.Server.Host, strconv.Itoa(settings.GRPC.Port)),
+		Membership:  membership,
+		closers:     []func(){closeRegistry},
+	}, nil
 }
 
-// newRegistry builds the registry backend named by settings.Backend. Adding a
-// backend means adding a case here and its name in internal/config.
-func newRegistry(settings config.StorageConfig) (discovery.Registry, error) {
+// newGRPCServer builds the gRPC API over service with the HTTP API's
+// credentials, limiters and metrics, so both transports enforce one set of
+// rules and budgets.
+func newGRPCServer(
+	service *discovery.Service,
+	logger *slog.Logger,
+	store *credentials.Store,
+	settings config.Config,
+	observer *metrics.Metrics,
+	failed, rateLimited func(string),
+	registrationLimit, failureLimit *ratelimit.Limiter,
+) *grpc.Server {
+	config := grpcapi.Config{
+		RegistrationLimit: registrationLimit,
+		FailureLimit:      failureLimit,
+		RateLimited:       rateLimited,
+		AuthFailed:        failed,
+	}
+
+	if settings.Auth.Enabled {
+		config.Authenticator = store
+	}
+
+	if store != nil {
+		if tlsConfig := store.ServerTLSConfig(); tlsConfig != nil {
+			// NewTLS adds HTTP/2 to ALPN, per-handshake configs included.
+			config.TLS = grpccredentials.NewTLS(tlsConfig)
+		}
+	}
+
+	if observer != nil {
+		config.Observe = func(method string, code codes.Code, duration time.Duration) {
+			observer.GRPCCall(method, code.String(), duration)
+		}
+	}
+
+	return grpcapi.NewServer(service, logger, config)
+}
+
+// postgresOpenTimeout bounds connecting to PostgreSQL and migrating it at
+// startup.
+const postgresOpenTimeout = 30 * time.Second
+
+// newRegistry builds the registry backend named by settings.Backend, the
+// store where nodes sharing it record themselves, and a function that
+// releases both. Adding a backend means adding a case here and its name in
+// internal/config.
+func newRegistry(settings config.StorageConfig) (discovery.Registry, cluster.Store, func(), error) {
 	switch settings.Backend {
 	case config.StorageMemory:
-		return memory.New(), nil
+		// Nothing is shared, so this node is alone.
+		return memory.New(), cluster.NewLocal(), func() {}, nil
+	case config.StoragePostgres:
+		ctx, cancel := context.WithTimeout(context.Background(), postgresOpenTimeout)
+		defer cancel()
+
+		registry, err := postgres.Open(ctx, settings.Postgres.URL)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+
+		return registry, registry, registry.Close, nil
 	default:
-		return nil, fmt.Errorf("unknown storage backend %q", settings.Backend)
+		return nil, nil, nil, fmt.Errorf("unknown storage backend %q", settings.Backend)
+	}
+}
+
+// nodeID returns configured, or a random ID when it is empty.
+func nodeID(configured string) string {
+	if configured != "" {
+		return configured
+	}
+
+	return "node-" + strings.ToLower(rand.Text()[:12])
+}
+
+// nodeLister lists membership's nodes for the API.
+func nodeLister(membership *cluster.Membership) func(ctx context.Context) ([]api.Node, error) {
+	return func(ctx context.Context) ([]api.Node, error) {
+		nodes, err := membership.Nodes(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		result := make([]api.Node, 0, len(nodes))
+		for _, node := range nodes {
+			node.StartedAt = node.StartedAt.UTC()
+			node.LastSeen = node.LastSeen.UTC()
+			result = append(result, api.Node(node))
+		}
+
+		return result, nil
 	}
 }
 

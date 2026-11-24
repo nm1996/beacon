@@ -16,6 +16,8 @@ import (
 	"sync"
 	"syscall"
 
+	"google.golang.org/grpc"
+
 	"github.com/nm1996/beacon/internal/bootstrap"
 	"github.com/nm1996/beacon/internal/config"
 )
@@ -94,8 +96,9 @@ func newLogger(output io.Writer, settings config.LoggingConfig) *slog.Logger {
 	return slog.New(slog.NewJSONHandler(output, options))
 }
 
-// run binds the listen address, starts the HTTP server, the cleanup worker
-// and, when TLS or authentication is on, the credentials reload worker,
+// run binds the listen address, joins the cluster of nodes sharing the
+// storage backend, starts the HTTP server, the membership and cleanup
+// workers and, when TLS or authentication is on, the credentials reload worker,
 // which reloads on SIGHUP and every server.reload_interval. It then blocks
 // until the server fails or the process gets SIGINT or SIGTERM. On a signal
 // it gives in-flight requests up to server.shutdown_timeout to finish; a
@@ -109,6 +112,8 @@ func run(settings config.Config, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	// Deferred first, so it runs last: after the server and workers stop.
+	defer components.Close()
 
 	server := components.Server
 
@@ -127,6 +132,35 @@ func run(settings config.Config, logger *slog.Logger) error {
 		stopWorkers()
 		workers.Wait()
 	}()
+
+	if batched := components.Heartbeats; batched != nil {
+		// Its own context, cancelled only when run returns, after the
+		// servers have stopped: its last flush then writes every heartbeat
+		// they accepted, including those of the shutdown drain. Deferred
+		// after components.Close, so it runs before it.
+		flushCtx, stopFlushing := context.WithCancel(context.WithoutCancel(ctx))
+		flushed := make(chan struct{})
+
+		go func() {
+			defer close(flushed)
+			batched.Run(flushCtx)
+		}()
+
+		defer func() {
+			stopFlushing()
+			<-flushed
+		}()
+	}
+
+	// Count this node in before serving, so the rate limits are divided
+	// from the first request.
+	if err := components.Membership.Join(ctx); err != nil {
+		return fmt.Errorf("join the cluster: %w", err)
+	}
+
+	workers.Go(func() {
+		components.Membership.Run(workerCtx)
+	})
 
 	workers.Go(func() {
 		if err := components.Discovery.RunCleanup(workerCtx); err != nil {
@@ -149,19 +183,44 @@ func run(settings config.Config, logger *slog.Logger) error {
 	// up HTTP/2, so afterwards it is neither meaningful nor safe to read.
 	servesTLS := server.TLSConfig != nil
 
-	serveErr := make(chan error, 1)
+	serveErr := make(chan error, 2)
 	go func() {
 		serveErr <- serve(server, listener, servesTLS)
 	}()
 
+	if components.GRPC != nil {
+		grpcListener, err := listenConfig.Listen(ctx, "tcp", components.GRPCAddr)
+		if err != nil {
+			_ = server.Close() // already failing; the listen error matters more
+			return fmt.Errorf("listen on %s for gRPC: %w", components.GRPCAddr, err)
+		}
+
+		go func() {
+			if err := components.GRPC.Serve(grpcListener); err != nil {
+				serveErr <- fmt.Errorf("grpc server: %w", err)
+			}
+		}()
+
+		logger.Info("beacon serving gRPC", slog.String("addr", grpcListener.Addr().String()), slog.Bool("tls", servesTLS))
+	}
+
 	logListening(logger, listener.Addr(), servesTLS, settings.Auth.Enabled, settings.Storage.Backend)
+
+	if proxies := settings.Server.TrustedProxies; len(proxies) > 0 {
+		logger.Info("trusting X-Forwarded-For from proxies", slog.Any("trusted_proxies", proxies))
+	}
 
 	select {
 	case err := <-serveErr:
+		if components.GRPC != nil {
+			components.GRPC.Stop()
+		}
+
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
-		return fmt.Errorf("http server: %w", err)
+
+		return fmt.Errorf("serve: %w", err)
 	case <-ctx.Done():
 	}
 
@@ -174,11 +233,43 @@ func run(settings config.Config, logger *slog.Logger) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), settings.Server.ShutdownTimeout)
 	defer cancel()
 
-	if err := server.Shutdown(shutdownCtx); err != nil {
+	// Both servers drain at once, within the same timeout, and run waits
+	// for both, so nothing they serve outlives the storage it uses.
+	grpcStopped := make(chan struct{})
+
+	go func() {
+		defer close(grpcStopped)
+
+		if components.GRPC != nil {
+			stopGRPC(shutdownCtx, components.GRPC)
+		}
+	}()
+
+	err = server.Shutdown(shutdownCtx)
+	<-grpcStopped
+
+	if err != nil {
 		return fmt.Errorf("shutdown http server: %w", err)
 	}
 
 	return nil
+}
+
+// stopGRPC lets in-flight gRPC calls finish until ctx ends, then cuts off
+// whatever is left.
+func stopGRPC(ctx context.Context, server *grpc.Server) {
+	done := make(chan struct{})
+
+	go func() {
+		server.GracefulStop()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+		server.Stop()
+	}
 }
 
 // serve runs server on listener until it stops, over TLS when servesTLS is

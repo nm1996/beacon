@@ -5,7 +5,6 @@ import (
 	"math"
 	"net"
 	"net/http"
-	"net/netip"
 	"strconv"
 	"time"
 
@@ -30,25 +29,27 @@ const codeRateLimited = "rate_limited"
 const ipv6NetworkBits = 64
 
 // clientNetwork returns the key that stands for request's client network:
-// its IPv4 address, or the /64 its IPv6 address is in. It uses the address
-// of the connection, so behind a proxy every client shares the proxy's.
-func clientNetwork(request *http.Request) string {
-	host, _, err := net.SplitHostPort(request.RemoteAddr)
-	if err != nil {
-		host = request.RemoteAddr
-	}
+// the IPv4 address of the client, or the /64 its IPv6 address is in. The
+// client is the connection's peer, or, behind one of proxies, the address
+// the proxies forwarded; see TrustedProxies.
+func clientNetwork(request *http.Request, proxies TrustedProxies) string {
+	address, ok := proxies.clientAddress(request)
+	if !ok {
+		// Not an IP address: key by the host alone, so every connection
+		// from it shares one bucket whatever its port.
+		host, _, err := net.SplitHostPort(request.RemoteAddr)
+		if err != nil {
+			return request.RemoteAddr
+		}
 
-	address, err := netip.ParseAddr(host)
-	if err != nil {
 		return host
 	}
 
-	address = address.Unmap()
 	if address.Is4() {
 		return address.String()
 	}
 
-	prefix, err := address.WithZone("").Prefix(ipv6NetworkBits)
+	prefix, err := address.Prefix(ipv6NetworkBits)
 	if err != nil {
 		return address.String()
 	}
@@ -60,10 +61,10 @@ func clientNetwork(request *http.Request) string {
 // caller, or the client network when authentication is off.
 func (handler *Handler) registrationKey(request *http.Request) string {
 	if identity, ok := identityFrom(request.Context()); ok {
-		return "caller:" + identity.Name
+		return "caller:" + identity.ID
 	}
 
-	return "network:" + clientNetwork(request)
+	return "network:" + clientNetwork(request, handler.config.TrustedProxies)
 }
 
 // limitRegistrations wraps next so each caller may register at most as
@@ -114,6 +115,15 @@ func retryAfterSeconds(wait time.Duration) int64 {
 
 // GuardOption configures a Guard.
 type GuardOption func(*Guard)
+
+// WithTrustedProxies makes the Guard find the client network of requests
+// from proxies by their X-Forwarded-For header, as the handlers do; see
+// TrustedProxies.
+func WithTrustedProxies(proxies TrustedProxies) GuardOption {
+	return func(guard *Guard) {
+		guard.proxies = proxies
+	}
+}
 
 // WithFailureLimit makes the Guard refuse, with 429, every request from a
 // client network that has failed authentication more often than limiter

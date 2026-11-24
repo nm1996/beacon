@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"math"
 	"net"
+	"net/netip"
 	"os"
 	"slices"
 	"strconv"
@@ -31,6 +32,7 @@ type Config struct {
 	Registry  RegistryConfig  `toml:"registry"`
 	Storage   StorageConfig   `toml:"storage"`
 	RateLimit RateLimitConfig `toml:"rate_limit"`
+	GRPC      GRPCConfig      `toml:"grpc"`
 	Metrics   MetricsConfig   `toml:"metrics"`
 	Logging   LoggingConfig   `toml:"logging"`
 }
@@ -57,6 +59,39 @@ type ServerConfig struct {
 	// checked for changes and reloaded when their contents differ. Zero
 	// turns checking off; SIGHUP still reloads on platforms that have it.
 	ReloadInterval time.Duration `toml:"reload_interval"`
+	// TrustedProxies lists the addresses or CIDR ranges of proxies, such as
+	// load balancers, whose X-Forwarded-For header gives the client address
+	// rate limits are keyed by. Empty, the default, trusts no proxy.
+	TrustedProxies []string `toml:"trusted_proxies"`
+	// NodeID names this process among the Beacon nodes sharing a storage
+	// backend, for example its pod name. Empty, the default, picks a
+	// random ID at every start.
+	NodeID string `toml:"node_id"`
+}
+
+// TrustedProxyRanges parses TrustedProxies. A plain address is a range of
+// that one address.
+func (server ServerConfig) TrustedProxyRanges() ([]netip.Prefix, error) {
+	ranges := make([]netip.Prefix, 0, len(server.TrustedProxies))
+
+	for _, entry := range server.TrustedProxies {
+		entry = strings.TrimSpace(entry)
+
+		if prefix, err := netip.ParsePrefix(entry); err == nil {
+			ranges = append(ranges, prefix.Masked())
+			continue
+		}
+
+		address, err := netip.ParseAddr(entry)
+		if err != nil {
+			return nil, fmt.Errorf("%q is neither an address nor a CIDR range", entry)
+		}
+
+		address = address.Unmap()
+		ranges = append(ranges, netip.PrefixFrom(address, address.BitLen()))
+	}
+
+	return ranges, nil
 }
 
 // TLSConfig turns on HTTPS. Setting both files serves the API, /health and
@@ -109,20 +144,45 @@ type RegistryConfig struct {
 	// no limit per owner. It needs authentication, since without it callers
 	// are not told apart.
 	MaxInstancesPerOwner int `toml:"max_instances_per_owner"`
+	// CacheTTL is how long each node keeps lookup results before asking the
+	// storage backend again; zero, the default, is no cache. Writes through
+	// the node clear it, writes through other nodes show within it. It may
+	// be at most a third of ServiceTTL, since heartbeats do not clear it.
+	CacheTTL time.Duration `toml:"cache_ttl"`
 }
 
 // StorageMemory selects the in-memory registry backend, which keeps
 // nothing across restarts.
 const StorageMemory = "memory"
 
+// StoragePostgres selects the PostgreSQL registry backend, which keeps
+// instances across restarts and can be shared by several nodes.
+const StoragePostgres = "postgres"
+
 // storageBackends lists every value storage.backend accepts. bootstrap
 // builds the matching backend for each one.
-var storageBackends = []string{StorageMemory}
+var storageBackends = []string{StorageMemory, StoragePostgres}
 
 // StorageConfig selects where registered instances are kept.
 type StorageConfig struct {
-	// Backend names the registry backend. Only "memory" exists today.
+	// Backend names the registry backend: "memory" or "postgres".
 	Backend string `toml:"backend"`
+	// Postgres configures the "postgres" backend.
+	Postgres PostgresConfig `toml:"postgres"`
+}
+
+// PostgresConfig configures the PostgreSQL backend.
+type PostgresConfig struct {
+	// URL is the connection string, such as
+	// "postgres://beacon:secret@db:5432/beacon?sslmode=verify-full". Its
+	// parameters include pool settings such as pool_max_conns. It may hold
+	// a password, so Beacon never logs it.
+	URL string `toml:"url"`
+	// HeartbeatFlushInterval is how often each node writes the heartbeats
+	// it received, all in one statement per thousand instances, instead of
+	// one write per heartbeat. Zero writes each at once. It may be at most
+	// a third of registry.service_ttl.
+	HeartbeatFlushInterval time.Duration `toml:"heartbeat_flush_interval"`
 }
 
 // RateLimitConfig limits how often a client may do what is costly or a
@@ -142,6 +202,14 @@ type RateLimitConfig struct {
 	// AuthFailureBurst is how many failed attempts a client network may
 	// make at once before AuthFailuresPerSecond applies.
 	AuthFailureBurst int `toml:"auth_failure_burst"`
+}
+
+// GRPCConfig controls the gRPC API.
+type GRPCConfig struct {
+	// Port is the TCP port of the gRPC API, on server.host; zero, the
+	// default, turns it off. It uses the same TLS, authentication and rate
+	// limits as the HTTP API.
+	Port int `toml:"port"`
 }
 
 // MetricsConfig controls the Prometheus endpoint.
@@ -169,6 +237,7 @@ func Default() Config {
 			WriteTimeout:        10 * time.Second,
 			IdleTimeout:         60 * time.Second,
 			ShutdownTimeout:     10 * time.Second,
+			TrustedProxies:      []string{},
 			MaxRequestBodyBytes: 64 << 10,
 		},
 		Registry: RegistryConfig{
@@ -179,7 +248,8 @@ func Default() Config {
 			MaxInstances:     10000,
 		},
 		Storage: StorageConfig{
-			Backend: StorageMemory,
+			Backend:  StorageMemory,
+			Postgres: PostgresConfig{HeartbeatFlushInterval: time.Second},
 		},
 		RateLimit: RateLimitConfig{
 			RegistrationsPerSecond: 20,
@@ -255,6 +325,8 @@ func (config Config) Validate() error {
 
 	server := config.Server
 	check(server.Port >= 1 && server.Port <= 65535, "server.port must be between 1 and 65535, got %d", server.Port)
+	check(config.GRPC.Port >= 0 && config.GRPC.Port <= 65535, "grpc.port must be 0 (off) or between 1 and 65535, got %d", config.GRPC.Port)
+	check(config.GRPC.Port == 0 || config.GRPC.Port != server.Port, "grpc.port must differ from server.port, both are %d", server.Port)
 	check(server.ReadTimeout > 0, "server.read_timeout must be positive, got %s", server.ReadTimeout)
 	check(server.WriteTimeout > 0, "server.write_timeout must be positive, got %s", server.WriteTimeout)
 	check(server.IdleTimeout > 0, "server.idle_timeout must be positive, got %s", server.IdleTimeout)
@@ -262,6 +334,8 @@ func (config Config) Validate() error {
 	check(server.MaxRequestBodyBytes > 0, "server.max_request_body_bytes must be positive, got %d", server.MaxRequestBodyBytes)
 	// Each check reads every file, so sub-second intervals would only add
 	// load; zero means off.
+	_, proxiesErr := server.TrustedProxyRanges()
+	check(proxiesErr == nil, "server.trusted_proxies: %v", proxiesErr)
 	check(server.ReloadInterval == 0 || server.ReloadInterval >= time.Second,
 		"server.reload_interval must be 0s (off) or at least 1s, got %s", server.ReloadInterval)
 
@@ -282,6 +356,9 @@ func (config Config) Validate() error {
 	// Clients are told the TTL as ttl_seconds when they register, so it must
 	// be a whole number of seconds for that to be exact.
 	check(registry.ServiceTTL >= time.Second, "registry.service_ttl must be at least 1s, got %s", registry.ServiceTTL)
+	check(registry.CacheTTL >= 0 && registry.CacheTTL <= registry.ServiceTTL/3,
+		"registry.cache_ttl must be between 0s (off) and a third of registry.service_ttl (%s), got %s",
+		registry.ServiceTTL/3, registry.CacheTTL)
 	check(registry.ServiceTTL%time.Second == 0,
 		"registry.service_ttl must be a whole number of seconds, such as \"30s\" or \"1m\", got %s", registry.ServiceTTL)
 	check(registry.CleanupInterval > 0, "registry.cleanup_interval must be positive, got %s", registry.CleanupInterval)
@@ -311,6 +388,21 @@ func (config Config) Validate() error {
 
 	check(slices.Contains(storageBackends, config.Storage.Backend),
 		"storage.backend must be one of %s, got %q", strings.Join(storageBackends, ", "), config.Storage.Backend)
+	check(config.Storage.Backend != StoragePostgres || config.Storage.Postgres.URL != "",
+		"storage.postgres.url is required when storage.backend is %q", StoragePostgres)
+	flush := config.Storage.Postgres.HeartbeatFlushInterval
+	check(config.Storage.Backend != StoragePostgres || (flush >= 0 && flush <= config.Registry.ServiceTTL/3),
+		"storage.postgres.heartbeat_flush_interval must be between 0s (write each heartbeat) and a third of registry.service_ttl (%s), got %s",
+		config.Registry.ServiceTTL/3, flush)
+
+	// A lookup may show a heartbeat as old as the cache, plus the time it
+	// waited to be written, plus the time between heartbeats (a third of
+	// the TTL). Keep the sum within the TTL with room for jitter.
+	if config.Storage.Backend == StoragePostgres && flush > 0 {
+		check(config.Registry.CacheTTL+flush <= config.Registry.ServiceTTL/3,
+			"registry.cache_ttl (%s) and storage.postgres.heartbeat_flush_interval (%s) together must be at most a third of registry.service_ttl (%s), or live instances can look expired in lookups",
+			config.Registry.CacheTTL, flush, config.Registry.ServiceTTL/3)
+	}
 
 	_, levelErr := config.Logging.SlogLevel()
 	check(levelErr == nil, "logging.level must be debug, info, warn or error, got %q", config.Logging.Level)
