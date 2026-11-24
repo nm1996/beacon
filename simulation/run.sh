@@ -18,6 +18,10 @@
 #   docker compose -f simulation/compose.yaml down --volumes
 set -euo pipefail
 
+# Times are passed to the runner and to sleep with a decimal point, which
+# awk and printf write as a comma under locales such as sr_RS.
+export LC_ALL=C
+
 here="$(cd "$(dirname "$0")" && pwd)"
 
 # Every bound below follows from the 9s TTL in compose.yaml; see
@@ -53,7 +57,7 @@ lead=10
 # sleep_until waits until the Unix time $1.
 sleep_until() {
 	local left
-	left="$(awk -v until="$1" -v now="$(now)" 'BEGIN { left = until - now; printf "%.3f", left > 0 ? left : 0 }')"
+	left="$(awk -v until="$1" -v now="$(now)" 'BEGIN { left = until - now; printf "%.3f", (left > 0 ? left : 0) }')"
 	sleep "$left"
 }
 
