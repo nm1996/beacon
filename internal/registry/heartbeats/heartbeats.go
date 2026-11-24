@@ -85,6 +85,9 @@ type Registry struct {
 	// flushedAt is when the last flush that did not fail started. While it
 	// is more than two intervals old, heartbeats are not buffered.
 	flushedAt time.Time
+	// forgets counts the instances forgotten, so a check that started
+	// before one does not remember an instance that is gone.
+	forgets uint64
 }
 
 var _ discovery.Registry = (*Registry)(nil)
@@ -134,6 +137,7 @@ func (registry *Registry) Touch(ctx context.Context, id string, at time.Time, ch
 		return nil
 	}
 
+	forgets := registry.forgets
 	registry.mu.Unlock()
 
 	if err := registry.Registry.Touch(ctx, id, at, check); err != nil {
@@ -147,8 +151,12 @@ func (registry *Registry) Touch(ctx context.Context, id string, at time.Time, ch
 	}
 
 	registry.mu.Lock()
-	registry.known[id] = known{owner: stored.Owner, checkedAt: time.Now()}
-	registry.mu.Unlock()
+	defer registry.mu.Unlock()
+
+	// An instance forgotten meanwhile may be the one just read, now gone.
+	if registry.forgets == forgets {
+		registry.known[id] = known{owner: stored.Owner, checkedAt: time.Now()}
+	}
 
 	return nil
 }
@@ -181,6 +189,7 @@ func (registry *Registry) forget(id string) {
 
 	delete(registry.known, id)
 	delete(registry.pending, id)
+	registry.forgets++
 }
 
 // Flush writes every buffered heartbeat, chunkSize at a time, and forgets

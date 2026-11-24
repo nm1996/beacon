@@ -251,6 +251,46 @@ func TestHeartbeatsAreNotAcknowledgedWhileFlushesFail(t *testing.T) {
 	})
 }
 
+// afterGet is a registry that calls hook after each Get has read the
+// instance.
+type afterGet struct {
+	discovery.Registry
+	hook func()
+}
+
+func (registry *afterGet) Get(ctx context.Context, id string) (discovery.Instance, error) {
+	instance, err := registry.Registry.Get(ctx, id)
+	registry.hook()
+
+	return instance, err
+}
+
+func TestAnInstanceDeletedWhileCheckedIsNotRemembered(t *testing.T) {
+	backend := memory.New()
+	writer := &memoryWriter{registry: backend}
+	hooked := &afterGet{Registry: backend, hook: func() {}}
+	batched := New(hooked, writer, time.Second, slog.New(slog.DiscardHandler), nil)
+	ctx := t.Context()
+
+	create(t, backend, "a", "alice")
+
+	hooked.hook = func() {
+		hooked.hook = func() {}
+
+		if err := batched.Delete(ctx, "a", alice); err != nil {
+			t.Error(err)
+		}
+	}
+
+	if err := batched.Touch(ctx, "a", time.Now(), alice); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := batched.Touch(ctx, "a", time.Now(), alice); !errors.Is(err, discovery.ErrInstanceNotFound) {
+		t.Errorf("expected the deleted instance to be checked again, got %v", err)
+	}
+}
+
 func TestFlushesWithHeartbeatsAreReported(t *testing.T) {
 	backend := memory.New()
 	writer := &memoryWriter{registry: backend}
