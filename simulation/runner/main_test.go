@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -45,18 +47,21 @@ func startBeacon(t *testing.T) string {
 	return server.URL
 }
 
-// startInstance registers an instance of service with Beacon, served by
-// a /work handler that answers with answerAs, or with its own ID when
-// answerAs is empty.
-func startInstance(t *testing.T, beaconURL, service, answerAs string) {
+// serveWork serves /work for an instance of service, answering with
+// answerAs, or, when answerAs is empty, with the ID passed to the returned
+// function once the instance is registered. It returns the registration
+// to make, without an ID.
+func serveWork(t *testing.T, service, answerAs string) (client.Registration, func(id string)) {
 	t.Helper()
 
-	var id string
+	var id atomic.Pointer[string]
 
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
-		answered := id
-		if answerAs != "" {
-			answered = answerAs
+		answered := answerAs
+		if answered == "" {
+			if current := id.Load(); current != nil {
+				answered = *current
+			}
 		}
 
 		_ = json.NewEncoder(writer).Encode(work{Service: service, InstanceID: answered, Time: time.Now()})
@@ -73,17 +78,37 @@ func startInstance(t *testing.T, beaconURL, service, answerAs string) {
 		t.Fatal(err)
 	}
 
+	return client.Registration{Name: service, Address: host, Port: portNumber}, func(registered string) { id.Store(&registered) }
+}
+
+// startInstance registers an instance of service with Beacon, served by
+// a /work handler that answers with answerAs, or with its own ID when
+// answerAs is empty. It returns the registration.
+func startInstance(t *testing.T, beaconURL, service, answerAs string) client.Registration {
+	t.Helper()
+
+	registration, setID := serveWork(t, service, answerAs)
+
 	beacon, err := client.New(beaconURL)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	registered, err := beacon.Register(t.Context(), client.Registration{Name: service, Address: host, Port: portNumber})
-	if err != nil {
+	// The ID Beacon will choose is not known before registering, so the
+	// instance names its own, as the simulation's applications may.
+	registration.ID = "instance-" + strconv.Itoa(registration.Port)
+	setID(registration.ID)
+
+	if _, err := beacon.Register(t.Context(), registration); err != nil {
 		t.Fatal(err)
 	}
 
-	id = registered.ID
+	return registration
+}
+
+// hostPort is how -address names registration.
+func hostPort(registration client.Registration) string {
+	return net.JoinHostPort(registration.Address, strconv.Itoa(registration.Port))
 }
 
 // runScenario runs the runner with args against beaconURL and returns its
@@ -217,9 +242,190 @@ func TestParseOptionsRejectsBadInput(t *testing.T) {
 		{"-expect", "orders=x"},
 		{"-expect", "orders=-1"},
 		{"-rounds", "0"},
+		{"-scenario", "gone", "-service", "orders"},
+		{"-scenario", "back", "-service", "nope", "-address", "x"},
 	} {
 		if _, err := parseOptions(args); err == nil {
 			t.Errorf("parseOptions(%q) succeeded", args)
 		}
+	}
+}
+
+// unregisterAfter removes registration from Beacon after delay.
+func unregisterAfter(t *testing.T, beaconURL string, registration client.Registration, delay time.Duration) {
+	t.Helper()
+
+	beacon, err := client.New(beaconURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	time.AfterFunc(delay, func() { _ = beacon.Unregister(context.Background(), registration.ID) })
+}
+
+func TestGonePassesWhenTheInstanceLeavesInTime(t *testing.T) {
+	beaconURL := startBeacon(t)
+	startInstance(t, beaconURL, "orders", "")
+	target := startInstance(t, beaconURL, "orders", "")
+	unregisterAfter(t, beaconURL, target, 300*time.Millisecond)
+
+	code, output, report := runScenario(t, beaconURL,
+		"-scenario", "gone", "-expect", "orders=2", "-service", "orders", "-address", hostPort(target), "-within", "2s")
+
+	if code != 0 {
+		t.Fatalf("exit %d, want 0:\n%s", code, output)
+	}
+
+	if report.Target == nil || report.Target.ID != target.ID || !strings.Contains(output, "target id: "+target.ID) {
+		t.Errorf("target %+v, want ID %s:\n%s", report.Target, target.ID, output)
+	}
+}
+
+func TestGoneFailsWhenTheInstanceStays(t *testing.T) {
+	beaconURL := startBeacon(t)
+	startInstance(t, beaconURL, "orders", "")
+	target := startInstance(t, beaconURL, "orders", "")
+
+	code, output, _ := runScenario(t, beaconURL,
+		"-scenario", "gone", "-expect", "orders=2", "-service", "orders", "-address", hostPort(target), "-within", "200ms")
+
+	if code != 1 || !strings.Contains(output, "left not seen within") {
+		t.Fatalf("exit %d, want 1 with the instance never leaving:\n%s", code, output)
+	}
+}
+
+func TestGoneFailsWhenAnotherInstanceLeaves(t *testing.T) {
+	beaconURL := startBeacon(t)
+	other := startInstance(t, beaconURL, "orders", "")
+	target := startInstance(t, beaconURL, "orders", "")
+	unregisterAfter(t, beaconURL, target, 300*time.Millisecond)
+	unregisterAfter(t, beaconURL, other, 300*time.Millisecond)
+
+	code, output, _ := runScenario(t, beaconURL,
+		"-scenario", "gone", "-expect", "orders=2", "-service", "orders", "-address", hostPort(target), "-within", "2s")
+
+	if code != 1 || !strings.Contains(output, "FAIL every other instance stays registered") {
+		t.Fatalf("exit %d, want 1 with the other instance gone:\n%s", code, output)
+	}
+}
+
+func TestBackPassesUnderANewID(t *testing.T) {
+	beaconURL := startBeacon(t)
+	since := strconv.FormatInt(time.Now().Unix(), 10)
+	target := startInstance(t, beaconURL, "orders", "")
+
+	code, output, _ := runScenario(t, beaconURL,
+		"-scenario", "back", "-expect", "orders=1", "-service", "orders", "-address", hostPort(target),
+		"-since", since, "-within", "3s", "-old-id", "the-old-one")
+
+	if code != 0 || !strings.Contains(output, "comes back under a new ID") {
+		t.Fatalf("exit %d, want 0:\n%s", code, output)
+	}
+}
+
+func TestBackFailsUnderTheOldID(t *testing.T) {
+	beaconURL := startBeacon(t)
+	target := startInstance(t, beaconURL, "orders", "")
+
+	code, output, _ := runScenario(t, beaconURL,
+		"-scenario", "back", "-expect", "orders=1", "-service", "orders", "-address", hostPort(target),
+		"-within", "3s", "-old-id", target.ID)
+
+	if code != 1 || !strings.Contains(output, "FAIL the old ID never returns") {
+		t.Fatalf("exit %d, want 1 with the old ID returned:\n%s", code, output)
+	}
+}
+
+func TestBackChecksAFixedID(t *testing.T) {
+	beaconURL := startBeacon(t)
+	target := startInstance(t, beaconURL, "orders", "")
+
+	code, output, _ := runScenario(t, beaconURL,
+		"-scenario", "back", "-expect", "orders=1", "-service", "orders", "-address", hostPort(target),
+		"-within", "3s", "-want-id", "orders-2")
+
+	if code != 1 || !strings.Contains(output, "FAIL "+hostPort(target)+" comes back as orders-2") {
+		t.Fatalf("exit %d, want 1 with the wrong ID:\n%s", code, output)
+	}
+}
+
+func TestParseSince(t *testing.T) {
+	parsed, err := parseSince("1700000000.25")
+	if err != nil || !parsed.Equal(time.Unix(1700000000, 250_000_000)) {
+		t.Fatalf("Unix seconds: %v, %v", parsed, err)
+	}
+
+	parsed, err = parseSince("2026-11-24T18:00:00.5Z")
+	if err != nil || !parsed.Equal(time.Date(2026, 11, 24, 18, 0, 0, 500_000_000, time.UTC)) {
+		t.Fatalf("RFC 3339: %v, %v", parsed, err)
+	}
+
+	if _, err := parseSince("yesterday"); err == nil {
+		t.Fatal("parsed yesterday")
+	}
+}
+
+func TestGoneFailsWhenTheInstanceLeavesLate(t *testing.T) {
+	beaconURL := startBeacon(t)
+	startInstance(t, beaconURL, "orders", "")
+	target := startInstance(t, beaconURL, "orders", "")
+	unregisterAfter(t, beaconURL, target, 800*time.Millisecond)
+
+	code, output, _ := runScenario(t, beaconURL,
+		"-scenario", "gone", "-expect", "orders=2", "-service", "orders", "-address", hostPort(target), "-within", "200ms")
+
+	if code != 1 || !strings.Contains(output, "bound 200ms") {
+		t.Fatalf("exit %d, want 1 with the instance late:\n%s", code, output)
+	}
+}
+
+func TestBackWaitsForAFutureSince(t *testing.T) {
+	beaconURL := startBeacon(t)
+	since := time.Now().Add(time.Second)
+
+	target, setID := serveWork(t, "orders", "")
+	target.ID = "late-orders"
+	setID(target.ID)
+
+	beacon, err := client.New(beaconURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	registered := make(chan error, 1)
+
+	time.AfterFunc(1500*time.Millisecond, func() {
+		_, err := beacon.Register(context.Background(), target)
+		registered <- err
+	})
+
+	code, output, report := runScenario(t, beaconURL,
+		"-scenario", "back", "-expect", "orders=1", "-service", "orders", "-address", hostPort(target),
+		"-since", strconv.FormatFloat(float64(since.UnixMicro())/1e6, 'f', 6, 64), "-within", "2s")
+
+	if err := <-registered; err != nil {
+		t.Fatal(err)
+	}
+
+	if code != 0 || !strings.Contains(output, "ok   the runner is ready before -since") {
+		t.Fatalf("exit %d, want 0 having waited:\n%s", code, output)
+	}
+
+	// Measured from -since, not from the runner's start a second earlier.
+	if after := report.Timings["back_beacon-a"]; after < 300 || after > 1500 {
+		t.Errorf("back after %vms, want about 500ms after -since", after)
+	}
+}
+
+func TestOthersAnsweredCountsFailedPicks(t *testing.T) {
+	caller := &traffic{calls: map[string]int{"orders-1:9000": 3}, failures: map[string]int{}, pickFailures: 2}
+
+	if err := othersAnswered(caller, ""); err == nil || !strings.Contains(err.Error(), "could not pick an instance 2 times") {
+		t.Fatalf("othersAnswered = %v, want the failed picks named", err)
+	}
+
+	caller.pickFailures = 0
+	if err := othersAnswered(caller, ""); err != nil {
+		t.Fatalf("othersAnswered = %v with every call answered", err)
 	}
 }

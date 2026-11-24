@@ -125,7 +125,8 @@ services:
 
   orders-2:
     <<: *app
-    command: ["-service", "orders", "-address", "orders-2"]
+    # run.sh sets ORDERS_2_ID for the variant of scenario D with a fixed ID.
+    command: ["-service", "orders", "-address", "orders-2", "-id", "${ORDERS_2_ID:-}"]
 
   payments-1:
     <<: *app
