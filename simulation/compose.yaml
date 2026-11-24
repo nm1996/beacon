@@ -5,7 +5,8 @@
 #   docker compose -f simulation/compose.yaml up --build --wait
 #
 # Everything here is for a laptop only: PostgreSQL trusts every connection
-# from the Compose network, and authentication is off.
+# from the Compose network. Authentication is off unless BEACON_SIM_AUTH is
+# true, with the tokens run.sh generates in auth/.
 
 name: beacon-sim
 
@@ -23,6 +24,8 @@ x-beacon-node: &beacon-node
       condition: service_healthy
   networks:
     sim: {}
+  volumes:
+    - ./auth:/etc/beacon/auth:ro
   read_only: true
   cap_drop:
     - ALL
@@ -42,6 +45,8 @@ x-app: &app
       condition: service_healthy
   networks:
     sim: {}
+  volumes:
+    - ./auth:/auth:ro
   read_only: true
   cap_drop:
     - ALL
@@ -59,6 +64,8 @@ x-beacon-environment: &beacon-environment
   # trusted to name the real client in X-Forwarded-For. Without it, every
   # application would share one registration rate limit.
   BEACON_SERVER_TRUSTED_PROXIES: 172.29.53.10
+  BEACON_AUTH_ENABLED: ${BEACON_SIM_AUTH:-false}
+  BEACON_AUTH_TOKENS_FILE: ${BEACON_SIM_AUTH:+/etc/beacon/auth/tokens.toml}
 
 services:
   postgres:
@@ -121,20 +128,20 @@ services:
 
   orders-1:
     <<: *app
-    command: ["-service", "orders", "-address", "orders-1"]
+    command: ["-service", "orders", "-address", "orders-1", "-token-file", "${BEACON_SIM_AUTH:+/auth/orders.token}"]
 
   orders-2:
     <<: *app
     # run.sh sets ORDERS_2_ID for the variant of scenario D with a fixed ID.
-    command: ["-service", "orders", "-address", "orders-2", "-id", "${ORDERS_2_ID:-}"]
+    command: ["-service", "orders", "-address", "orders-2", "-id", "${ORDERS_2_ID:-}", "-token-file", "${BEACON_SIM_AUTH:+/auth/orders.token}"]
 
   payments-1:
     <<: *app
-    command: ["-service", "payments", "-address", "payments-1"]
+    command: ["-service", "payments", "-address", "payments-1", "-token-file", "${BEACON_SIM_AUTH:+/auth/payments.token}"]
 
   inventory-1:
     <<: *app
-    command: ["-service", "inventory", "-address", "inventory-1"]
+    command: ["-service", "inventory", "-address", "inventory-1", "-token-file", "${BEACON_SIM_AUTH:+/auth/inventory.token}"]
 
   # Runs one scenario and exits; it never starts with "up":
   #
@@ -148,8 +155,11 @@ services:
     # Reports are written as the user running Compose, so they can be read
     # and deleted without root. run.sh sets these.
     user: "${RUNNER_UID:-65532}:${RUNNER_GID:-65532}"
+    environment:
+      RUNNER_TOKEN_FILE: ${BEACON_SIM_AUTH:+/auth/runner.token}
     volumes:
       - ./reports:/reports
+      - ./auth:/auth:ro
 
 networks:
   sim:

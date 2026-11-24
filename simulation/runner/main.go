@@ -56,6 +56,14 @@ type options struct {
 	// long to watch the others afterwards.
 	down  string
 	watch time.Duration
+
+	// For storage-down: how long after since PostgreSQL is started again,
+	// and how long the nodes then have to serve again.
+	outage  time.Duration
+	recover time.Duration
+
+	// attackerToken is, for ownership, another service's token.
+	attackerToken string
 }
 
 // scenario runs its steps against cluster, recording each in the report.
@@ -67,11 +75,33 @@ var scenarios = map[string]scenario{
 	"gone":   runGone,
 	"back":   runBack,
 
-	"node-down": runNodeDown,
+	"node-down":    runNodeDown,
+	"storage-down": runStorageDown,
+	"ownership":    runOwnership,
 }
 
 // aboutOneInstance lists the scenarios that need -service and -address.
 var aboutOneInstance = []string{"gone", "back"}
+
+// readToken returns the token in path, without surrounding white space,
+// or nothing when path is empty.
+func readToken(path string) (string, error) {
+	if path == "" {
+		return "", nil
+	}
+
+	content, err := os.ReadFile(path) //nolint:gosec // The path comes from the command line, by design.
+	if err != nil {
+		return "", fmt.Errorf("read token: %w", err)
+	}
+
+	token := strings.TrimSpace(string(content))
+	if token == "" {
+		return "", fmt.Errorf("read token: %s is empty", path)
+	}
+
+	return token, nil
+}
 
 // main runs the scenario and exits 1 if it failed, 2 if it could not run.
 func main() {
@@ -136,10 +166,12 @@ func parseOptions(args []string) (options, error) {
 	flags := flag.NewFlagSet("runner", flag.ContinueOnError)
 
 	var (
-		parsed   options
-		nodes    string
-		expected string
-		since    string
+		parsed       options
+		nodes        string
+		expected     string
+		since        string
+		tokenFile    string
+		attackerFile string
 	)
 
 	flags.StringVar(&parsed.scenario, "scenario", "normal", "scenario to run: "+strings.Join(scenarioNames(), ", "))
@@ -148,8 +180,11 @@ func parseOptions(args []string) (options, error) {
 	flags.StringVar(&parsed.reports, "reports", "/reports", "directory to write the JSON report to")
 	flags.DurationVar(&parsed.timeout, "timeout", time.Minute, "how long to wait for the cluster to reach the expected state")
 	flags.IntVar(&parsed.rounds, "rounds", 20, "how many times to repeat each lookup and call, for latency")
-	flags.StringVar(&parsed.token, "token", os.Getenv("RUNNER_TOKEN"), "bearer token for Beacon; defaults to $RUNNER_TOKEN")
-	flags.StringVar(&parsed.service, "service", "", "gone, back: the service of the instance to watch")
+	flags.StringVar(&tokenFile, "token-file", os.Getenv("RUNNER_TOKEN_FILE"), "file holding the runner's bearer token for Beacon; defaults to $RUNNER_TOKEN_FILE, and empty sends none")
+	flags.StringVar(&attackerFile, "attacker-token-file", "", "ownership: file holding another service's token, which must not be able to change -service's instances")
+	flags.DurationVar(&parsed.outage, "outage", 20*time.Second, "storage-down: how long after -since PostgreSQL is started again")
+	flags.DurationVar(&parsed.recover, "recover", 15*time.Second, "storage-down: how long after PostgreSQL starts every node must serve again")
+	flags.StringVar(&parsed.service, "service", "", "gone, back: the service of the instance to watch; ownership: the service whose instances to attack")
 	flags.StringVar(&parsed.address, "address", "", "gone, back: the address of the instance to watch, such as orders-2, or host:port")
 	flags.StringVar(&since, "since", "", "gone, back, node-down: when the instance or node is or was killed, stopped or started, as Unix seconds or RFC 3339; empty is now. A time to come is waited for")
 	flags.DurationVar(&parsed.within, "within", 9*time.Second, "gone, back: how long after -since the change may take")
@@ -185,6 +220,28 @@ func parseOptions(args []string) (options, error) {
 	}
 
 	parsed.sinceAhead = parsed.since.After(time.Now())
+
+	if parsed.token, err = readToken(tokenFile); err != nil {
+		return options{}, err
+	}
+
+	if parsed.attackerToken, err = readToken(attackerFile); err != nil {
+		return options{}, err
+	}
+
+	if parsed.scenario == "ownership" {
+		if parsed.attackerToken == "" {
+			return options{}, errors.New("-scenario ownership needs -attacker-token-file")
+		}
+
+		if _, ok := parsed.expected[parsed.service]; !ok {
+			return options{}, errors.New("-scenario ownership needs a -service listed in -expect")
+		}
+	}
+
+	if parsed.scenario == "storage-down" && (parsed.outage <= 0 || parsed.recover <= 0) {
+		return options{}, errors.New("-outage and -recover must be positive")
+	}
 
 	if parsed.scenario == "node-down" && (parsed.down == "" || parsed.watch <= 0) {
 		return options{}, errors.New("-scenario node-down needs -down and a positive -watch")

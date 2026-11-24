@@ -5,3 +5,4 @@
 !client/
 !simulation/
 simulation/reports/
+simulation/auth/

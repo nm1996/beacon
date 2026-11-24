@@ -383,8 +383,16 @@ func countErr(count int, what string) error {
 // acts at that moment, so whatever the runner set up after it would miss
 // the start of what it measures.
 func (cluster *cluster) awaitSince(ctx context.Context, options options) error {
+	cluster.readyBySince(options)
+
+	return sleep(ctx, time.Until(options.since))
+}
+
+// readyBySince records whether the runner got ready before options.since,
+// when that was still to come as the runner started.
+func (cluster *cluster) readyBySince(options options) {
 	if !options.sinceAhead {
-		return nil
+		return
 	}
 
 	now := time.Now()
@@ -395,8 +403,6 @@ func (cluster *cluster) awaitSince(ctx context.Context, options options) error {
 	}
 
 	cluster.report.check("the runner is ready before -since", now, late)
-
-	return sleep(ctx, options.since.Sub(now))
 }
 
 // sleep waits for delay or until ctx ends.
