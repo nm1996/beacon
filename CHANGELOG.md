@@ -46,8 +46,9 @@ Add an entry under **Unreleased** in the same pull request as the change.
   `503` or `504`. It used to fail on the first lost response, so `Announce`
   could fail on one dropped packet.
 - A `Lease` registers again under the ID it had, so the instance keeps its
-  ID across Beacon restarts. Only if another instance took the ID meanwhile
-  does it register under a new one.
+  ID across Beacon restarts. Only if another instance took the ID meanwhile,
+  or another caller owns it (`403 instance_not_owned`), does it register
+  under a new one, with one warning in the log.
 
 ## [0.2.0] - 2026-11-13
 

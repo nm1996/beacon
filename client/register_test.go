@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -158,6 +159,47 @@ func TestLeaseTakesANewIDWhenItsOwnIsTaken(t *testing.T) {
 
 		if ids := instanceIDs(t, beacon); len(ids) != 2 {
 			t.Errorf("expected the intruder and the lease's new instance, got %v", ids)
+		}
+	})
+}
+
+func TestLeaseTakesANewIDWhenAnotherCallerOwnsIt(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var notOwned atomic.Int32
+
+		// Heartbeats for the lease's first ID are refused as another
+		// caller's, as after a token mix-up; everything else is served.
+		fake := newFakeBeacon(t)
+		handler := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			if request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/first/heartbeat") {
+				notOwned.Add(1)
+				writer.Header().Set("Content-Type", "application/json")
+				writer.WriteHeader(http.StatusForbidden)
+				_, _ = writer.Write([]byte(`{"error":{"code":"instance_not_owned","message":"not yours"}}`))
+
+				return
+			}
+
+			fake.ServeHTTP(writer, request)
+		})
+
+		beacon := mustNew(t, "http://beacon.test", client.WithHTTPClient(&http.Client{Transport: handlerTransport{handler: handler}}))
+
+		lease, err := beacon.Announce(t.Context(), client.Registration{ID: "first", Name: "orders", Address: "127.0.0.1", Port: 8081})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer lease.Close(context.Background())
+
+		time.Sleep(25 * time.Second)
+		synctest.Wait()
+
+		if lease.ID() == "first" || notOwned.Load() != 1 {
+			t.Errorf("expected one refused heartbeat and then a new ID, got %s after %d refusals", lease.ID(), notOwned.Load())
+		}
+
+		if fake.succeeded.Load() == 0 {
+			t.Error("expected heartbeats under the new ID to succeed")
 		}
 	})
 }

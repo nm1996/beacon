@@ -147,7 +147,8 @@ func (lease *Lease) run(ctx context.Context) {
 }
 
 // renew sends a heartbeat, or registers again if Beacon no longer knows the
-// instance. It reports whether the instance is known to Beacon afterwards.
+// instance, or if another caller owns its ID, under a new ID then. It
+// reports whether the instance is known to Beacon afterwards.
 // Each request gets at most attemptTimeout.
 func (lease *Lease) renew(ctx context.Context) bool {
 	logger := lease.client.logger
@@ -165,7 +166,14 @@ func (lease *Lease) renew(ctx context.Context) bool {
 		return false
 	}
 
-	if !errors.Is(err, ErrNotFound) {
+	switch {
+	case errors.Is(err, ErrNotOwned):
+		// Another caller holds the ID, so heartbeats under it will never
+		// pass: say so once and register under a new ID.
+		logger.WarnContext(ctx, "beacon says another caller owns the instance's ID; registering under a new one",
+			slog.String("name", lease.registration.Name), slog.String("id", id))
+		lease.registration.ID = ""
+	case !errors.Is(err, ErrNotFound):
 		logger.WarnContext(ctx, "beacon heartbeat failed", slog.String("id", id), slog.Any("error", err))
 		return false
 	}
