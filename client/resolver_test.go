@@ -241,3 +241,185 @@ func TestRandomPickerStaysWithinTheInstances(t *testing.T) {
 		t.Errorf("expected every instance to be picked eventually, got %v", seen)
 	}
 }
+
+// pickedPorts picks count times and returns the ports seen.
+func pickedPorts(t *testing.T, resolver *client.Resolver, count int) map[int]int {
+	t.Helper()
+
+	seen := map[int]int{}
+
+	for range count {
+		instance, err := resolver.Pick()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		seen[instance.Port]++
+	}
+
+	return seen
+}
+
+// instanceOnPort returns the resolver's instance listening on port.
+func instanceOnPort(t *testing.T, resolver *client.Resolver, port int) client.Instance {
+	t.Helper()
+
+	for _, instance := range resolver.Instances() {
+		if instance.Port == port {
+			return instance
+		}
+	}
+
+	t.Fatalf("no instance on port %d", port)
+
+	return client.Instance{}
+}
+
+func TestOutlierDetectionIsOffByDefault(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		_, _, beacon := resolverFixture(t)
+		registerPorts(t, beacon, 1, 2)
+
+		resolver, err := beacon.NewResolver(t.Context(), "orders")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resolver.Close()
+
+		for range 100 {
+			resolver.Report(instanceOnPort(t, resolver, 1), errors.New("refused"))
+		}
+
+		if seen := pickedPorts(t, resolver, 10); seen[1] == 0 {
+			t.Errorf("expected reports to change nothing without outlier detection, got %v", seen)
+		}
+	})
+}
+
+func TestFailingInstancesAreEjectedForAWhile(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		_, _, beacon := resolverFixture(t)
+		registerPorts(t, beacon, 1, 2, 3)
+
+		resolver, err := beacon.NewResolver(t.Context(), "orders", client.WithOutlierDetection(client.OutlierDetection{
+			ConsecutiveFailures: 3,
+			EjectionTime:        10 * time.Second,
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resolver.Close()
+
+		bad := instanceOnPort(t, resolver, 1)
+
+		// Two failures, a success, two more: never three in a row.
+		for _, failed := range []bool{true, true, false, true, true} {
+			var err error
+			if failed {
+				err = errors.New("refused")
+			}
+
+			resolver.Report(bad, err)
+		}
+
+		if seen := pickedPorts(t, resolver, 9); seen[1] == 0 {
+			t.Fatalf("expected a success to reset the count, got %v", seen)
+		}
+
+		resolver.Report(bad, errors.New("refused"))
+
+		if seen := pickedPorts(t, resolver, 30); seen[1] != 0 || seen[2] == 0 || seen[3] == 0 {
+			t.Fatalf("expected the instance ejected and the others picked, got %v", seen)
+		}
+
+		time.Sleep(10 * time.Second)
+
+		if seen := pickedPorts(t, resolver, 9); seen[1] == 0 {
+			t.Fatalf("expected the instance back after its ejection, got %v", seen)
+		}
+
+		// A second ejection lasts twice as long.
+		for range 3 {
+			resolver.Report(bad, errors.New("refused"))
+		}
+
+		time.Sleep(15 * time.Second)
+
+		if seen := pickedPorts(t, resolver, 9); seen[1] != 0 {
+			t.Errorf("expected the second ejection to last 20s, got %v after 15s", seen)
+		}
+
+		time.Sleep(5 * time.Second)
+
+		if seen := pickedPorts(t, resolver, 9); seen[1] == 0 {
+			t.Errorf("expected the instance back after 20s, got %v", seen)
+		}
+	})
+}
+
+func TestEjectionsAreCapped(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		_, _, beacon := resolverFixture(t)
+		registerPorts(t, beacon, 1, 2)
+
+		resolver, err := beacon.NewResolver(t.Context(), "orders", client.WithOutlierDetection(client.OutlierDetection{ConsecutiveFailures: 1}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resolver.Close()
+
+		// The caller's own network fails, so every instance looks bad: at
+		// most half of them may be ejected.
+		resolver.Report(instanceOnPort(t, resolver, 1), errors.New("unreachable"))
+		resolver.Report(instanceOnPort(t, resolver, 2), errors.New("unreachable"))
+
+		if seen := pickedPorts(t, resolver, 10); len(seen) != 1 {
+			t.Errorf("expected exactly one of two instances ejected, got %v", seen)
+		}
+	})
+}
+
+func TestTheLastInstanceIsNeverEjected(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		_, _, beacon := resolverFixture(t)
+		registerPorts(t, beacon, 1)
+
+		resolver, err := beacon.NewResolver(t.Context(), "orders", client.WithOutlierDetection(client.OutlierDetection{
+			ConsecutiveFailures: 1,
+			MaxEjectedPercent:   100,
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resolver.Close()
+
+		resolver.Report(instanceOnPort(t, resolver, 1), errors.New("refused"))
+
+		if _, err := resolver.Pick(); err != nil {
+			t.Errorf("expected the only instance to stay pickable, got %v", err)
+		}
+	})
+}
+
+func TestOneInstanceAlwaysStaysEvenAtAHundredPercent(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		_, _, beacon := resolverFixture(t)
+		registerPorts(t, beacon, 1, 2)
+
+		resolver, err := beacon.NewResolver(t.Context(), "orders", client.WithOutlierDetection(client.OutlierDetection{
+			ConsecutiveFailures: 1,
+			MaxEjectedPercent:   100,
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resolver.Close()
+
+		resolver.Report(instanceOnPort(t, resolver, 1), errors.New("refused"))
+		resolver.Report(instanceOnPort(t, resolver, 2), errors.New("refused"))
+
+		if seen := pickedPorts(t, resolver, 10); len(seen) != 1 || seen[2] != 10 {
+			t.Errorf("expected only the second instance to stay, got %v", seen)
+		}
+	})
+}

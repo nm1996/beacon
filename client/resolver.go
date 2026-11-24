@@ -76,7 +76,32 @@ type resolverSettings struct {
 	refreshInterval time.Duration
 	maxStale        time.Duration
 	picker          Picker
+	outliers        OutlierDetection
 }
+
+// OutlierDetection configures how a Resolver stops picking instances that
+// keep failing, as Envoy's outlier detection does. The zero value turns it
+// off, which is the default.
+type OutlierDetection struct {
+	// ConsecutiveFailures is how many failures in a row, reported with
+	// Resolver.Report, eject an instance. Zero turns detection off.
+	ConsecutiveFailures int
+	// EjectionTime is how long a first ejection lasts; each further one of
+	// the same instance lasts that much longer, up to ten times it. Zero
+	// means 30 seconds.
+	EjectionTime time.Duration
+	// MaxEjectedPercent caps the share of a service's instances ejected at
+	// once, so a failure on the caller's side cannot eject everything. Zero
+	// means 50; at least one instance always stays.
+	MaxEjectedPercent int
+}
+
+// Defaults of OutlierDetection.
+const (
+	defaultEjectionTime      = 30 * time.Second
+	defaultMaxEjectedPercent = 50
+	maxEjectionMultiplier    = 10
+)
 
 // ResolverOption configures a Resolver.
 type ResolverOption func(*resolverSettings)
@@ -96,6 +121,22 @@ func WithRefreshInterval(interval time.Duration) ResolverOption {
 func WithMaxStale(maxStale time.Duration) ResolverOption {
 	return func(settings *resolverSettings) {
 		settings.maxStale = maxStale
+	}
+}
+
+// WithOutlierDetection makes the Resolver skip instances that callers
+// report failing; see OutlierDetection. It is off by default.
+func WithOutlierDetection(detection OutlierDetection) ResolverOption {
+	return func(settings *resolverSettings) {
+		if detection.EjectionTime <= 0 {
+			detection.EjectionTime = defaultEjectionTime
+		}
+
+		if detection.MaxEjectedPercent <= 0 || detection.MaxEjectedPercent > 100 {
+			detection.MaxEjectedPercent = defaultMaxEjectedPercent
+		}
+
+		settings.outliers = detection
 	}
 }
 
@@ -129,6 +170,13 @@ type Resolver struct {
 	settings resolverSettings
 
 	current atomic.Pointer[view]
+
+	// ejected maps instance IDs to when their ejection ends. It is replaced,
+	// never changed, so Pick reads it without a lock; Report builds the next
+	// one under outliersMu.
+	ejected    atomic.Pointer[map[string]time.Time]
+	outliersMu sync.Mutex
+	outliers   map[string]*outlier
 
 	stop      context.CancelFunc
 	done      chan struct{}
@@ -185,7 +233,108 @@ func (resolver *Resolver) Pick() (Instance, error) {
 		return Instance{}, ErrNoInstances
 	}
 
-	return resolver.settings.picker.Pick(current.instances), nil
+	return resolver.settings.picker.Pick(resolver.healthy(current.instances)), nil
+}
+
+// outlier is what a Resolver tracks about an instance callers report on.
+type outlier struct {
+	failures  int
+	ejections int
+}
+
+// Report tells the Resolver how a call to instance went: err nil for a
+// success, which resets its count, or the error. With outlier detection on,
+// enough failures in a row eject the instance for a while, and Pick skips
+// it. Without it, Report does nothing.
+func (resolver *Resolver) Report(instance Instance, err error) {
+	detection := resolver.settings.outliers
+	if detection.ConsecutiveFailures <= 0 {
+		return
+	}
+
+	resolver.outliersMu.Lock()
+	defer resolver.outliersMu.Unlock()
+
+	if resolver.outliers == nil {
+		resolver.outliers = make(map[string]*outlier)
+	}
+
+	state := resolver.outliers[instance.ID]
+	if state == nil {
+		state = &outlier{}
+		resolver.outliers[instance.ID] = state
+	}
+
+	if err == nil {
+		state.failures = 0
+		return
+	}
+
+	state.failures++
+	if state.failures < detection.ConsecutiveFailures {
+		return
+	}
+
+	now := time.Now()
+	ejected := resolver.liveEjections(now)
+
+	if _, already := ejected[instance.ID]; already {
+		return
+	}
+
+	total := len(resolver.current.Load().instances)
+	if allowed := total * detection.MaxEjectedPercent / 100; len(ejected) >= min(allowed, total-1) {
+		return
+	}
+
+	state.failures = 0
+	state.ejections++
+	ejected[instance.ID] = now.Add(detection.EjectionTime * time.Duration(min(state.ejections, maxEjectionMultiplier)))
+	resolver.ejected.Store(&ejected)
+
+	resolver.client.logger.Warn("beacon resolver ejected an instance",
+		slog.String("name", resolver.name), slog.String("id", instance.ID), slog.Int("ejections", state.ejections))
+}
+
+// liveEjections returns a copy of the ejections that have not ended by
+// now. The caller holds outliersMu.
+func (resolver *Resolver) liveEjections(now time.Time) map[string]time.Time {
+	live := make(map[string]time.Time)
+
+	if current := resolver.ejected.Load(); current != nil {
+		for id, until := range *current {
+			if now.Before(until) {
+				live[id] = until
+			}
+		}
+	}
+
+	return live
+}
+
+// healthy returns instances without those currently ejected, or instances
+// itself when none is.
+func (resolver *Resolver) healthy(instances []Instance) []Instance {
+	ejected := resolver.ejected.Load()
+	if ejected == nil || len(*ejected) == 0 {
+		return instances
+	}
+
+	now := time.Now()
+	result := make([]Instance, 0, len(instances))
+
+	for _, instance := range instances {
+		if until, out := (*ejected)[instance.ID]; !out || !now.Before(until) {
+			result = append(result, instance)
+		}
+	}
+
+	// Ejections never cover everything, but the view may have shrunk since.
+	if len(result) == 0 {
+		return instances
+	}
+
+	return result
 }
 
 // Instances returns a copy of the instances the Resolver holds, sorted by

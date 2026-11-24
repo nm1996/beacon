@@ -45,7 +45,9 @@ Add an entry under **Unreleased** in the same pull request as the change.
   (`client.RoundRobin`, the default, `client.Random`, or any
   `client.Picker`), and while Beacon is unreachable it keeps serving the
   last instances for up to `client.WithMaxStale`, then returns
-  `client.ErrStale`. See
+  `client.ErrStale`. With `client.WithOutlierDetection`, off by default,
+  instances that `Resolver.Report` shows failing several times in a row are
+  skipped for a while, never more than half of them nor the last one. See
   [design record 0005](docs/design/0005-client-cache-and-load-balancing.md).
 - `client.Registration.ID` chooses the instance ID, and `client.ErrConflict`
   matches `instance_exists` and `idempotency_key_reused`.

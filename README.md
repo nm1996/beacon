@@ -642,6 +642,7 @@ A `Resolver` is the client-side cache and load balancer most services want inste
 - **Picking:** `Pick` chooses an instance without a request, in turn by default. `client.WithPicker(client.Random())` picks at random, and any type with a `Pick([]client.Instance) client.Instance` method plugs in, such as consistent hashing.
 - **While Beacon is down:** the `Resolver` keeps serving the instances it last saw and retries with backoff. After 5 minutes (`client.WithMaxStale`), `Pick` returns `client.ErrStale`, since routing on a picture that old is worse than failing.
 - **No instances:** `Pick` returns `client.ErrNoInstances`, so callers can tell an empty service from an unreachable Beacon.
+- **Failing instances:** with `client.WithOutlierDetection(client.OutlierDetection{ConsecutiveFailures: 5})`, callers report each call with `resolver.Report(instance, err)`, and an instance that fails that many times in a row is skipped for 30 seconds (`EjectionTime`), longer each time it happens again, up to ten times as long. At most half the instances (`MaxEjectedPercent`) are skipped at once, and never the last one, so a failure on the caller's own side cannot empty the service. It is off by default.
 - **Close:** stops the refreshes. A picked instance may still have just gone away, so handle connection errors by picking again.
 
 `Discover` fetches the current instances on every call, for tools and one-off lookups.
