@@ -40,6 +40,10 @@ type Config struct {
 	// RateLimited, if not nil, is called with LimitRegistrations for every
 	// registration RegistrationLimit refuses.
 	RateLimited func(limit string)
+	// TrustedProxies are the proxies whose X-Forwarded-For header gives the
+	// client address that registration limits are keyed by. Empty trusts
+	// none.
+	TrustedProxies TrustedProxies
 }
 
 // rateLimited reports a refusal by limit to RateLimited, if set.

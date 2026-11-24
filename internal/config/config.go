@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"math"
 	"net"
+	"net/netip"
 	"os"
 	"slices"
 	"strconv"
@@ -57,6 +58,35 @@ type ServerConfig struct {
 	// checked for changes and reloaded when their contents differ. Zero
 	// turns checking off; SIGHUP still reloads on platforms that have it.
 	ReloadInterval time.Duration `toml:"reload_interval"`
+	// TrustedProxies lists the addresses or CIDR ranges of proxies, such as
+	// load balancers, whose X-Forwarded-For header gives the client address
+	// rate limits are keyed by. Empty, the default, trusts no proxy.
+	TrustedProxies []string `toml:"trusted_proxies"`
+}
+
+// TrustedProxyRanges parses TrustedProxies. A plain address is a range of
+// that one address.
+func (server ServerConfig) TrustedProxyRanges() ([]netip.Prefix, error) {
+	ranges := make([]netip.Prefix, 0, len(server.TrustedProxies))
+
+	for _, entry := range server.TrustedProxies {
+		entry = strings.TrimSpace(entry)
+
+		if prefix, err := netip.ParsePrefix(entry); err == nil {
+			ranges = append(ranges, prefix.Masked())
+			continue
+		}
+
+		address, err := netip.ParseAddr(entry)
+		if err != nil {
+			return nil, fmt.Errorf("%q is neither an address nor a CIDR range", entry)
+		}
+
+		address = address.Unmap()
+		ranges = append(ranges, netip.PrefixFrom(address, address.BitLen()))
+	}
+
+	return ranges, nil
 }
 
 // TLSConfig turns on HTTPS. Setting both files serves the API, /health and
@@ -169,6 +199,7 @@ func Default() Config {
 			WriteTimeout:        10 * time.Second,
 			IdleTimeout:         60 * time.Second,
 			ShutdownTimeout:     10 * time.Second,
+			TrustedProxies:      []string{},
 			MaxRequestBodyBytes: 64 << 10,
 		},
 		Registry: RegistryConfig{
@@ -262,6 +293,8 @@ func (config Config) Validate() error {
 	check(server.MaxRequestBodyBytes > 0, "server.max_request_body_bytes must be positive, got %d", server.MaxRequestBodyBytes)
 	// Each check reads every file, so sub-second intervals would only add
 	// load; zero means off.
+	_, proxiesErr := server.TrustedProxyRanges()
+	check(proxiesErr == nil, "server.trusted_proxies: %v", proxiesErr)
 	check(server.ReloadInterval == 0 || server.ReloadInterval >= time.Second,
 		"server.reload_interval must be 0s (off) or at least 1s, got %s", server.ReloadInterval)
 

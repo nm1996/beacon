@@ -28,6 +28,8 @@ func TestClientNetwork(t *testing.T) {
 		{remote: "[2001:db8:1:3::1]:5000", want: "2001:db8:1:3::/64"},
 		{remote: "[fe80::1%eth0]:5000", want: "fe80::/64"},
 		{remote: "@", want: "@"},
+		{remote: "beacon.internal:5000", want: "beacon.internal"},
+		{remote: "beacon.internal:5001", want: "beacon.internal"},
 	}
 
 	for _, tt := range tests {
@@ -35,7 +37,7 @@ func TestClientNetwork(t *testing.T) {
 			request := httptest.NewRequest(http.MethodGet, "/", nil)
 			request.RemoteAddr = tt.remote
 
-			if got := clientNetwork(request); got != tt.want {
+			if got := clientNetwork(request, nil); got != tt.want {
 				t.Errorf("expected %q, got %q", tt.want, got)
 			}
 		})

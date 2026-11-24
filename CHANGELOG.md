@@ -9,6 +9,15 @@ Add an entry under **Unreleased** in the same pull request as the change.
 
 ## [Unreleased]
 
+### Added
+
+- `server.trusted_proxies` (`BEACON_SERVER_TRUSTED_PROXIES`): addresses or
+  CIDR ranges of proxies whose `X-Forwarded-For` header gives the client
+  address that rate limits are keyed by. Beacon takes the rightmost
+  address that is not a listed proxy, so entries a client adds are never
+  believed. Empty by default, which keeps ignoring the header. See
+  [design record 0001](docs/design/0001-trusted-proxies.md).
+
 ## [0.2.0] - 2026-11-13
 
 Upgrading from 0.1.0 needs attention in three places, each described below:

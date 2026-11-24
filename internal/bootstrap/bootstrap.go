@@ -94,9 +94,17 @@ func New(settings config.Config, logger *slog.Logger, version string) (*Componen
 
 	limits := settings.RateLimit
 
+	// Load has validated the ranges already.
+	ranges, err := settings.Server.TrustedProxyRanges()
+	if err != nil {
+		return nil, fmt.Errorf("trusted proxies: %w", err)
+	}
+
+	proxies := api.TrustedProxies(ranges)
+
 	var guard *api.Guard
 	if settings.Auth.Enabled {
-		guard = api.NewGuard(store, logger, failed, api.WithFailureLimit(
+		guard = api.NewGuard(store, logger, failed, api.WithTrustedProxies(proxies), api.WithFailureLimit(
 			ratelimit.New(limits.AuthFailuresPerSecond, limits.AuthFailureBurst, 0),
 			func() {
 				if rateLimited != nil {
@@ -112,6 +120,7 @@ func New(settings config.Config, logger *slog.Logger, version string) (*Componen
 		Guard:               guard,
 		RegistrationLimit:   ratelimit.New(limits.RegistrationsPerSecond, limits.RegistrationBurst, 0),
 		RateLimited:         rateLimited,
+		TrustedProxies:      proxies,
 	})
 
 	if observer != nil {
