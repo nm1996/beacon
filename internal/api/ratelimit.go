@@ -3,6 +3,7 @@ package api
 import (
 	"log/slog"
 	"math"
+	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -34,7 +35,14 @@ const ipv6NetworkBits = 64
 func clientNetwork(request *http.Request, proxies TrustedProxies) string {
 	address, ok := proxies.clientAddress(request)
 	if !ok {
-		return request.RemoteAddr
+		// Not an IP address: key by the host alone, so every connection
+		// from it shares one bucket whatever its port.
+		host, _, err := net.SplitHostPort(request.RemoteAddr)
+		if err != nil {
+			return request.RemoteAddr
+		}
+
+		return host
 	}
 
 	if address.Is4() {
