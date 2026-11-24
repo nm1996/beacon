@@ -1,0 +1,197 @@
+{
+  "scenario": "node-down",
+  "run": "214319Z",
+  "label": "node-killed-retry-post",
+  "started": "2026-11-24T21:47:54.462425502Z",
+  "finished": "2026-11-24T21:48:33.811367394Z",
+  "passed": true,
+  "endpoints": {
+    "beacon-a": "http://beacon-a:8080",
+    "beacon-b": "http://beacon-b:8080"
+  },
+  "expected": {
+    "inventory": 1,
+    "orders": 2,
+    "payments": 1
+  },
+  "seen": {
+    "beacon-b": {
+      "inventory": [
+        {
+          "id": "4b382f77-80b2-5130-9599-977c62f5f66b",
+          "address": "inventory-1",
+          "port": 9000
+        }
+      ],
+      "orders": [
+        {
+          "id": "4d26320b-377d-548f-93a9-4502a3a36a5e",
+          "address": "orders-1",
+          "port": 9000
+        },
+        {
+          "id": "6ebeef7e-a7ca-5d41-b9a3-8f09cc98381f",
+          "address": "orders-2",
+          "port": 9000
+        }
+      ],
+      "payments": [
+        {
+          "id": "356cd95e-c4af-51d0-89e8-5ab776f90b18",
+          "address": "payments-1",
+          "port": 9000
+        }
+      ]
+    }
+  },
+  "calls_by_address": {
+    "inventory-1:9000": {
+      "calls": 393,
+      "failures": 0
+    },
+    "orders-1:9000": {
+      "calls": 197,
+      "failures": 0
+    },
+    "orders-2:9000": {
+      "calls": 196,
+      "failures": 0
+    },
+    "payments-1:9000": {
+      "calls": 393,
+      "failures": 0
+    }
+  },
+  "steps": [
+    {
+      "name": "the runner is ready before -since",
+      "passed": true,
+      "at": "2026-11-24T21:47:54.473760776Z",
+      "duration_ms": 0
+    },
+    {
+      "name": "every instance stays registered for 30s",
+      "passed": true,
+      "at": "2026-11-24T21:48:33.804868026Z",
+      "duration_ms": 0.02
+    },
+    {
+      "name": "lookups through the other nodes succeed throughout",
+      "passed": true,
+      "at": "2026-11-24T21:48:33.804868026Z",
+      "duration_ms": 0.022
+    },
+    {
+      "name": "the other nodes stop listing beacon-a within 15s",
+      "passed": true,
+      "at": "2026-11-24T21:48:33.804868026Z",
+      "duration_ms": 0.05
+    },
+    {
+      "name": "every inventory instance answers throughout",
+      "passed": true,
+      "at": "2026-11-24T21:48:33.804868026Z",
+      "duration_ms": 0.057
+    },
+    {
+      "name": "every orders instance answers throughout",
+      "passed": true,
+      "at": "2026-11-24T21:48:33.804868026Z",
+      "duration_ms": 0.088
+    },
+    {
+      "name": "every payments instance answers throughout",
+      "passed": true,
+      "at": "2026-11-24T21:48:33.804868026Z",
+      "duration_ms": 0.09
+    }
+  ],
+  "requests": {
+    "discover": {
+      "total": 354,
+      "errors": 0,
+      "p50_ms": 0.868,
+      "p95_ms": 1.404,
+      "p99_ms": 1.61,
+      "max_ms": 2.493
+    },
+    "metrics": {
+      "total": 4,
+      "errors": 1,
+      "errors_by_kind": {
+        "network dial": 1
+      },
+      "p50_ms": 3.765,
+      "p95_ms": 4.621,
+      "p99_ms": 4.621,
+      "max_ms": 4.621
+    },
+    "nodes": {
+      "total": 118,
+      "errors": 0,
+      "p50_ms": 0.809,
+      "p95_ms": 1.017,
+      "p99_ms": 1.22,
+      "max_ms": 1.662
+    },
+    "resolved": {
+      "total": 1179,
+      "errors": 0,
+      "p50_ms": 0.537,
+      "p95_ms": 0.795,
+      "p99_ms": 0.955,
+      "max_ms": 2.225
+    }
+  },
+  "timings_ms": {
+    "unlisted_beacon-b": 11448.249
+  },
+  "metrics": {
+    "beacon-a": {
+      "before": [
+        "beacon_cluster_nodes 2",
+        "beacon_expired_instances_total 0",
+        "beacon_heartbeat_flushes_total{result=\"ok\"} 2",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /api/v1/nodes\"} 2",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /api/v1/services\"} 126",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /health\"} 5",
+        "beacon_http_requests_total{code=\"204\",method=\"POST\",route=\"POST /api/v1/services/{id}/heartbeat\"} 7",
+        "beacon_registry_operations_total{operation=\"delete_stale\",result=\"ok\"} 14",
+        "beacon_registry_operations_total{operation=\"list\",result=\"ok\"} 126",
+        "beacon_registry_operations_total{operation=\"touch\",result=\"ok\"} 7"
+      ]
+    },
+    "beacon-b": {
+      "before": [
+        "beacon_cluster_nodes 2",
+        "beacon_expired_instances_total 0",
+        "beacon_heartbeat_flushes_total{result=\"ok\"} 100",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /api/v1/nodes\"} 361",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /api/v1/services\"} 1512",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /health\"} 84",
+        "beacon_http_requests_total{code=\"201\",method=\"POST\",route=\"POST /api/v1/services\"} 2",
+        "beacon_http_requests_total{code=\"204\",method=\"POST\",route=\"POST /api/v1/services/{id}/heartbeat\"} 164",
+        "beacon_http_requests_total{code=\"304\",method=\"GET\",route=\"GET /api/v1/services\"} 349",
+        "beacon_registry_operations_total{operation=\"create\",result=\"ok\"} 2",
+        "beacon_registry_operations_total{operation=\"delete_stale\",result=\"ok\"} 162",
+        "beacon_registry_operations_total{operation=\"list\",result=\"ok\"} 1861",
+        "beacon_registry_operations_total{operation=\"touch\",result=\"ok\"} 164"
+      ],
+      "after": [
+        "beacon_cluster_nodes 1",
+        "beacon_expired_instances_total 0",
+        "beacon_heartbeat_flushes_total{result=\"ok\"} 122",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /api/v1/nodes\"} 479",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /api/v1/services\"} 1869",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /health\"} 103",
+        "beacon_http_requests_total{code=\"201\",method=\"POST\",route=\"POST /api/v1/services\"} 2",
+        "beacon_http_requests_total{code=\"204\",method=\"POST\",route=\"POST /api/v1/services/{id}/heartbeat\"} 208",
+        "beacon_http_requests_total{code=\"304\",method=\"GET\",route=\"GET /api/v1/services\"} 465",
+        "beacon_registry_operations_total{operation=\"create\",result=\"ok\"} 2",
+        "beacon_registry_operations_total{operation=\"delete_stale\",result=\"ok\"} 201",
+        "beacon_registry_operations_total{operation=\"list\",result=\"ok\"} 2334",
+        "beacon_registry_operations_total{operation=\"touch\",result=\"ok\"} 208"
+      ]
+    }
+  }
+}

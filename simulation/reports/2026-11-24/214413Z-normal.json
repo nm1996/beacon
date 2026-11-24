@@ -1,0 +1,218 @@
+{
+  "scenario": "normal",
+  "run": "214319Z",
+  "label": "instance-back",
+  "started": "2026-11-24T21:44:13.894761077Z",
+  "finished": "2026-11-24T21:44:14.031311673Z",
+  "passed": true,
+  "endpoints": {
+    "beacon-a": "http://beacon-a:8080",
+    "beacon-b": "http://beacon-b:8080"
+  },
+  "expected": {
+    "inventory": 1,
+    "orders": 2,
+    "payments": 1
+  },
+  "seen": {
+    "beacon-a": {
+      "inventory": [
+        {
+          "id": "250ecb7b-a3e1-5a4b-ab59-be0c32be6681",
+          "address": "inventory-1",
+          "port": 9000
+        }
+      ],
+      "orders": [
+        {
+          "id": "015d67e6-8e33-5bd3-bb4e-560036eccc19",
+          "address": "orders-1",
+          "port": 9000
+        },
+        {
+          "id": "ba170ed1-2e13-5c78-a75a-ac0e0edc30d5",
+          "address": "orders-2",
+          "port": 9000
+        }
+      ],
+      "payments": [
+        {
+          "id": "7526d2d0-0aad-5fc2-896c-bfd0657e0bca",
+          "address": "payments-1",
+          "port": 9000
+        }
+      ]
+    },
+    "beacon-b": {
+      "inventory": [
+        {
+          "id": "250ecb7b-a3e1-5a4b-ab59-be0c32be6681",
+          "address": "inventory-1",
+          "port": 9000
+        }
+      ],
+      "orders": [
+        {
+          "id": "015d67e6-8e33-5bd3-bb4e-560036eccc19",
+          "address": "orders-1",
+          "port": 9000
+        },
+        {
+          "id": "ba170ed1-2e13-5c78-a75a-ac0e0edc30d5",
+          "address": "orders-2",
+          "port": 9000
+        }
+      ],
+      "payments": [
+        {
+          "id": "7526d2d0-0aad-5fc2-896c-bfd0657e0bca",
+          "address": "payments-1",
+          "port": 9000
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "name": "every node is healthy",
+      "passed": true,
+      "at": "2026-11-24T21:44:13.907198368Z",
+      "duration_ms": 1.803
+    },
+    {
+      "name": "every node lists every node",
+      "passed": true,
+      "at": "2026-11-24T21:44:13.909003105Z",
+      "duration_ms": 2.312
+    },
+    {
+      "name": "every node returns the expected instances",
+      "passed": true,
+      "at": "2026-11-24T21:44:13.911316644Z",
+      "duration_ms": 4.283
+    },
+    {
+      "name": "every node returns the same instances",
+      "passed": true,
+      "at": "2026-11-24T21:44:13.915602533Z",
+      "duration_ms": 0.018
+    },
+    {
+      "name": "repeated lookups succeed",
+      "passed": true,
+      "at": "2026-11-24T21:44:13.915621769Z",
+      "duration_ms": 81.304
+    },
+    {
+      "name": "every instance answers as itself",
+      "passed": true,
+      "at": "2026-11-24T21:44:13.996948027Z",
+      "duration_ms": 25.953
+    }
+  ],
+  "requests": {
+    "discover": {
+      "total": 126,
+      "errors": 0,
+      "p50_ms": 0.668,
+      "p95_ms": 0.848,
+      "p99_ms": 1.019,
+      "max_ms": 1.078
+    },
+    "metrics": {
+      "total": 4,
+      "errors": 0,
+      "p50_ms": 4.259,
+      "p95_ms": 7.192,
+      "p99_ms": 7.192,
+      "max_ms": 7.192
+    },
+    "nodes": {
+      "total": 2,
+      "errors": 0,
+      "p50_ms": 0.902,
+      "p95_ms": 1.156,
+      "p99_ms": 1.156,
+      "max_ms": 1.156
+    },
+    "work": {
+      "total": 80,
+      "errors": 0,
+      "p50_ms": 0.259,
+      "p95_ms": 0.379,
+      "p99_ms": 1.624,
+      "max_ms": 1.624
+    }
+  },
+  "timings_ms": {
+    "settle": 4.278
+  },
+  "metrics": {
+    "beacon-a": {
+      "before": [
+        "beacon_cluster_nodes 2",
+        "beacon_expired_instances_total 0",
+        "beacon_heartbeat_flushes_total{result=\"ok\"} 12",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /api/v1/nodes\"} 3",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /api/v1/services\"} 296",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /health\"} 18",
+        "beacon_http_requests_total{code=\"201\",method=\"POST\",route=\"POST /api/v1/services\"} 3",
+        "beacon_http_requests_total{code=\"204\",method=\"DELETE\",route=\"DELETE /api/v1/services/{id}\"} 1",
+        "beacon_http_requests_total{code=\"204\",method=\"POST\",route=\"POST /api/v1/services/{id}/heartbeat\"} 20",
+        "beacon_http_requests_total{code=\"304\",method=\"GET\",route=\"GET /api/v1/services\"} 26",
+        "beacon_registry_operations_total{operation=\"create\",result=\"ok\"} 3",
+        "beacon_registry_operations_total{operation=\"delete\",result=\"ok\"} 1",
+        "beacon_registry_operations_total{operation=\"delete_stale\",result=\"ok\"} 41",
+        "beacon_registry_operations_total{operation=\"list\",result=\"ok\"} 322",
+        "beacon_registry_operations_total{operation=\"touch\",result=\"ok\"} 20"
+      ],
+      "after": [
+        "beacon_cluster_nodes 2",
+        "beacon_expired_instances_total 0",
+        "beacon_heartbeat_flushes_total{result=\"ok\"} 12",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /api/v1/nodes\"} 4",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /api/v1/services\"} 359",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /health\"} 20",
+        "beacon_http_requests_total{code=\"201\",method=\"POST\",route=\"POST /api/v1/services\"} 3",
+        "beacon_http_requests_total{code=\"204\",method=\"DELETE\",route=\"DELETE /api/v1/services/{id}\"} 1",
+        "beacon_http_requests_total{code=\"204\",method=\"POST\",route=\"POST /api/v1/services/{id}/heartbeat\"} 20",
+        "beacon_http_requests_total{code=\"304\",method=\"GET\",route=\"GET /api/v1/services\"} 26",
+        "beacon_registry_operations_total{operation=\"create\",result=\"ok\"} 3",
+        "beacon_registry_operations_total{operation=\"delete\",result=\"ok\"} 1",
+        "beacon_registry_operations_total{operation=\"delete_stale\",result=\"ok\"} 41",
+        "beacon_registry_operations_total{operation=\"list\",result=\"ok\"} 385",
+        "beacon_registry_operations_total{operation=\"touch\",result=\"ok\"} 20"
+      ]
+    },
+    "beacon-b": {
+      "before": [
+        "beacon_cluster_nodes 2",
+        "beacon_expired_instances_total 1",
+        "beacon_heartbeat_flushes_total{result=\"ok\"} 13",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /api/v1/nodes\"} 3",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /api/v1/services\"} 294",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /health\"} 16",
+        "beacon_http_requests_total{code=\"201\",method=\"POST\",route=\"POST /api/v1/services\"} 3",
+        "beacon_http_requests_total{code=\"204\",method=\"POST\",route=\"POST /api/v1/services/{id}/heartbeat\"} 22",
+        "beacon_registry_operations_total{operation=\"create\",result=\"ok\"} 3",
+        "beacon_registry_operations_total{operation=\"delete_stale\",result=\"ok\"} 41",
+        "beacon_registry_operations_total{operation=\"list\",result=\"ok\"} 294",
+        "beacon_registry_operations_total{operation=\"touch\",result=\"ok\"} 22"
+      ],
+      "after": [
+        "beacon_cluster_nodes 2",
+        "beacon_expired_instances_total 1",
+        "beacon_heartbeat_flushes_total{result=\"ok\"} 13",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /api/v1/nodes\"} 4",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /api/v1/services\"} 357",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /health\"} 17",
+        "beacon_http_requests_total{code=\"201\",method=\"POST\",route=\"POST /api/v1/services\"} 3",
+        "beacon_http_requests_total{code=\"204\",method=\"POST\",route=\"POST /api/v1/services/{id}/heartbeat\"} 22",
+        "beacon_registry_operations_total{operation=\"create\",result=\"ok\"} 3",
+        "beacon_registry_operations_total{operation=\"delete_stale\",result=\"ok\"} 41",
+        "beacon_registry_operations_total{operation=\"list\",result=\"ok\"} 357",
+        "beacon_registry_operations_total{operation=\"touch\",result=\"ok\"} 22"
+      ]
+    }
+  }
+}

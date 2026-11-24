@@ -398,40 +398,58 @@ Each phase is one pull request, and each one is run before the next starts.
 6. Scenarios E and F.
 7. Load profiles.
 
+## Findings
+
+What runs have shown so far, and what became of it. The reports of each
+run are in [reports/](reports/README.md).
+
+- **After a PostgreSQL outage, instances took one heartbeat interval per
+  node to come back. Fixed.** In the first Compose run, on 2026-11-24,
+  `storage-down` failed: every instance was back only 6.8s, then 8.7s,
+  after the nodes served again, against 4s. Cleanup removed every instance
+  once the database was back, since their stored heartbeats were older
+  than the TTL, and each node kept accepting their heartbeats from memory
+  until its own next write noticed; the load balancer spreads heartbeats
+  over both nodes, so an instance could get one acknowledged per node
+  before a `404`. Each node now forgets the instances it knew when its
+  first write after an outage succeeds. In the run with the fix, every
+  instance was back 1.86s after the nodes served again.
+- **nginx's passive health check is enough for a node failure.** Scenario C
+  passed in all four variants: no instance expired after `beacon-a` was
+  stopped or killed, with or without retrying POSTs. `beacon-b` stopped
+  listing it 0.26s after a stop and 11.5s to 13.0s after a kill, within
+  15s. While building C with local processes, a stand-in load balancer
+  that neither retried POSTs nor skipped a failed node did lose an
+  instance, 7.2s after a node stopped, so a load balancer without either
+  behavior is not enough; that is what the open question on client-side
+  failover is about.
+- **Instances expire and come back within the documented bounds.** Killed,
+  `orders-2` left discovery after 7.4s to 8.2s, within the 5.7s to 9s that
+  the heartbeat interval allows; stopped, after 0.26s. Started again, it
+  was back after 0.5s under a new ID, or at once under its fixed ID.
+- **PostgreSQL outages and ownership behave as documented.** Lookups failed
+  with `500` 0.26s into the outage, heartbeats were refused within the 2s
+  allowance, `/health` stayed `200`, and both nodes served again 1.4s after
+  PostgreSQL started, without a restart. `payments`' token got `403
+  instance_not_owned` on every heartbeat and unregister of `orders`'
+  instances through both nodes, also right after `beacon-b` restarted.
+- **The large load profile kept every instance.** For 2 minutes, 100
+  `catalog` instances plus the four others, 50 lookups and 200 calls a
+  second: no instance missing at any check and no request failed. Each
+  Beacon node peaked at about 10% of a CPU and 11 MiB of memory,
+  PostgreSQL at 14% and 64 MiB.
+- **run.sh broke under a locale with a decimal comma. Fixed.** Under
+  `LC_NUMERIC=sr_RS`, awk wrote `-since` with a comma, so every scenario
+  that waits for it failed before writing a report, and a misplaced `>`
+  in awk wrote the wait to a file instead of to `sleep`.
+
 ## Open questions
 
 - Should a client-side list of Beacon URLs, as failover without a load
   balancer, become a roadmap item? The simulation will show how much the
-  load balancer alone covers.
+  load balancer alone covers. It is on the roadmap as a next item.
 - Is `GET /health` not checking PostgreSQL acceptable for orchestrators that
-  restart unhealthy containers? Scenario E will show what an operator sees.
-
-## Findings
-
-What runs have shown so far, and what became of it.
-
-- **A load balancer that neither retries POSTs nor stops sending to a
-  dead node loses instances when a node goes away.** Seen while building
-  scenario C, with the nodes and applications run as local processes and a
-  stand-in load balancer with neither behavior: one instance expired 7.2s
-  after `beacon-a` stopped. Every heartbeat it sent had an even chance of
-  reaching the dead node, and the Lease's retries, after 1s, 2s, then
-  every 3s, did not land on the live one within the TTL. With the stand-in
-  retrying POSTs on the other node, nothing expired, after a stop or a
-  kill. The nginx configuration here does both: it stops sending to a node
-  for 2s after one failure, and the `-retry-post` scenarios also retry
-  POSTs. The Compose runs will show whether the first alone is enough.
-  This is what the open question on client-side failover is about.
-- **Scenarios E and F behave as documented**, in the same local setup with
-  a real PostgreSQL stopped for 20s: lookups failed with `500` 47ms after
-  the stop, heartbeats were refused within the 2s allowance, `/health`
-  stayed `200`, both nodes served again 0.3s after PostgreSQL started, and
-  every instance was back 2.6s later. `payments`' token got `403
-  instance_not_owned` on every heartbeat and unregister of `orders`'
-  instances through both nodes, also right after `beacon-b` restarted. A
-  token with `manage`, as a check that the scenario can fail, removed them.
-- **The large load profile kept every instance**, in the same local setup
-  and for 45s instead of 5 minutes: 100 `catalog` instances plus the four
-  others, 50 lookups and 200 calls a second, no instance missing at any
-  check and no request failed. Each node used about 26 MB of memory and 3%
-  of a CPU.
+  restart unhealthy containers? Scenario E shows what an operator sees:
+  `/health` stays `200` while every request that needs the database fails
+  with `500`, and the nodes recover on their own once it is back, so a
+  restart would not have helped.
