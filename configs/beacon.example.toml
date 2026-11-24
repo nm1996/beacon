@@ -46,6 +46,12 @@ max_request_body_bytes = 65536
 # checking off. Sending Beacon SIGHUP reloads them at once on Linux and macOS.
 # A reload that fails keeps the files Beacon already has.
 reload_interval = "0s"
+# Proxies, such as load balancers, whose X-Forwarded-For header gives the
+# client address rate limits use. Only list your own; empty trusts none.
+trusted_proxies = []
+# Names this node among those sharing PostgreSQL, such as its pod name.
+# Empty picks a random ID at every start.
+node_id = ""
 
 [tls]
 # Serve HTTPS instead of plain HTTP. Set both files to turn TLS on, or leave
@@ -60,7 +66,7 @@ key_file = ""
 # Leave empty to accept bearer tokens only. Needs cert_file, key_file and
 # auth.enabled. Clients without a certificate can still connect and send a
 # token; [[certificates]] entries in auth.tokens_file decide what each
-# certificate may do. See "Client certificates (mTLS)" in the README.
+# certificate may do. See "Client certificates (mTLS)" in docs/guides/security.md.
 client_ca_file = ""
 
 [auth]
@@ -70,7 +76,7 @@ client_ca_file = ""
 enabled = false
 
 # File listing the accepted tokens by their SHA-256 hash, and what each token
-# may do. Required when enabled is true. See "Authentication" in the README
+# may do. Required when enabled is true. See "Authentication" in docs/guides/security.md
 # for its format and for "beacon --hash-token", which computes the hashes.
 tokens_file = ""
 
@@ -96,6 +102,10 @@ max_instances = 10000
 # caller cannot take every place above. 0 means no limit per owner. It only
 # applies with authentication on, since callers are not told apart without it.
 max_instances_per_owner = 0
+# How long each node keeps lookup results before asking storage again, at
+# most a third of service_ttl. Worth it with storage.backend = "postgres";
+# "0s" is off.
+cache_ttl = "0s"
 
 [rate_limit]
 # Each limit is a token bucket: a steady rate per second, and a burst that
@@ -115,9 +125,25 @@ auth_failures_per_second = 1
 auth_failure_burst = 20
 
 [storage]
-# Where registered instances are kept. Only "memory" exists today: fast, and
-# everything is forgotten on restart, so clients register again.
+# Where registered instances are kept. "memory" is fast, and forgets
+# everything on restart, so clients register again. "postgres" keeps them
+# in PostgreSQL, across restarts and shared by several Beacon nodes.
 backend = "memory"
+
+[storage.postgres]
+# Connection string for backend = "postgres", such as
+# "postgres://beacon:secret@db:5432/beacon?sslmode=verify-full". It may
+# hold a password, so prefer BEACON_STORAGE_POSTGRES_URL.
+url = ""
+# How often each node writes the heartbeats it received, in one statement
+# per thousand instances, instead of one write per heartbeat. At most a
+# third of registry.service_ttl; "0s" writes each at once.
+heartbeat_flush_interval = "1s"
+
+[grpc]
+# Port of the gRPC API, on server.host, with the same TLS, authentication and
+# rate limits as HTTP. 0 is off.
+port = 0
 
 [metrics]
 # Serve Prometheus metrics at GET /metrics on the API port.

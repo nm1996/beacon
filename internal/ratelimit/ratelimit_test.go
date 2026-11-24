@@ -502,3 +502,57 @@ func TestConcurrentAllowNeverExceedsTheBurst(t *testing.T) {
 		}
 	})
 }
+
+func TestSetShareDividesTheRateAndBurst(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		limiter := New(4, 8, 0)
+		limiter.Allow("tracked")
+
+		limiter.SetShare(4)
+
+		// A new key gets a burst of 8/4 = 2 at 4/4 = 1 per second.
+		for attempt := range 2 {
+			if ok, _ := limiter.Allow("new"); !ok {
+				t.Fatalf("attempt %d: expected the divided burst to allow it", attempt+1)
+			}
+		}
+
+		ok, wait := limiter.Allow("new")
+		if ok || wait != time.Second {
+			t.Fatalf("expected the third attempt to wait 1s at a quarter of the rate, got %v, %v", ok, wait)
+		}
+
+		// A bucket that existed before is capped at the new burst too.
+		allowed := 0
+		for range 8 {
+			if ok, _ := limiter.Allow("tracked"); ok {
+				allowed++
+			}
+		}
+
+		if allowed > 2 {
+			t.Errorf("expected an existing bucket to hold at most the new burst, allowed %d", allowed)
+		}
+
+		limiter.SetShare(1)
+		time.Sleep(8 * time.Second)
+
+		for attempt := range 8 {
+			if ok, _ := limiter.Allow("new"); !ok {
+				t.Fatalf("attempt %d: expected the full burst back with one node", attempt+1)
+			}
+		}
+	})
+}
+
+func TestSetShareKeepsABurstOfAtLeastOne(t *testing.T) {
+	limiter := New(1, 2, 0)
+	limiter.SetShare(10)
+
+	if ok, _ := limiter.Allow("orders"); !ok {
+		t.Error("expected a burst of at least one with more nodes than burst")
+	}
+
+	var off *Limiter
+	off.SetShare(3)
+}

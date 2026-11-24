@@ -10,6 +10,7 @@ package metrics
 import (
 	"net/http"
 	"runtime"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -34,7 +35,11 @@ type Metrics struct {
 
 	authFailures      *prometheus.CounterVec
 	credentialReloads *prometheus.CounterVec
+	heartbeatFlushes  *prometheus.CounterVec
 	rateLimited       *prometheus.CounterVec
+	clusterNodes      prometheus.Gauge
+	grpcRequests      *prometheus.CounterVec
+	grpcDuration      *prometheus.HistogramVec
 }
 
 // New returns Metrics with the Go runtime and process collectors and a
@@ -58,7 +63,7 @@ func New(version string) *Metrics {
 		registryOperations: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: namespace,
 			Name:      "registry_operations_total",
-			Help:      "Calls to the storage backend, by operation and result (ok, not_found, not_owned, full, owner_full or error).",
+			Help:      "Calls to the storage backend, by operation and result (ok, not_found, not_owned, full, owner_full, exists or error).",
 		}, []string{"operation", "result"}),
 		registryDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Namespace: namespace,
@@ -81,11 +86,32 @@ func New(version string) *Metrics {
 			Name:      "credential_reloads_total",
 			Help:      "Attempts to reload the TLS files and tokens file while running, by result (ok or error).",
 		}, []string{"result"}),
+		heartbeatFlushes: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "heartbeat_flushes_total",
+			Help:      "Writes of buffered heartbeats to PostgreSQL that had heartbeats to write, by result (ok or error).",
+		}, []string{"result"}),
 		rateLimited: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: namespace,
 			Name:      "rate_limited_total",
 			Help:      "Requests refused by a rate limit, by limit (registrations or auth_failures).",
 		}, []string{"limit"}),
+		grpcRequests: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "grpc_requests_total",
+			Help:      "gRPC calls served, by full method name and status code.",
+		}, []string{"method", "code"}),
+		grpcDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: namespace,
+			Name:      "grpc_request_duration_seconds",
+			Help:      "Time spent serving gRPC calls, by full method name.",
+			Buckets:   prometheus.DefBuckets,
+		}, []string{"method"}),
+		clusterNodes: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: namespace,
+			Name:      "cluster_nodes",
+			Help:      "Live Beacon nodes sharing this node's storage, this one included; the rate limits are divided by it.",
+		}),
 	}
 
 	buildInfo := prometheus.NewGauge(prometheus.GaugeOpts{
@@ -107,7 +133,11 @@ func New(version string) *Metrics {
 		metrics.expiredInstances,
 		metrics.authFailures,
 		metrics.credentialReloads,
+		metrics.heartbeatFlushes,
 		metrics.rateLimited,
+		metrics.clusterNodes,
+		metrics.grpcRequests,
+		metrics.grpcDuration,
 	)
 
 	return metrics
@@ -118,6 +148,18 @@ func (metrics *Metrics) AuthFailed(reason string) {
 	metrics.authFailures.WithLabelValues(reason).Inc()
 }
 
+// GRPCCall records one gRPC call of method, the full method name the
+// server defines, that ended with code after duration.
+func (metrics *Metrics) GRPCCall(method, code string, duration time.Duration) {
+	metrics.grpcRequests.WithLabelValues(method, code).Inc()
+	metrics.grpcDuration.WithLabelValues(method).Observe(duration.Seconds())
+}
+
+// ClusterNodes reports how many nodes are live.
+func (metrics *Metrics) ClusterNodes(nodes int) {
+	metrics.clusterNodes.Set(float64(nodes))
+}
+
 // RateLimited counts one request refused by limit.
 func (metrics *Metrics) RateLimited(limit string) {
 	metrics.rateLimited.WithLabelValues(limit).Inc()
@@ -126,6 +168,11 @@ func (metrics *Metrics) RateLimited(limit string) {
 // CredentialsReloaded counts one attempt to reload credentials, by result.
 func (metrics *Metrics) CredentialsReloaded(result string) {
 	metrics.credentialReloads.WithLabelValues(result).Inc()
+}
+
+// HeartbeatsFlushed counts one write of buffered heartbeats, by result.
+func (metrics *Metrics) HeartbeatsFlushed(result string) {
+	metrics.heartbeatFlushes.WithLabelValues(result).Inc()
 }
 
 // Handler serves every metric in the Prometheus text format.

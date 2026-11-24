@@ -36,6 +36,8 @@ func (registry *instrumentedRegistry) observe(operation string, started time.Tim
 		result = "owner_full"
 	case errors.Is(err, discovery.ErrInstanceNotOwned):
 		result = "not_owned"
+	case errors.Is(err, discovery.ErrInstanceExists):
+		result = "exists"
 	case err != nil:
 		result = "error"
 	}

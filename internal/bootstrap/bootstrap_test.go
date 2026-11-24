@@ -8,12 +8,14 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/nm1996/beacon/internal/config"
 	"github.com/nm1996/beacon/internal/discovery"
+	"github.com/nm1996/beacon/internal/registry/postgres/postgrestest"
 	"github.com/nm1996/beacon/internal/tlstest"
 )
 
@@ -97,7 +99,7 @@ func TestNewAppliesRequestBodyLimit(t *testing.T) {
 func TestNewConnectsServerToDiscovery(t *testing.T) {
 	components := mustNew(t, config.Default(), "v0.0.0-test")
 
-	_, err := components.Discovery.Register(t.Context(), discovery.Registration{
+	_, _, err := components.Discovery.Register(t.Context(), discovery.Registration{
 		Name:    "orders",
 		Address: "10.0.0.1",
 		Port:    8081,
@@ -337,5 +339,150 @@ func TestNewRejectsUnusableTLSFiles(test *testing.T) {
 				test.Errorf("expected a TLS load error, got %v", err)
 			}
 		})
+	}
+}
+
+func TestNewWithPostgresKeepsInstancesAcrossServers(t *testing.T) {
+	url := postgrestest.URL(t)
+
+	settings := config.Default()
+	settings.Storage.Backend = config.StoragePostgres
+	settings.Storage.Postgres.URL = url
+
+	first, err := New(settings, slog.New(slog.DiscardHandler), "test")
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+
+	registration := discovery.Registration{ID: "bootstrap-postgres-test", Name: "orders", Address: "10.0.0.1", Port: 8081}
+
+	if _, _, err := first.Discovery.Register(t.Context(), registration, discovery.Caller{AnyInstance: true}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	first.Close()
+
+	// A second server, as after a restart or on another node, sees it.
+	second, err := New(settings, slog.New(slog.DiscardHandler), "test")
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	defer second.Close()
+
+	if _, created, err := second.Discovery.Register(t.Context(), registration, discovery.Caller{AnyInstance: true}); err != nil || created {
+		t.Errorf("expected the instance to survive, got created=%v, %v", created, err)
+	}
+
+	if err := second.Discovery.Unregister(t.Context(), registration.ID, discovery.Caller{AnyInstance: true}); err != nil {
+		t.Errorf("clean up: %v", err)
+	}
+}
+
+func TestTwoNodesOverPostgresShareTheRateLimits(t *testing.T) {
+	url := postgrestest.URL(t)
+
+	settings := config.Default()
+	settings.Storage.Backend = config.StoragePostgres
+	settings.Storage.Postgres.URL = url
+	settings.RateLimit.RegistrationsPerSecond = 0.001
+	settings.RateLimit.RegistrationBurst = 4
+
+	nodes := make([]*Components, 0, 2)
+
+	for _, id := range []string{"node-a", "node-b"} {
+		settings.Server.NodeID = id
+
+		components, err := New(settings, slog.New(slog.DiscardHandler), "test")
+		if err != nil {
+			t.Fatalf("new %s: %v", id, err)
+		}
+		defer components.Close()
+
+		if err := components.Membership.Join(t.Context()); err != nil {
+			t.Fatalf("join %s: %v", id, err)
+		}
+
+		nodes = append(nodes, components)
+	}
+
+	listed, err := nodes[1].Membership.Nodes(t.Context())
+	if err != nil || len(listed) != 2 {
+		t.Fatalf("expected both nodes listed, got %+v, %v", listed, err)
+	}
+
+	// The second node joined last, so it already divides by two: half of
+	// the burst of 4 per client network.
+	handler := nodes[1].Server.Handler
+	codes := make([]int, 0, 3)
+
+	for port := range 3 {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/services",
+			strings.NewReader(`{"name":"orders","address":"10.0.0.1","port":`+strconv.Itoa(8081+port)+`}`))
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		codes = append(codes, recorder.Code)
+	}
+
+	if codes[0] != http.StatusCreated || codes[1] != http.StatusCreated || codes[2] != http.StatusTooManyRequests {
+		t.Errorf("expected two registrations and then 429 at half the burst, got %v", codes)
+	}
+}
+
+func TestASingleNodeKeepsTheWholeLimit(t *testing.T) {
+	settings := config.Default()
+	settings.RateLimit.RegistrationsPerSecond = 0.001
+	settings.RateLimit.RegistrationBurst = 4
+
+	components, err := New(settings, slog.New(slog.DiscardHandler), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer components.Close()
+
+	if err := components.Membership.Join(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	for port := range 4 {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/services",
+			strings.NewReader(`{"name":"orders","address":"10.0.0.1","port":`+strconv.Itoa(8081+port)+`}`))
+		recorder := httptest.NewRecorder()
+		components.Server.Handler.ServeHTTP(recorder, request)
+
+		if recorder.Code != http.StatusCreated {
+			t.Fatalf("registration %d: expected the whole burst on one node, got %d", port+1, recorder.Code)
+		}
+	}
+}
+
+func TestHeartbeatsAreBatchedOnlyWithPostgres(t *testing.T) {
+	if components := mustNew(t, config.Default(), "test"); components.Heartbeats != nil {
+		t.Error("expected no batching with the memory backend")
+	}
+
+	settings := config.Default()
+	settings.Storage.Backend = config.StoragePostgres
+	settings.Storage.Postgres.URL = postgrestest.URL(t)
+
+	batched, err := New(settings, slog.New(slog.DiscardHandler), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer batched.Close()
+
+	if batched.Heartbeats == nil {
+		t.Error("expected heartbeats batched with PostgreSQL by default")
+	}
+
+	settings.Storage.Postgres.HeartbeatFlushInterval = 0
+
+	direct, err := New(settings, slog.New(slog.DiscardHandler), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer direct.Close()
+
+	if direct.Heartbeats != nil {
+		t.Error("expected a zero interval to write each heartbeat at once")
 	}
 }

@@ -41,7 +41,7 @@ func registration(name string) discovery.Registration {
 func mustRegister(t *testing.T, service *discovery.Service, name string) discovery.Instance {
 	t.Helper()
 
-	instance, err := service.Register(t.Context(), registration(name), anyone)
+	instance, _, err := service.Register(t.Context(), registration(name), anyone)
 	if err != nil {
 		t.Fatalf("register %q: %v", name, err)
 	}
@@ -147,7 +147,7 @@ func TestRegisterRejectsInvalidRegistration(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			service := newService(t)
 
-			instance, err := service.Register(t.Context(), tt.registration, anyone)
+			instance, _, err := service.Register(t.Context(), tt.registration, anyone)
 
 			if !errors.Is(err, discovery.ErrInvalidRegistration) {
 				t.Fatalf("expected ErrInvalidRegistration, got %v", err)
@@ -169,7 +169,7 @@ func TestRegisterAcceptsPortBoundaries(t *testing.T) {
 		reg := registration("orders")
 		reg.Port = port
 
-		if _, err := newService(t).Register(t.Context(), reg, anyone); err != nil {
+		if _, _, err := newService(t).Register(t.Context(), reg, anyone); err != nil {
 			t.Errorf("expected port %d to be accepted, got %v", port, err)
 		}
 	}
@@ -274,7 +274,7 @@ func TestRegistryErrorsArePassedOn(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	_, registerErr := service.Register(ctx, registration("orders"), anyone)
+	_, _, registerErr := service.Register(ctx, registration("orders"), anyone)
 	_, discoverErr := service.Discover(ctx, "orders")
 
 	for name, err := range map[string]error{
@@ -321,7 +321,7 @@ func TestRegisterRefusesBeyondMaxInstances(t *testing.T) {
 	first := mustRegister(t, service, "orders")
 	mustRegister(t, service, "orders")
 
-	if _, err := service.Register(t.Context(), registration("orders"), anyone); !errors.Is(err, discovery.ErrRegistryFull) {
+	if _, _, err := service.Register(t.Context(), registration("orders"), anyone); !errors.Is(err, discovery.ErrRegistryFull) {
 		t.Fatalf("expected ErrRegistryFull beyond the limit, got %v", err)
 	}
 
@@ -329,7 +329,7 @@ func TestRegisterRefusesBeyondMaxInstances(t *testing.T) {
 		t.Fatalf("unregister: %v", err)
 	}
 
-	if _, err := service.Register(t.Context(), registration("orders"), anyone); err != nil {
+	if _, _, err := service.Register(t.Context(), registration("orders"), anyone); err != nil {
 		t.Errorf("expected a place once an instance left, got %v", err)
 	}
 }
@@ -344,13 +344,13 @@ func TestRegisterRefusesBeyondMaxInstancesPerOwner(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	orders := discovery.Caller{Name: "orders"}
-	payments := discovery.Caller{Name: "payments"}
+	orders := discovery.Caller{ID: "orders"}
+	payments := discovery.Caller{ID: "payments"}
 
 	var first discovery.Instance
 
 	for index := range 2 {
-		instance, err := service.Register(ctx, registration("orders"), orders)
+		instance, _, err := service.Register(ctx, registration("orders"), orders)
 		if err != nil {
 			t.Fatalf("register %d within the owner limit: %v", index, err)
 		}
@@ -360,12 +360,12 @@ func TestRegisterRefusesBeyondMaxInstancesPerOwner(t *testing.T) {
 		}
 	}
 
-	if _, err := service.Register(ctx, registration("orders"), orders); !errors.Is(err, discovery.ErrOwnerQuotaExceeded) {
+	if _, _, err := service.Register(ctx, registration("orders"), orders); !errors.Is(err, discovery.ErrOwnerQuotaExceeded) {
 		t.Fatalf("expected ErrOwnerQuotaExceeded beyond the owner limit, got %v", err)
 	}
 
 	// One owner at its limit leaves the registry open to everyone else.
-	if _, err := service.Register(ctx, registration("payments"), payments); err != nil {
+	if _, _, err := service.Register(ctx, registration("payments"), payments); err != nil {
 		t.Errorf("expected another owner to register, got %v", err)
 	}
 
@@ -373,7 +373,7 @@ func TestRegisterRefusesBeyondMaxInstancesPerOwner(t *testing.T) {
 		t.Fatalf("unregister: %v", err)
 	}
 
-	if _, err := service.Register(ctx, registration("orders"), orders); err != nil {
+	if _, _, err := service.Register(ctx, registration("orders"), orders); err != nil {
 		t.Errorf("expected a place once one of the owner's instances left, got %v", err)
 	}
 }
@@ -390,7 +390,7 @@ func TestOwnerLimitDoesNotApplyWithoutAuthentication(t *testing.T) {
 	// Without authentication every caller is anonymous; a per-owner limit
 	// of 1 must not become a registry-wide limit of 1.
 	for index := range 3 {
-		if _, err := service.Register(t.Context(), registration("orders"), anyone); err != nil {
+		if _, _, err := service.Register(t.Context(), registration("orders"), anyone); err != nil {
 			t.Fatalf("register %d: %v", index, err)
 		}
 	}

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ func TestLoadAppliesEveryEnvironmentVariable(test *testing.T) {
 	test.Setenv("BEACON_SERVER_SHUTDOWN_TIMEOUT", "4s")
 	test.Setenv("BEACON_SERVER_MAX_REQUEST_BODY_BYTES", "1024")
 	test.Setenv("BEACON_SERVER_RELOAD_INTERVAL", "30s")
+	test.Setenv("BEACON_SERVER_TRUSTED_PROXIES", "10.0.0.0/8, ,fd00::/8")
 	test.Setenv("BEACON_TLS_CERT_FILE", "/etc/beacon/tls/cert.pem")
 	test.Setenv("BEACON_TLS_KEY_FILE", "/etc/beacon/tls/key.pem")
 	test.Setenv("BEACON_TLS_CLIENT_CA_FILE", "/etc/beacon/tls/clients.pem")
@@ -27,6 +29,7 @@ func TestLoadAppliesEveryEnvironmentVariable(test *testing.T) {
 	test.Setenv("BEACON_REGISTRY_MAX_INSTANCES", "250")
 	test.Setenv("BEACON_REGISTRY_MAX_INSTANCES_PER_OWNER", "25")
 	test.Setenv("BEACON_STORAGE_BACKEND", "memory")
+	test.Setenv("BEACON_STORAGE_POSTGRES_HEARTBEAT_FLUSH_INTERVAL", "2s")
 	test.Setenv("BEACON_RATE_LIMIT_REGISTRATIONS_PER_SECOND", "2.5")
 	test.Setenv("BEACON_RATE_LIMIT_REGISTRATION_BURST", "7")
 	test.Setenv("BEACON_RATE_LIMIT_AUTH_FAILURES_PER_SECOND", "0.5")
@@ -50,6 +53,7 @@ func TestLoadAppliesEveryEnvironmentVariable(test *testing.T) {
 			ShutdownTimeout:     4 * time.Second,
 			MaxRequestBodyBytes: 1024,
 			ReloadInterval:      30 * time.Second,
+			TrustedProxies:      []string{"10.0.0.0/8", "fd00::/8"},
 		},
 		TLS: TLSConfig{
 			CertFile:     "/etc/beacon/tls/cert.pem",
@@ -69,7 +73,8 @@ func TestLoadAppliesEveryEnvironmentVariable(test *testing.T) {
 			MaxInstancesPerOwner: 25,
 		},
 		Storage: StorageConfig{
-			Backend: StorageMemory,
+			Backend:  StorageMemory,
+			Postgres: PostgresConfig{HeartbeatFlushInterval: 2 * time.Second},
 		},
 		RateLimit: RateLimitConfig{
 			RegistrationsPerSecond: 2.5,
@@ -86,7 +91,7 @@ func TestLoadAppliesEveryEnvironmentVariable(test *testing.T) {
 		},
 	}
 
-	if config != want {
+	if !reflect.DeepEqual(config, want) {
 		test.Errorf("expected %+v, got %+v", want, config)
 	}
 }
@@ -108,7 +113,7 @@ read_timeout = "1m"
 	want.Server.Port = 7070
 	want.Server.ReadTimeout = time.Minute
 
-	if config != want {
+	if !reflect.DeepEqual(config, want) {
 		test.Errorf("expected %+v, got %+v", want, config)
 	}
 }
@@ -196,7 +201,7 @@ func TestLoadEnvironmentFailures(test *testing.T) {
 		{
 			name:      "unknown storage backend",
 			variables: map[string]string{"BEACON_STORAGE_BACKEND": "redis"},
-			wantErr:   []string{"invalid config", `storage.backend must be one of memory, got "redis"`},
+			wantErr:   []string{"invalid config", `storage.backend must be one of memory, postgres, got "redis"`},
 		},
 		{
 			name:      "unknown log level",
@@ -222,5 +227,19 @@ func TestLoadEnvironmentFailures(test *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestPostgresURLFromTheEnvironment(test *testing.T) {
+	test.Setenv("BEACON_STORAGE_BACKEND", "postgres")
+	test.Setenv("BEACON_STORAGE_POSTGRES_URL", "postgres://beacon@db/beacon")
+
+	config, err := Load("")
+	if err != nil {
+		test.Fatalf("load: %v", err)
+	}
+
+	if config.Storage.Backend != StoragePostgres || config.Storage.Postgres.URL != "postgres://beacon@db/beacon" {
+		test.Errorf("expected the postgres backend and URL from the environment, got %+v", config.Storage)
 	}
 }

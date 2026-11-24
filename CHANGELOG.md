@@ -9,6 +9,110 @@ Add an entry under **Unreleased** in the same pull request as the change.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-24
+
+Upgrading from 0.2.0 needs no changes: the configuration and the HTTP API
+stay compatible, and PostgreSQL, several nodes, the gRPC API, trusted proxies
+and the lookup cache are all off until configured. The Go client's
+`Register` and `Lease` behave differently, as described under Changed.
+
+### Added
+
+- `server.trusted_proxies` (`BEACON_SERVER_TRUSTED_PROXIES`): addresses or
+  CIDR ranges of proxies whose `X-Forwarded-For` header gives the client
+  address that rate limits are keyed by. Beacon takes the rightmost
+  address that is not a listed proxy, so entries a client adds are never
+  believed. Empty by default, which keeps ignoring the header. See
+  [design record 0001](docs/design/0001-trusted-proxies.md).
+- An optional `id` for entries in the tokens file. It owns the instances the
+  entry registers and is what `registry.max_instances_per_owner` and the
+  registration rate limit count, so an entry can be renamed, or its token
+  rotated under a new entry, without its instances changing owner. Entries
+  that share an `id` share ownership. Without it the ID is the `name`, as
+  before. Refused-request logs add `caller_id`. See
+  [design record 0002](docs/design/0002-owner-id.md).
+- Registrations may name their instance `id`. Registering the same `id`
+  again with the same name, address and port answers `200 OK` with the same
+  instance, refreshed as by a heartbeat, so the ID survives Beacon restarts
+  and retries. Another caller's ID, or the same ID with a different name,
+  address or port, gets `409 instance_exists`. See
+  [design record 0003](docs/design/0003-stable-instance-ids.md).
+- The `Idempotency-Key` header makes repeating a registration safe: Beacon
+  derives the instance ID from the key and the caller, so a retry finds the
+  instance the first attempt created. The same key with a different body
+  gets `422 idempotency_key_reused`. See
+  [design record 0004](docs/design/0004-idempotency.md).
+- `beacon_registry_operations_total` has the result `exists`.
+- `GET /api/v1/services` sends a weak `ETag` over the instances' IDs, names,
+  addresses and ports, and answers `304 Not Modified` without a body when
+  `If-None-Match` lists it.
+- `client.Resolver`, a client-side cache and load balancer for one service:
+  `NewResolver` fetches once, a background goroutine refreshes with
+  conditional requests, `Pick` chooses an instance without a request
+  (`client.RoundRobin`, the default, `client.Random`, or any
+  `client.Picker`), and while Beacon is unreachable it keeps serving the
+  last instances for up to `client.WithMaxStale`, then returns
+  `client.ErrStale`. With `client.WithOutlierDetection`, off by default,
+  instances that `Resolver.Report` shows failing several times in a row are
+  skipped for a while, never more than half of them nor the last one. See
+  [design record 0005](docs/design/0005-client-cache-and-load-balancing.md).
+- PostgreSQL storage: `storage.backend = "postgres"` with
+  `storage.postgres.url` (`BEACON_STORAGE_POSTGRES_URL`) keeps instances
+  across restarts, shared by every Beacon process using the database.
+  Beacon creates and migrates its tables itself, and the instance limits
+  stay exact across processes. Built on `github.com/jackc/pgx/v5`, a new
+  direct dependency. See
+  [design record 0006](docs/design/0006-postgres-and-cache.md).
+- With PostgreSQL, heartbeats are batched: each process checks an
+  instance's first heartbeat with the database, buffers the following ones,
+  and writes them every `storage.postgres.heartbeat_flush_interval`
+  (`BEACON_STORAGE_POSTGRES_HEARTBEAT_FLUSH_INTERVAL`, 1s by default) in one
+  statement per thousand instances. When no write has succeeded for two
+  intervals, a process stops buffering and sends each heartbeat to the
+  database, so it answers with an error instead of acknowledging heartbeats
+  it cannot store. `beacon_heartbeat_flushes_total{result}` counts the
+  writes.
+- `registry.cache_ttl` (`BEACON_REGISTRY_CACHE_TTL`) caches lookup results
+  in each process for up to a third of the service TTL; off by default.
+- Several nodes over one PostgreSQL database: each node records itself in
+  `beacon_nodes` every 5 seconds and leaves on shutdown, every node runs
+  cleanup, and `GET /api/v1/nodes` (with `manage`) and the
+  `beacon_cluster_nodes` gauge list the live ones. `server.node_id`
+  (`BEACON_SERVER_NODE_ID`) names a node. See
+  [design record 0007](docs/design/0007-multiple-nodes.md).
+- Rate limits are divided by the number of live nodes, so behind a
+  round-robin load balancer the cluster enforces about the configured
+  limit. See [design record 0008](docs/design/0008-cluster-rate-limits.md).
+- A gRPC API on `grpc.port` (`BEACON_GRPC_PORT`), off by default:
+  `beacon.v1.RegistryService` with `Register`, `Heartbeat`, `Unregister`
+  and `ListInstances`, defined in `api/beacon/v1/registry.proto` with the
+  generated Go code next to it. It uses the HTTP API's TLS settings,
+  authentication, permissions and rate limiters, and reports errors with
+  standard codes and a `google.rpc.ErrorInfo` whose reason is the HTTP
+  error code. The health service and reflection are included, as are
+  `beacon_grpc_requests_total` and `beacon_grpc_request_duration_seconds`.
+  Adds `google.golang.org/grpc` and `google.golang.org/protobuf`. See
+  [design record 0009](docs/design/0009-grpc-api.md).
+- `client.Registration.ID` chooses the instance ID, and `client.ErrConflict`
+  matches `instance_exists` and `idempotency_key_reused`.
+
+### Changed
+
+- The README is now a short introduction. The API, configuration, security,
+  operations, client and development guides moved to `docs/guides/`, which
+  release archives include, and the new
+  [Guarantees and failure behavior](docs/guides/guarantees.md) guide states
+  what is consistent across nodes, what may lag, and what happens when
+  PostgreSQL, a node or shutdown fails.
+- `client.Register` sends an `Idempotency-Key` and retries, up to three
+  attempts in all, when Beacon cannot be reached or a proxy answers `502`,
+  `503` or `504`. It used to fail on the first lost response, so `Announce`
+  could fail on one dropped packet.
+- A `Lease` registers again under the ID it had, so the instance keeps its
+  ID across Beacon restarts. Only if another instance took the ID meanwhile,
+  or another caller owns it (`403 instance_not_owned`), does it register
+  under a new one, with one warning in the log.
+
 ## [0.2.0] - 2026-11-13
 
 Upgrading from 0.1.0 needs attention in three places, each described below:
@@ -216,6 +320,7 @@ HTTP API.
   operations, registered and expired instances and the running build,
   controlled by `metrics.enabled` (`BEACON_METRICS_ENABLED`).
 
-[Unreleased]: https://github.com/nm1996/beacon/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/nm1996/beacon/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/nm1996/beacon/releases/tag/v0.3.0
 [0.2.0]: https://github.com/nm1996/beacon/releases/tag/v0.2.0
 [0.1.0]: https://github.com/nm1996/beacon/releases/tag/v0.1.0

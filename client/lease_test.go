@@ -32,8 +32,11 @@ type fakeBeacon struct {
 	heartbeats atomic.Int32
 	// hang is how many of the next heartbeats get no answer at all, as on
 	// a connection that died without being closed.
-	hang      atomic.Int32
-	succeeded atomic.Int32
+	hang atomic.Int32
+	// onNotFound, if set, runs once after a heartbeat gets 404, before the
+	// lease can register again.
+	onNotFound func()
+	succeeded  atomic.Int32
 }
 
 // newFakeBeacon returns a running fake with an empty registry and the
@@ -100,6 +103,12 @@ func (beacon *fakeBeacon) ServeHTTP(writer http.ResponseWriter, request *http.Re
 
 	if isHeartbeat && recorder.Code == http.StatusNoContent {
 		beacon.succeeded.Add(1)
+	}
+
+	if isHeartbeat && recorder.Code == http.StatusNotFound && beacon.onNotFound != nil {
+		hook := beacon.onNotFound
+		beacon.onNotFound = nil
+		hook()
 	}
 
 	for key, values := range recorder.Header() {
@@ -235,15 +244,15 @@ func TestLeaseRegistersAgainAfterBeaconRestarts(t *testing.T) {
 		synctest.Wait()
 
 		after := lease.ID()
-		if after == before {
-			t.Fatal("expected a new ID after Beacon forgot the instance")
+		if after != before {
+			t.Fatalf("expected the lease to register again under its ID %s, got %s", before, after)
 		}
 
-		if ids := instanceIDs(t, beacon); len(ids) != 1 || ids[0] != after {
-			t.Errorf("expected the restarted Beacon to hold the new ID %s, got %v", after, ids)
+		if ids := instanceIDs(t, beacon); len(ids) != 1 || ids[0] != before {
+			t.Errorf("expected the restarted Beacon to hold %s again, got %v", before, ids)
 		}
 
-		// And heartbeats continue for the new ID.
+		// And heartbeats continue.
 		succeeded := fake.succeeded.Load()
 		time.Sleep(12 * time.Second)
 		synctest.Wait()
@@ -535,12 +544,8 @@ func TestLeaseRecoversAfterALongOutage(t *testing.T) {
 		time.Sleep(12 * time.Second)
 		synctest.Wait()
 
-		if lease.ID() == before {
-			t.Fatal("expected the lease to register again after the outage")
-		}
-
-		if ids := instanceIDs(t, beacon); len(ids) != 1 || ids[0] != lease.ID() {
-			t.Errorf("expected Beacon to hold the new ID, got %v", ids)
+		if ids := instanceIDs(t, beacon); len(ids) != 1 || ids[0] != before || lease.ID() != before {
+			t.Errorf("expected Beacon to hold the lease's ID %s again, got %v", before, ids)
 		}
 	})
 }

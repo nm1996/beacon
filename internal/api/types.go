@@ -4,6 +4,8 @@ import "time"
 
 // RegisterRequest is the body of POST /api/v1/services.
 type RegisterRequest struct {
+	// ID is optional: the instance ID to use, so registering again keeps it.
+	ID      string `json:"id,omitempty"`
 	Name    string `json:"name"`
 	Address string `json:"address"`
 	Port    int    `json:"port"`
@@ -42,4 +44,13 @@ type ErrorResponse struct {
 type ErrorDetail struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+}
+
+// Node is one live Beacon node, as GET /api/v1/nodes lists it.
+type Node struct {
+	ID        string    `json:"id"`
+	Address   string    `json:"address"`
+	Version   string    `json:"version"`
+	StartedAt time.Time `json:"started_at"`
+	LastSeen  time.Time `json:"last_seen"`
 }

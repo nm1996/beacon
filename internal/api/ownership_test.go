@@ -171,3 +171,34 @@ func TestOwnerQuotaAnswersQuotaExceeded(test *testing.T) {
 	// Another caller is not affected.
 	registerAs(test, router, "payments-token")
 }
+
+// renamedIdentity is a token whose entry kept the ID "orders" but was
+// renamed, so it must still own what "orders" registered.
+func renamedIdentity(name string, permissions ...auth.Permission) auth.Identity {
+	identity := auth.NewIdentity(name, permissions...)
+	identity.ID = "orders"
+
+	return identity
+}
+
+func TestOwnershipFollowsTheIDNotTheName(test *testing.T) {
+	tokens := fakeTokens{
+		"orders-token":  auth.NewIdentity("orders", auth.PermissionRegister),
+		"renamed-token": renamedIdentity("orders (rotated)", auth.PermissionRegister),
+		"other-token":   auth.NewIdentity("orders-copy", auth.PermissionRegister),
+	}
+
+	config := testConfig
+	config.Guard = NewGuard(tokens, discard, nil)
+	router := NewRouter(newDiscovery(test, testTTL), discard, config)
+
+	id := registerAs(test, router, "orders-token")
+
+	if recorder := send(router, http.MethodPost, servicesPath+"/"+id+"/heartbeat", "other-token", ""); recorder.Code != http.StatusForbidden {
+		test.Errorf("expected another ID to be refused, got %d", recorder.Code)
+	}
+
+	if recorder := send(router, http.MethodPost, servicesPath+"/"+id+"/heartbeat", "renamed-token", ""); recorder.Code != http.StatusNoContent {
+		test.Errorf("expected the same ID under a new name to own the instance, got %d", recorder.Code)
+	}
+}

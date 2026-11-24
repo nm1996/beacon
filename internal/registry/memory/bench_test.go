@@ -224,9 +224,9 @@ func BenchmarkMixedParallel(b *testing.B) {
 
 // BenchmarkHeartbeatDuringLookups is one heartbeat while other goroutines
 // look up one service as fast as they can: how long a heartbeat waits for
-// the lock that lookups hold. It reports the 99th percentile as p99-ns
-// besides the mean, since a few long waits are what can make instances
-// expire.
+// the lock that lookups hold. It reports the mean and the 99th percentile
+// of the measured waits as mean-ns and p99-ns, since a few long waits are
+// what can make instances expire.
 func BenchmarkHeartbeatDuringLookups(b *testing.B) {
 	for _, lookups := range []int{0, 1, 4} {
 		b.Run(fmt.Sprintf("lookups=%d", lookups), func(b *testing.B) {
@@ -264,7 +264,15 @@ func BenchmarkHeartbeatDuringLookups(b *testing.B) {
 				stop.Store(true)
 				group.Wait()
 
+				// Both from the same samples: ns/op also counts reading the
+				// clock and recording the sample, so it is not comparable.
+				var total time.Duration
+				for _, wait := range waits {
+					total += wait
+				}
+
 				slices.Sort(waits)
+				b.ReportMetric(float64(total)/float64(len(waits)), "mean-ns")
 				b.ReportMetric(float64(waits[len(waits)*99/100]), "p99-ns")
 			})
 		})

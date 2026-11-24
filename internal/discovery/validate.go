@@ -50,6 +50,19 @@ var hostLabelPattern = regexp.MustCompile(`^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-
 // length limits in config. The returned error wraps ErrInvalidRegistration
 // and names the first field that is wrong.
 func (registration Registration) validate(config Config) error {
+	if registration.ID != "" && !instanceIDPattern.MatchString(registration.ID) {
+		return fmt.Errorf("%w: id must be 1 to %d letters, digits, '.', '_' or '-', starting with a letter or digit",
+			ErrInvalidRegistration, maxInstanceIDLength)
+	}
+
+	if err := validateIdempotencyKey(registration.IdempotencyKey); err != nil {
+		return err
+	}
+
+	if registration.ID != "" && registration.IdempotencyKey != "" {
+		return fmt.Errorf("%w: give either an id or an idempotency key, not both", ErrInvalidRegistration)
+	}
+
 	if err := validateName(registration.Name, config.maxNameLength()); err != nil {
 		return err
 	}
@@ -106,6 +119,32 @@ func validateAddress(address string, maxLength int) error {
 	for label := range strings.SplitSeq(strings.TrimSuffix(address, "."), ".") {
 		if len(label) > maxHostLabelLength || !hostLabelPattern.MatchString(label) {
 			return invalid
+		}
+	}
+
+	return nil
+}
+
+// maxInstanceIDLength is the longest instance ID a registration may give.
+const maxInstanceIDLength = 128
+
+// instanceIDPattern is what an instance ID given by a client looks like:
+// UUIDs, host names and pod names all fit.
+var instanceIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+
+// maxIdempotencyKeyLength is the longest idempotency key accepted.
+const maxIdempotencyKeyLength = 255
+
+// validateIdempotencyKey checks an idempotency key: empty, or at most
+// maxIdempotencyKeyLength printable ASCII characters.
+func validateIdempotencyKey(key string) error {
+	if len(key) > maxIdempotencyKeyLength {
+		return fmt.Errorf("%w: idempotency key must be at most %d characters", ErrInvalidRegistration, maxIdempotencyKeyLength)
+	}
+
+	for _, character := range key {
+		if character < ' ' || character > '~' {
+			return fmt.Errorf("%w: idempotency key must be printable ASCII", ErrInvalidRegistration)
 		}
 	}
 

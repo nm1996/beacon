@@ -30,7 +30,7 @@ type Config struct {
 	// MaxInstancesPerOwner is the most instances one caller may hold at
 	// once, so a single identity cannot take every place MaxInstances
 	// allows. Registrations beyond it get ErrOwnerQuotaExceeded. Zero means
-	// no limit per owner. It applies only to callers with a Name, that is
+	// no limit per owner. It applies only to callers with an ID, that is
 	// when the transport authenticates.
 	MaxInstancesPerOwner int
 }
@@ -107,32 +107,121 @@ func (service *Service) TTL() time.Duration {
 	return service.config.TTL
 }
 
-// Register validates registration and stores it as a new instance with a
-// generated ID, owned by caller. It returns an error wrapping
-// ErrInvalidRegistration when validation fails.
-func (service *Service) Register(ctx context.Context, registration Registration, caller Caller) (Instance, error) {
+// idempotencyNamespace is the UUID namespace of instance IDs derived from
+// idempotency keys. It must never change, or repeated registrations would
+// stop finding the instances their first attempt created.
+var idempotencyNamespace = uuid.MustParse("1f0b6a52-3c8e-4d6b-9a57-0c3f6e2d8b41")
+
+// Register validates registration and stores it as an instance owned by
+// caller, with the ID the registration gives, one derived from its
+// idempotency key and the caller, or a new random one. It reports whether
+// it created the instance.
+//
+// If an instance with that ID exists, belongs to the caller and has the
+// same name, address and port, the registration is a repeat: it counts as
+// a heartbeat and returns that instance, created false. Otherwise it fails
+// with ErrInstanceConflict, or ErrIdempotencyKeyReused when the ID came
+// from a key. Validation failures wrap ErrInvalidRegistration.
+func (service *Service) Register(ctx context.Context, registration Registration, caller Caller) (Instance, bool, error) {
 	if err := registration.validate(service.config); err != nil {
-		return Instance{}, err
+		return Instance{}, false, err
 	}
 
-	now := time.Now()
-	instance := Instance{
-		ID:            uuid.New().String(),
-		Name:          registration.Name,
-		Address:       registration.Address,
-		Port:          registration.Port,
-		Owner:         caller.Name,
-		RegisteredAt:  now,
-		LastHeartbeat: now,
+	id := registration.ID
+
+	switch {
+	case registration.IdempotencyKey != "":
+		// The owner is part of the name, so callers cannot reach each
+		// other's instances by using the same key.
+		id = uuid.NewSHA1(idempotencyNamespace, []byte(caller.ID+"\x00"+registration.IdempotencyKey)).String()
+	case id == "":
+		id = uuid.New().String()
 	}
 
-	if err := service.registry.Create(ctx, instance, Limits{
-		Total:    service.config.MaxInstances,
-		PerOwner: service.config.MaxInstancesPerOwner,
-	}); err != nil {
-		return Instance{}, fmt.Errorf("store instance: %w", err)
+	chosen := registration.ID != "" || registration.IdempotencyKey != ""
+
+	// Twice at most: an instance found to exist may be removed before it
+	// can be refreshed, and is then created again.
+	for range 2 {
+		now := time.Now()
+		instance := Instance{
+			ID:            id,
+			Name:          registration.Name,
+			Address:       registration.Address,
+			Port:          registration.Port,
+			Owner:         caller.ID,
+			RegisteredAt:  now,
+			LastHeartbeat: now,
+		}
+
+		err := service.registry.Create(ctx, instance, Limits{
+			Total:    service.config.MaxInstances,
+			PerOwner: service.config.MaxInstancesPerOwner,
+		})
+		if err == nil {
+			service.logRegistered(ctx, "service registered", instance)
+			return instance, true, nil
+		}
+
+		if !chosen || !errors.Is(err, ErrInstanceExists) {
+			return Instance{}, false, fmt.Errorf("store instance: %w", err)
+		}
+
+		existing, refreshed, err := service.repeat(ctx, instance, registration.IdempotencyKey != "", caller)
+		if err != nil {
+			return Instance{}, false, err
+		}
+
+		if refreshed {
+			service.logRegistered(ctx, "service registration repeated", existing)
+			return existing, false, nil
+		}
 	}
 
+	return Instance{}, false, fmt.Errorf("store instance %s: %w", id, ErrInstanceExists)
+}
+
+// repeat handles a registration whose ID already exists: if the stored
+// instance is the same one, it refreshes and returns it. It reports false,
+// without an error, if the instance disappeared meanwhile.
+func (service *Service) repeat(ctx context.Context, wanted Instance, fromKey bool, caller Caller) (Instance, bool, error) {
+	existing, err := service.registry.Get(ctx, wanted.ID)
+	if errors.Is(err, ErrInstanceNotFound) {
+		return Instance{}, false, nil
+	}
+
+	if err != nil {
+		return Instance{}, false, fmt.Errorf("look up instance %s: %w", wanted.ID, err)
+	}
+
+	sameInstance := existing.Name == wanted.Name && existing.Address == wanted.Address && existing.Port == wanted.Port
+
+	switch {
+	case !caller.check().Allows(existing.Owner):
+		return Instance{}, false, fmt.Errorf("register %s: %w", wanted.ID, ErrInstanceConflict)
+	case !sameInstance && fromKey:
+		return Instance{}, false, fmt.Errorf("register %s: %w", wanted.ID, ErrIdempotencyKeyReused)
+	case !sameInstance:
+		return Instance{}, false, fmt.Errorf("register %s: %w", wanted.ID, ErrInstanceConflict)
+	}
+
+	err = service.registry.Touch(ctx, wanted.ID, wanted.LastHeartbeat, caller.check())
+	if errors.Is(err, ErrInstanceNotFound) {
+		return Instance{}, false, nil
+	}
+
+	if err != nil {
+		return Instance{}, false, fmt.Errorf("refresh instance %s: %w", wanted.ID, err)
+	}
+
+	existing.LastHeartbeat = wanted.LastHeartbeat
+
+	return existing, true, nil
+}
+
+// logRegistered logs message about instance with its ID, name, address,
+// port and owner.
+func (service *Service) logRegistered(ctx context.Context, message string, instance Instance) {
 	attributes := []slog.Attr{
 		slog.String("id", instance.ID),
 		slog.String("name", instance.Name),
@@ -143,9 +232,7 @@ func (service *Service) Register(ctx context.Context, registration Registration,
 		attributes = append(attributes, slog.String("owner", instance.Owner))
 	}
 
-	service.logger.LogAttrs(ctx, slog.LevelInfo, "service registered", attributes...)
-
-	return instance, nil
+	service.logger.LogAttrs(ctx, slog.LevelInfo, message, attributes...)
 }
 
 // Heartbeat records that the instance with id is still alive. It returns
@@ -188,8 +275,8 @@ func (service *Service) Unregister(ctx context.Context, id string, caller Caller
 	}
 
 	attributes := []slog.Attr{slog.String("id", id)}
-	if caller.Name != "" {
-		attributes = append(attributes, slog.String("by", caller.Name))
+	if caller.ID != "" {
+		attributes = append(attributes, slog.String("by", caller.ID))
 	}
 
 	service.logger.LogAttrs(ctx, slog.LevelInfo, "service unregistered", attributes...)

@@ -17,7 +17,7 @@ import (
 // it is used, so handlers depend only on these methods and tests can swap
 // in a fake. *discovery.Service satisfies it.
 type Discovery interface {
-	Register(ctx context.Context, registration discovery.Registration, caller discovery.Caller) (discovery.Instance, error)
+	Register(ctx context.Context, registration discovery.Registration, caller discovery.Caller) (discovery.Instance, bool, error)
 	Heartbeat(ctx context.Context, id string, caller discovery.Caller) error
 	List(ctx context.Context, query discovery.ListQuery) ([]discovery.Instance, error)
 	Unregister(ctx context.Context, id string, caller discovery.Caller) error
@@ -40,6 +40,12 @@ type Config struct {
 	// RateLimited, if not nil, is called with LimitRegistrations for every
 	// registration RegistrationLimit refuses.
 	RateLimited func(limit string)
+	// Nodes, if not nil, lists the live Beacon nodes for GET /api/v1/nodes.
+	Nodes func(ctx context.Context) ([]Node, error)
+	// TrustedProxies are the proxies whose X-Forwarded-For header gives the
+	// client address that registration limits are keyed by. Empty trusts
+	// none.
+	TrustedProxies TrustedProxies
 }
 
 // rateLimited reports a refusal by limit to RateLimited, if set.
@@ -72,6 +78,10 @@ func NewHandler(discovery Discovery, logger *slog.Logger, config Config) *Handle
 // Register adds a new service instance and responds 201 with its ID and the
 // TTL within which it must send heartbeats. The Location header points at
 // the new instance. Malformed bodies or invalid fields get 400.
+//
+// A registration that repeats an earlier one, by naming the same id or
+// sending the same Idempotency-Key header, refreshes that instance and
+// responds 200 with the same body instead.
 func (handler *Handler) Register(writer http.ResponseWriter, request *http.Request) {
 	var input RegisterRequest
 
@@ -80,14 +90,22 @@ func (handler *Handler) Register(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 
-	instance, err := handler.discovery.Register(request.Context(), mapRegisterRequest(input), handler.caller(request))
+	registration := mapRegisterRequest(input)
+	registration.IdempotencyKey = request.Header.Get("Idempotency-Key")
+
+	instance, created, err := handler.discovery.Register(request.Context(), registration, handler.caller(request))
 	if err != nil {
 		handler.writeDiscoveryError(writer, request, err)
 		return
 	}
 
+	status := http.StatusCreated
+	if !created {
+		status = http.StatusOK
+	}
+
 	writer.Header().Set("Location", servicesPath+"/"+url.PathEscape(instance.ID))
-	handler.writeJSON(writer, http.StatusCreated, RegisterResponse{
+	handler.writeJSON(writer, status, RegisterResponse{
 		ID:         instance.ID,
 		TTLSeconds: int64(handler.discovery.TTL() / time.Second),
 	})
@@ -112,6 +130,11 @@ func (handler *Handler) Heartbeat(writer http.ResponseWriter, request *http.Requ
 // Link header with rel="next" whose URL fetches the next page through an
 // opaque "cursor" parameter. Without "limit" it returns every instance, as
 // it always has.
+//
+// Every response carries a weak ETag over the instances' IDs, names,
+// addresses and ports. A request whose If-None-Match lists it gets 304
+// Not Modified without a body, so a client polling for changes pays for
+// a body only when the set of instances changed.
 func (handler *Handler) GetServices(writer http.ResponseWriter, request *http.Request) {
 	params := request.URL.Query()
 
@@ -136,6 +159,14 @@ func (handler *Handler) GetServices(writer http.ResponseWriter, request *http.Re
 	if query.Limit > 0 && len(instances) > query.Limit {
 		instances = instances[:query.Limit]
 		writer.Header().Set("Link", nextPageLink(query, instances[len(instances)-1].ID))
+	}
+
+	etag := listETag(instances, writer.Header().Get("Link"))
+	writer.Header().Set("ETag", etag)
+
+	if notModified(request, etag) {
+		writer.WriteHeader(http.StatusNotModified)
+		return
 	}
 
 	result := make([]Service, 0, len(instances))
@@ -173,7 +204,23 @@ func (handler *Handler) caller(request *http.Request) discovery.Caller {
 		return discovery.Caller{}
 	}
 
-	return discovery.Caller{Name: identity.Name, AnyInstance: identity.Allows(auth.PermissionManage)}
+	return discovery.Caller{ID: identity.ID, Name: identity.Name, AnyInstance: identity.Allows(auth.PermissionManage)}
+}
+
+// GetNodes lists the live Beacon nodes sharing this node's storage, sorted
+// by ID.
+func (handler *Handler) GetNodes(writer http.ResponseWriter, request *http.Request) {
+	nodes, err := handler.config.Nodes(request.Context())
+	if err != nil {
+		handler.writeDiscoveryError(writer, request, err)
+		return
+	}
+
+	if nodes == nil {
+		nodes = []Node{}
+	}
+
+	handler.writeJSON(writer, http.StatusOK, nodes)
 }
 
 // Health reports that the process is up and serving requests. It always
