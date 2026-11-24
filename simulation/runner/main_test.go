@@ -3,7 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -245,6 +248,8 @@ func TestParseOptionsRejectsBadInput(t *testing.T) {
 		{"-scenario", "gone", "-service", "orders"},
 		{"-scenario", "back", "-service", "nope", "-address", "x"},
 		{"-scenario", "node-down"},
+		{"-scenario", "ownership", "-service", "orders"},
+		{"-token-file", "/does/not/exist"},
 	} {
 		if _, err := parseOptions(args); err == nil {
 			t.Errorf("parseOptions(%q) succeeded", args)
@@ -484,5 +489,96 @@ func TestNodeDownFailsWhileTheNodeIsListed(t *testing.T) {
 
 	if code != 1 || !strings.Contains(output, "FAIL the other nodes stop listing beacon-a within 1s") {
 		t.Fatalf("exit %d, want 1 with beacon-a still listed:\n%s", code, output)
+	}
+}
+
+// startSecureBeacon serves a real Beacon API in memory with
+// authentication on, as the node beacon-a, and returns its URL and the
+// tokens of the callers orders, payments and runner, the last of which
+// may also manage and read metrics.
+func startSecureBeacon(t *testing.T) (string, map[string]string) {
+	t.Helper()
+
+	tokens := map[string]string{}
+	var file strings.Builder
+
+	for _, caller := range []string{"orders", "payments", "runner"} {
+		token := caller + "-token-for-the-simulation-test"
+		tokens[caller] = token
+
+		permissions := `["register", "discover"]`
+		if caller == "runner" {
+			permissions = `["register", "discover", "metrics", "manage"]`
+		}
+
+		sum := sha256.Sum256([]byte(token))
+		fmt.Fprintf(&file, "[[tokens]]\nname = %q\nsha256 = %q\npermissions = %s\n\n", caller, hex.EncodeToString(sum[:]), permissions)
+	}
+
+	path := filepath.Join(t.TempDir(), "tokens.toml")
+	if err := os.WriteFile(path, []byte(file.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	settings := config.Default()
+	settings.RateLimit.RegistrationsPerSecond = 0
+	settings.Server.NodeID = "beacon-a"
+	settings.Auth.Enabled = true
+	settings.Auth.TokensFile = path
+
+	components, err := bootstrap.New(settings, slog.New(slog.DiscardHandler), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(components.Close)
+
+	if err := components.Membership.Join(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	server := httptest.NewServer(components.Server.Handler)
+	t.Cleanup(server.Close)
+
+	return server.URL, tokens
+}
+
+// writeToken saves token in a file and returns its path.
+func writeToken(t *testing.T, token string) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(path, []byte(token+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	return path
+}
+
+func TestOwnershipHoldsAgainstAnotherService(t *testing.T) {
+	beaconURL, tokens := startSecureBeacon(t)
+
+	orders, err := client.New(beaconURL, client.WithToken(tokens["orders"]))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := orders.Register(t.Context(), client.Registration{Name: "orders", Address: "orders-1", Port: 9000}); err != nil {
+		t.Fatal(err)
+	}
+
+	// In this order: an attacker with manage succeeds, removing the
+	// instance, so it goes last.
+	for _, attack := range []struct {
+		attacker string
+		wantCode int
+	}{{"payments", 0}, {"runner", 1}} {
+		code, output, _ := runScenario(t, beaconURL,
+			"-scenario", "ownership", "-expect", "orders=1", "-service", "orders",
+			"-token-file", writeToken(t, tokens["runner"]), "-attacker-token-file", writeToken(t, tokens[attack.attacker]))
+
+		if code != attack.wantCode {
+			t.Errorf("attacking as %s: exit %d, want %d:\n%s", attack.attacker, code, attack.wantCode, output)
+		}
 	}
 }

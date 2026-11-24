@@ -52,12 +52,21 @@ simulation/run.sh instance-killed    # one scenario
 | `instance-back-same-id` | D with `Registration.ID` | `back -want-id orders-2` |
 | `node-stopped`, `node-killed` | C | `node-down -within 1s` or `15s`, then `normal` |
 | `node-stopped-retry-post`, `node-killed-retry-post` | C, nginx with `non_idempotent` | the same |
+| `storage-down` | E | `storage-down -outage 20s -recover 15s -within 4s` |
+| `ownership` | F | `ownership -service orders -attacker-token-file /auth/payments.token`, before and right after `beacon-b` restarts |
 
 For each step, `run.sh` starts the runner first with `-since` 10 seconds
 ahead, then stops, kills or starts the container at that moment, so the
 runner is already watching and its timings start at the step itself. A
 runner that was not ready by then fails with "the runner is ready before
--since". The containers share the host's clock.
+-since". The containers share the host's clock. For `storage-down` the
+runner also sends heartbeats through both nodes before PostgreSQL stops.
+
+Authentication is off unless `BEACON_SIM_AUTH=true` is set for every
+Compose command; leave it unset, not `false`, to keep it off. `ownership`
+does that itself: it writes a random token per caller to
+`simulation/auth/`, which Git ignores, with the tokens file holding their
+hashes, runs with authentication on, then turns it off again.
 
 `--wait` returns once every health check passes. The ports are published on
 loopback only. `down --volumes` also deletes the database, so the next run
@@ -379,3 +388,11 @@ What runs have shown so far, and what became of it.
   for 2s after one failure, and the `-retry-post` scenarios also retry
   POSTs. The Compose runs will show whether the first alone is enough.
   This is what the open question on client-side failover is about.
+- **Scenarios E and F behave as documented**, in the same local setup with
+  a real PostgreSQL stopped for 20s: lookups failed with `500` 47ms after
+  the stop, heartbeats were refused within the 2s allowance, `/health`
+  stayed `200`, both nodes served again 0.3s after PostgreSQL started, and
+  every instance was back 2.6s later. `payments`' token got `403
+  instance_not_owned` on every heartbeat and unregister of `orders`'
+  instances through both nodes, also right after `beacon-b` restarted. A
+  token with `manage`, as a check that the scenario can fail, removed them.

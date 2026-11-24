@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -43,7 +44,7 @@ type settings struct {
 	address   string
 	port      int
 	id        string
-	token     string
+	tokenFile string
 }
 
 // main runs the service until SIGTERM or SIGINT and exits non-zero if it
@@ -72,7 +73,7 @@ func parseSettings(args []string) (settings, error) {
 	flags.StringVar(&parsed.address, "address", "", "address other services reach this instance at, such as orders-1 (required)")
 	flags.IntVar(&parsed.port, "port", 9000, "port to listen on and register")
 	flags.StringVar(&parsed.id, "id", "", "instance ID to register; empty lets Beacon choose")
-	flags.StringVar(&parsed.token, "token", "", "bearer token for Beacon; empty sends none")
+	flags.StringVar(&parsed.tokenFile, "token-file", "", "file holding the bearer token for Beacon; empty sends none")
 
 	if err := flags.Parse(args); err != nil {
 		return settings{}, err
@@ -111,8 +112,14 @@ func serve(ctx context.Context, config settings, listener net.Listener, logger *
 	logger = logger.With(slog.String("service", config.service), slog.String("address", config.address))
 
 	options := []client.Option{client.WithLogger(logger)}
-	if config.token != "" {
-		options = append(options, client.WithToken(config.token))
+
+	if config.tokenFile != "" {
+		token, err := readToken(config.tokenFile)
+		if err != nil {
+			return err
+		}
+
+		options = append(options, client.WithToken(token))
 	}
 
 	beacon, err := client.New(config.beaconURL, options...)
@@ -167,6 +174,21 @@ func serve(ctx context.Context, config settings, listener net.Listener, logger *
 	}
 
 	return shutdownErr
+}
+
+// readToken returns the token in path, without surrounding white space.
+func readToken(path string) (string, error) {
+	content, err := os.ReadFile(path) //nolint:gosec // The path comes from the command line, by design.
+	if err != nil {
+		return "", fmt.Errorf("read token: %w", err)
+	}
+
+	token := strings.TrimSpace(string(content))
+	if token == "" {
+		return "", fmt.Errorf("read token: %s is empty", path)
+	}
+
+	return token, nil
 }
 
 // announce registers until it succeeds or ctx ends, waiting longer after

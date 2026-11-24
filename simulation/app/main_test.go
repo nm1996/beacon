@@ -7,6 +7,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
@@ -202,6 +204,30 @@ func TestParseSettings(t *testing.T) {
 	} {
 		if _, err := parseSettings(args); err == nil {
 			t.Errorf("parseSettings(%q) succeeded", args)
+		}
+	}
+}
+
+func TestReadToken(t *testing.T) {
+	dir := t.TempDir()
+
+	path := filepath.Join(dir, "orders.token")
+	if err := os.WriteFile(path, []byte("  orders-token-0123456789\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if token, err := readToken(path); err != nil || token != "orders-token-0123456789" {
+		t.Fatalf("readToken = %q, %v", token, err)
+	}
+
+	empty := filepath.Join(dir, "empty.token")
+	if err := os.WriteFile(empty, []byte("\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, path := range []string{empty, filepath.Join(dir, "missing.token")} {
+		if _, err := readToken(path); err == nil {
+			t.Errorf("readToken(%s) succeeded", path)
 		}
 	}
 }

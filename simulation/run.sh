@@ -18,6 +18,10 @@
 #   node-stopped-retry-post, node-killed-retry-post
 #                        C again, with the load balancer also passing
 #                        failed POSTs on to the other node
+#   storage-down         E: PostgreSQL is stopped for 20s
+#   ownership            F: with authentication on, payments' token must
+#                        not change orders' instances, also right after
+#                        beacon-b restarts
 #
 # The project is left running; stop it with
 #   docker compose -f simulation/compose.yaml down --volumes
@@ -40,7 +44,7 @@ compose() {
 # runner runs one scenario and prints its summary. It never stops the
 # script, so later scenarios still run; the result is collected instead.
 runner() {
-	RUNNER_UID="$(id -u)" RUNNER_GID="$(id -g)" compose run --rm --no-deps runner "$@"
+	RUNNER_UID="$(id -u)" RUNNER_GID="$(id -g)" compose run --rm --no-deps --no-TTY runner "$@"
 }
 
 # now prints the current time as Unix seconds with a fraction, for -since.
@@ -201,11 +205,77 @@ node_killed_retry_post() {
 	return "$status"
 }
 
+# outage stops PostgreSQL for 20s, more than two TTLs.
+outage() {
+	compose stop postgres
+	sleep 20
+	compose start postgres
+}
+
+# storage_down runs the outage while the runner watches. The runner gets
+# ready first, and sends heartbeats through both nodes until PostgreSQL
+# stops.
+storage_down() {
+	expect_normal
+	runner_args=(-scenario storage-down -outage 20s -recover 15s -within 4s)
+	watch outage
+}
+
+# auth_files writes a random token for each caller to auth/, and the tokens
+# file with their hashes. The applications may register and discover; the
+# runner may also read metrics and list nodes. The files are readable by
+# the containers' user, which is fine on a laptop only.
+auth_files() {
+	local dir="$here/auth"
+	local tokens="$dir/tokens.toml.new"
+	: >"$tokens"
+	for caller in orders payments inventory runner; do
+		local token permissions='["register", "discover"]'
+		token="$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')"
+		printf '%s\n' "$token" >"$dir/$caller.token"
+		if [[ "$caller" == runner ]]; then
+			permissions='["register", "discover", "metrics", "manage"]'
+		fi
+		printf '[[tokens]]\nid = "%s"\nname = "%s"\nsha256 = "%s"\npermissions = %s\n\n' \
+			"$caller" "$caller" "$(printf '%s' "$token" | sha256)" "$permissions" >>"$tokens"
+	done
+	mv "$tokens" "$dir/tokens.toml"
+	chmod 0644 "$dir"/*.token "$dir/tokens.toml"
+}
+
+# sha256 prints the hex SHA-256 of standard input.
+sha256() {
+	if command -v sha256sum >/dev/null; then
+		sha256sum | cut -d ' ' -f 1
+	else
+		shasum -a 256 | cut -d ' ' -f 1
+	fi
+}
+
+# ownership turns authentication on, attacks orders' instances with
+# payments' token, restarts beacon-b and attacks again at once, then turns
+# authentication off.
+ownership() {
+	local status=0
+	auth_files
+	export BEACON_SIM_AUTH=true
+	up
+	expect_normal
+	runner -scenario ownership -service orders -attacker-token-file /auth/payments.token || status=$?
+	compose restart beacon-b
+	compose up --detach --wait --no-deps beacon-b
+	runner -scenario ownership -service orders -attacker-token-file /auth/payments.token || status=$?
+	unset BEACON_SIM_AUTH
+	up
+	return "$status"
+}
+
 main() {
 	local scenarios=("$@")
 	if [[ ${#scenarios[@]} -eq 0 ]]; then
 		scenarios=(normal instance-killed instance-stopped instance-back instance-back-same-id
-			node-stopped node-killed node-stopped-retry-post node-killed-retry-post)
+			node-stopped node-killed node-stopped-retry-post node-killed-retry-post
+			storage-down ownership)
 	fi
 
 	up
@@ -215,7 +285,8 @@ main() {
 		echo "== $scenario"
 		case "$scenario" in
 		normal | instance-killed | instance-stopped | instance-back | instance-back-same-id | \
-			node-stopped | node-killed | node-stopped-retry-post | node-killed-retry-post)
+			node-stopped | node-killed | node-stopped-retry-post | node-killed-retry-post | \
+			storage-down | ownership)
 			"${scenario//-/_}" || failed+=("$scenario")
 			;;
 		*)
