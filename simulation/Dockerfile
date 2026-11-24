@@ -23,7 +23,7 @@ ARG TARGETARCH
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
-    go build -trimpath -o /out/ ./simulation/app
+    go build -trimpath -o /out/ ./simulation/app ./simulation/runner
 
 FROM gcr.io/distroless/static-debian13:nonroot
 
