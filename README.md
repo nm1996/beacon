@@ -1039,17 +1039,23 @@ Transports only translate requests and errors; every rule lives in `discovery`, 
 - [x] Paging for lookups
 - [x] Lookups by name that cost what they return
 
+**v0.3.0** (see the [design records](docs/design/README.md))
+
+- [x] gRPC API alongside HTTP
+- [x] Keep an instance's ID when it registers again, instead of issuing a new one
+- [x] Client-side caching and load balancing in the Go client, with optional outlier detection
+- [x] PostgreSQL storage, with a lookup cache and batched heartbeats
+- [x] Several nodes over one database
+- [x] Rate limits divided between nodes
+- [x] Trusted proxies, so rate limits can use the client address a known proxy forwards
+- [x] A stable owner ID for instance ownership and quotas, separate from the name shown in logs
+- [x] Idempotent registration with `Idempotency-Key`
+
 **Next**
 
-- [ ] gRPC API alongside HTTP
-- [ ] Keep an instance's ID when it registers again, instead of issuing a new one
-- [ ] Client-side caching and load balancing in the Go client
-- [ ] Cache and database
-- [ ] Scale, multiple nodes
-- [ ] Rate limits shared between nodes, or enforced at the load balancer
-- [ ] Trusted proxies, so rate limits can use the client address a known proxy forwards
-- [ ] A stable owner ID for instance ownership and quotas, separate from the name shown in logs
-- [ ] Idempotency
+- [ ] A `Watch` RPC that pushes changes instead of polling
+- [ ] One authentication core shared by the HTTP and gRPC transports
+- [ ] An advertised address for each node, for `GET /api/v1/nodes` behind NAT
 
 ## Versioning
 
