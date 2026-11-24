@@ -26,7 +26,6 @@ Services register themselves, send heartbeats, and discover each other over a sm
 - [How it works](#how-it-works)
 - [Documentation](#documentation)
 - [Limitations](#limitations)
-- [Roadmap](#roadmap)
 - [Versioning](#versioning)
 - [Contributing](#contributing)
 - [License](#license)
@@ -46,35 +45,13 @@ Beacon covers the core of the problem and nothing more: one small binary, no ext
 
 ## Features
 
-| | Feature |
-|:-:|---|
-| ✅ | Register, discover and unregister service instances over HTTP |
-| ✅ | Unique ID for every registered instance |
-| ✅ | Heartbeats keep an instance alive |
-| ✅ | Instances without a recent heartbeat are removed automatically |
-| ✅ | Input validation with clear `400` responses |
-| ✅ | Graceful shutdown on `SIGINT` / `SIGTERM` |
-| ✅ | `GET /health` endpoint for liveness checks |
-| ✅ | Server timeouts and request size limits |
-| ✅ | Structured JSON logs |
-| ✅ | TOML configuration file with validation |
-| ✅ | Environment variable overrides |
-| ✅ | Consistent JSON error responses with stable codes |
-| ✅ | Versioned API under `/api/v1` |
-| ✅ | Go client with automatic heartbeats and re-registration |
-| ✅ | Container image (amd64, arm64) with a built-in health check, and a Compose example |
-| ✅ | Prometheus metrics at `/metrics` |
-| ✅ | Optional HTTPS (TLS 1.2+) |
-| ✅ | Optional bearer-token authentication with per-token permissions |
-| ✅ | Optional client certificates (mTLS), with the same permissions |
-| ✅ | With authentication on, only the caller that registered an instance may change it |
-| ✅ | Limits on instances, per owner, and on how fast clients register or fail to authenticate |
-| ✅ | Paging for lookups, and conditional lookups with `ETag` |
-| ✅ | Stable instance IDs and safe retries with `Idempotency-Key` |
-| ✅ | Optional PostgreSQL storage, with batched heartbeats and a lookup cache |
-| ✅ | Several nodes over one PostgreSQL database |
-| ✅ | Optional gRPC API alongside HTTP |
-| ✅ | Client-side caching and load balancing in the Go client |
+- **Register, discover, heartbeat** over a small HTTP API, or gRPC, with instances removed when they stop sending heartbeats.
+- **A Go client** that keeps an instance registered, retries safely, and caches and load-balances lookups.
+- **Memory or PostgreSQL storage**, and several nodes over one database, without consensus.
+- **Security when you turn it on:** TLS, tokens or client certificates, ownership of instances, and rate limits.
+- **Operable:** one binary or container image, metrics, structured logs, and [written-down guarantees](docs/guides/guarantees.md) checked by an end-to-end [simulation](simulation/README.md).
+
+The full list is in [Features](docs/guides/features.md), and what comes next in the [roadmap](ROADMAP.md).
 
 ## Quick start
 
@@ -148,7 +125,10 @@ Instances of the same service share a name. Registering again creates a new inst
 | [Security](docs/guides/security.md) | TLS, tokens, client certificates, ownership, rate limits, reloading credentials, exposing Beacon |
 | [Operations](docs/guides/operations.md) | PostgreSQL, several nodes, Docker, metrics |
 | [Guarantees and failure behavior](docs/guides/guarantees.md) | What is consistent, what may lag, and what happens when something fails |
+| [Simulation](simulation/README.md) | Two nodes, a load balancer and application services run locally, with failures and their [reports](simulation/reports/README.md) |
 | [Developing Beacon](docs/guides/development.md) | Building, testing, benchmarks, project layout |
+| [Branches and releases](docs/guides/releasing.md) | How a change reaches a release |
+| [Features](docs/guides/features.md) and [roadmap](ROADMAP.md) | Everything Beacon does, and what comes next |
 | [Design records](docs/design/README.md) | Why the larger decisions were made |
 
 ## Limitations
@@ -163,60 +143,6 @@ Beacon is deliberately small. Before you depend on it, know that:
 - **Client certificates are not checked for revocation.** Use short-lived certificates.
 - **A paused Beacon expires everything at once.** If the process is stopped for longer than `registry.service_ttl`, for example with `SIGSTOP` or a paused virtual machine, no heartbeats arrive meanwhile, and every instance expires when it resumes; their leases then register again. A suspended laptop does not count, since Beacon measures time with a clock that stops during suspend.
 
-## Roadmap
-
-**Done**
-
-- [x] In-memory registry with register, heartbeat, discovery and unregister
-- [x] Request validation
-- [x] Automatic removal of stale instances
-- [x] Graceful shutdown
-- [x] Server timeouts and request size limits
-- [x] Health endpoint
-- [x] Structured logging
-- [x] CI pipeline
-- [x] TOML configuration
-- [x] Consistent JSON error responses
-- [x] Versioned REST API
-- [x] Environment variable overrides for configuration
-- [x] Docker image and Compose example
-- [x] Prometheus metrics
-- [x] Go client library
-- [x] First release, `v0.1.0`
-
-**v0.2.0**
-
-- [x] TLS for the HTTP API
-- [x] Authentication with bearer tokens and per-token permissions
-- [x] Client certificates (mTLS) as another way to authenticate
-- [x] Reload certificates and tokens without a restart
-- [x] Only the caller that registered an instance may change it
-- [x] Limits on instances, per owner, and on how fast clients register or fail to authenticate
-- [x] Paging for lookups
-- [x] Lookups by name that cost what they return
-
-**v0.3.0** (see the [design records](docs/design/README.md))
-
-- [x] gRPC API alongside HTTP
-- [x] Keep an instance's ID when it registers again, instead of issuing a new one
-- [x] Client-side caching and load balancing in the Go client, with optional outlier detection
-- [x] PostgreSQL storage, with a lookup cache and batched heartbeats
-- [x] Several nodes over one database
-- [x] Rate limits divided between nodes
-- [x] Trusted proxies, so rate limits can use the client address a known proxy forwards
-- [x] A stable owner ID for instance ownership and quotas, separate from the name shown in logs
-- [x] Idempotent registration with `Idempotency-Key`
-- [x] Conditional lookups with `ETag` and `If-None-Match`
-- [x] Heartbeats refused, not accepted, while a node cannot write them to PostgreSQL, with a metric for the writes
-- [x] [Guarantees and failure behavior](docs/guides/guarantees.md) written down, and the README split into [guides](#documentation)
-- [x] Integration tests with two nodes over a real PostgreSQL database
-
-**Next**
-
-- [ ] A `Watch` RPC that pushes changes instead of polling
-- [ ] One authentication core shared by the HTTP and gRPC transports
-- [ ] An advertised address for each node, for `GET /api/v1/nodes` behind NAT
-
 ## Versioning
 
 Beacon follows [Semantic Versioning](https://semver.org/). Releases are git tags such as `v0.1.0` on the `prod` branch, and every change is listed in [CHANGELOG.md](CHANGELOG.md).
@@ -229,30 +155,7 @@ Beacon follows [Semantic Versioning](https://semver.org/). Releases are git tags
 
 Commit messages follow Conventional Commits, which map onto these rules: `feat!` or `BREAKING CHANGE` is breaking, `feat` adds functionality, and `fix` is a patch.
 
-### Branches and releases
-
-Changes move through three long-lived branches:
-
-| Branch | Takes pull requests from | On every push |
-|---|---|---|
-| `main` (default) | Feature branches such as `feat/...` and `fix/...`, merged by the maintainer once reviewed | CI |
-| `stage` | `main` only | CI, then the next release candidate is tagged and published |
-| `prod` | `stage` only | CI, then the release is tagged and published |
-
-A required `Promotion source` check refuses pull requests to `stage` or `prod` from any other branch. Both take merge commits only, so each holds exactly the commits of the branch before it and the next promotion merges cleanly.
-
-To release:
-
-1. On a branch from `main`, move the **Unreleased** entries in `CHANGELOG.md` under a new heading `## [X.Y.Z] - YYYY-MM-DD`, for the version being released, and merge it.
-2. Run `mise run promote-stage`. It opens the pull request from `main` to `stage`, named after the candidate it will produce, and stops if the version has already been released, which means step 1 was missed. Once it is merged, the [stage workflow](.github/workflows/stage.yml) tags the next candidate, `vX.Y.Z-rc.1` for the first, and publishes it as a pre-release.
-3. Try the candidate. To fix something, merge the fix into `main` and promote again; each merge into `stage` tags the next candidate, `vX.Y.Z-rc.2` and so on.
-4. Run `mise run promote-prod`. It opens the pull request from `stage` to `prod`, after checking that `stage` is exactly the newest candidate. Once it is merged, the [production release workflow](.github/workflows/prod.yml) checks the same again, tags `vX.Y.Z`, and publishes the release.
-
-Both commands print the open pull request instead if there already is one. They run the GitHub CLI, which mise installs for them, as you, so pull requests they open run CI like any other; log in once with `gh auth login`.
-
-Publishing is done by the [release workflow](.github/workflows/release.yml): it runs the checks, builds archives for Linux, macOS and Windows on amd64 and arm64, publishes a GitHub release with checksums, and pushes the container image. Candidates become pre-releases and never move the image's `latest` tag. Pushing a `v*` tag by hand still runs it, for emergencies.
-
-Tags are never moved or deleted once pushed.
+How changes move from `main` through `stage` to a release on `prod` is described in [Branches and releases](docs/guides/releasing.md).
 
 ## Contributing
 

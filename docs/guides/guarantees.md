@@ -72,7 +72,11 @@ its own. With PostgreSQL:
   taken over through another process is noticed at the next write, after
   which the old owner's heartbeats are refused.
 - **An instance removed through another process** is noticed at the next
-  write; its heartbeats then get `404 instance_not_found`.
+  write; its heartbeats then get `404 instance_not_found`. Behind a load
+  balancer each process notices on its own, so until then each may still
+  accept one heartbeat for it. After a database outage, when cleanup
+  removes many instances at once, processes check every instance again
+  instead, so none is accepted.
 
 ## When something fails
 
@@ -80,7 +84,7 @@ its own. With PostgreSQL:
 |---|---|
 | PostgreSQL unreachable at startup | Beacon tries once to connect and migrate, for up to 30 seconds, then exits with an error. It does not start half initialized; let the supervisor or orchestrator restart it. |
 | PostgreSQL unreachable while running | Requests that need it fail with `500 internal_error` (gRPC: `INTERNAL`). With `cache_ttl` on, lookups still answer from the cache until it expires. Heartbeats are accepted for at most two more flush intervals, then fail too. Cleanup and node records log the error and try again on their next run. |
-| PostgreSQL restarts | Requests fail while it is down, as above. pgx's connection pool replaces broken connections, so requests succeed again once it is back, without restarting Beacon. |
+| PostgreSQL restarts | Requests fail while it is down, as above. pgx's connection pool replaces broken connections, so requests succeed again once it is back, without restarting Beacon. An outage longer than the TTL leaves every instance's stored heartbeat too old, so cleanup removes them as soon as the database is back. Each process forgets the instances it knew once its first write after the outage succeeds, so an instance's next heartbeat gets `404 instance_not_found` through any process, and its Lease registers it again: every instance is back within about one heartbeat interval. |
 | One process crashes | The others keep serving every request. Its buffered heartbeats are lost, and after 15 seconds it no longer counts as a live node. |
 | A process is stopped for longer than the TTL | If it is the only process, every instance expires when it resumes, and their leases register again. With PostgreSQL and other processes running, the instances keep sending heartbeats through those and stay registered. |
 | Clocks drift apart | Timestamps come from each process's clock, so skew between processes shifts when instances expire. Keep them synchronized with NTP, to well within the TTL. |

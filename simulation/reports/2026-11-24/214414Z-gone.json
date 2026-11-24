@@ -1,0 +1,219 @@
+{
+  "scenario": "gone",
+  "run": "214319Z",
+  "label": "instance-back",
+  "started": "2026-11-24T21:44:14.973236488Z",
+  "finished": "2026-11-24T21:44:31.911075455Z",
+  "passed": true,
+  "endpoints": {
+    "beacon-a": "http://beacon-a:8080",
+    "beacon-b": "http://beacon-b:8080"
+  },
+  "expected": {
+    "inventory": 1,
+    "orders": 2,
+    "payments": 1
+  },
+  "target": {
+    "service": "orders",
+    "address": "orders-2",
+    "id": "ba170ed1-2e13-5c78-a75a-ac0e0edc30d5"
+  },
+  "seen": {
+    "beacon-a": {
+      "inventory": [
+        {
+          "id": "250ecb7b-a3e1-5a4b-ab59-be0c32be6681",
+          "address": "inventory-1",
+          "port": 9000
+        }
+      ],
+      "orders": [
+        {
+          "id": "015d67e6-8e33-5bd3-bb4e-560036eccc19",
+          "address": "orders-1",
+          "port": 9000
+        }
+      ],
+      "payments": [
+        {
+          "id": "7526d2d0-0aad-5fc2-896c-bfd0657e0bca",
+          "address": "payments-1",
+          "port": 9000
+        }
+      ]
+    },
+    "beacon-b": {
+      "inventory": [
+        {
+          "id": "250ecb7b-a3e1-5a4b-ab59-be0c32be6681",
+          "address": "inventory-1",
+          "port": 9000
+        }
+      ],
+      "orders": [
+        {
+          "id": "015d67e6-8e33-5bd3-bb4e-560036eccc19",
+          "address": "orders-1",
+          "port": 9000
+        }
+      ],
+      "payments": [
+        {
+          "id": "7526d2d0-0aad-5fc2-896c-bfd0657e0bca",
+          "address": "payments-1",
+          "port": 9000
+        }
+      ]
+    }
+  },
+  "calls_by_address": {
+    "orders-1:9000": {
+      "calls": 120,
+      "failures": 0
+    },
+    "orders-2:9000": {
+      "calls": 49,
+      "failures": 2
+    }
+  },
+  "steps": [
+    {
+      "name": "the runner is ready before -since",
+      "passed": true,
+      "at": "2026-11-24T21:44:14.982603254Z",
+      "duration_ms": 0
+    },
+    {
+      "name": "orders-2 leaves discovery on every node within 9s",
+      "passed": true,
+      "at": "2026-11-24T21:44:31.903967578Z",
+      "duration_ms": 0.046
+    },
+    {
+      "name": "the nodes agree within one poll",
+      "passed": true,
+      "at": "2026-11-24T21:44:31.903967578Z",
+      "duration_ms": 0.054
+    },
+    {
+      "name": "every other instance stays registered",
+      "passed": true,
+      "at": "2026-11-24T21:44:31.903967578Z",
+      "duration_ms": 0.054
+    },
+    {
+      "name": "lookups succeed throughout",
+      "passed": true,
+      "at": "2026-11-24T21:44:31.903967578Z",
+      "duration_ms": 0.054
+    },
+    {
+      "name": "every other instance answers throughout",
+      "passed": true,
+      "at": "2026-11-24T21:44:31.903967578Z",
+      "duration_ms": 0.063
+    }
+  ],
+  "requests": {
+    "discover": {
+      "total": 180,
+      "errors": 0,
+      "p50_ms": 0.771,
+      "p95_ms": 1.372,
+      "p99_ms": 1.461,
+      "max_ms": 1.511
+    },
+    "metrics": {
+      "total": 4,
+      "errors": 0,
+      "p50_ms": 3.995,
+      "p95_ms": 4.318,
+      "p99_ms": 4.318,
+      "max_ms": 4.318
+    },
+    "resolved": {
+      "total": 169,
+      "errors": 2,
+      "errors_by_kind": {
+        "network dial": 2
+      },
+      "p50_ms": 0.726,
+      "p95_ms": 0.863,
+      "p99_ms": 2.15,
+      "max_ms": 2.328
+    }
+  },
+  "timings_ms": {
+    "gone_beacon-a": 7423.247,
+    "gone_beacon-b": 7423.248
+  },
+  "metrics": {
+    "beacon-a": {
+      "before": [
+        "beacon_cluster_nodes 2",
+        "beacon_expired_instances_total 0",
+        "beacon_heartbeat_flushes_total{result=\"ok\"} 13",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /api/v1/nodes\"} 4",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /api/v1/services\"} 359",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /health\"} 20",
+        "beacon_http_requests_total{code=\"201\",method=\"POST\",route=\"POST /api/v1/services\"} 3",
+        "beacon_http_requests_total{code=\"204\",method=\"DELETE\",route=\"DELETE /api/v1/services/{id}\"} 1",
+        "beacon_http_requests_total{code=\"204\",method=\"POST\",route=\"POST /api/v1/services/{id}/heartbeat\"} 20",
+        "beacon_http_requests_total{code=\"304\",method=\"GET\",route=\"GET /api/v1/services\"} 26",
+        "beacon_registry_operations_total{operation=\"create\",result=\"ok\"} 3",
+        "beacon_registry_operations_total{operation=\"delete\",result=\"ok\"} 1",
+        "beacon_registry_operations_total{operation=\"delete_stale\",result=\"ok\"} 42",
+        "beacon_registry_operations_total{operation=\"list\",result=\"ok\"} 385",
+        "beacon_registry_operations_total{operation=\"touch\",result=\"ok\"} 20"
+      ],
+      "after": [
+        "beacon_cluster_nodes 2",
+        "beacon_expired_instances_total 0",
+        "beacon_heartbeat_flushes_total{result=\"ok\"} 21",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /api/v1/nodes\"} 4",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /api/v1/services\"} 451",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /health\"} 25",
+        "beacon_http_requests_total{code=\"201\",method=\"POST\",route=\"POST /api/v1/services\"} 3",
+        "beacon_http_requests_total{code=\"204\",method=\"DELETE\",route=\"DELETE /api/v1/services/{id}\"} 1",
+        "beacon_http_requests_total{code=\"204\",method=\"POST\",route=\"POST /api/v1/services/{id}/heartbeat\"} 31",
+        "beacon_http_requests_total{code=\"304\",method=\"GET\",route=\"GET /api/v1/services\"} 42",
+        "beacon_registry_operations_total{operation=\"create\",result=\"ok\"} 3",
+        "beacon_registry_operations_total{operation=\"delete\",result=\"ok\"} 1",
+        "beacon_registry_operations_total{operation=\"delete_stale\",result=\"ok\"} 59",
+        "beacon_registry_operations_total{operation=\"list\",result=\"ok\"} 493",
+        "beacon_registry_operations_total{operation=\"touch\",result=\"ok\"} 31"
+      ]
+    },
+    "beacon-b": {
+      "before": [
+        "beacon_cluster_nodes 2",
+        "beacon_expired_instances_total 1",
+        "beacon_heartbeat_flushes_total{result=\"ok\"} 14",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /api/v1/nodes\"} 4",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /api/v1/services\"} 357",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /health\"} 17",
+        "beacon_http_requests_total{code=\"201\",method=\"POST\",route=\"POST /api/v1/services\"} 3",
+        "beacon_http_requests_total{code=\"204\",method=\"POST\",route=\"POST /api/v1/services/{id}/heartbeat\"} 23",
+        "beacon_registry_operations_total{operation=\"create\",result=\"ok\"} 3",
+        "beacon_registry_operations_total{operation=\"delete_stale\",result=\"ok\"} 42",
+        "beacon_registry_operations_total{operation=\"list\",result=\"ok\"} 357",
+        "beacon_registry_operations_total{operation=\"touch\",result=\"ok\"} 23"
+      ],
+      "after": [
+        "beacon_cluster_nodes 2",
+        "beacon_expired_instances_total 2",
+        "beacon_heartbeat_flushes_total{result=\"ok\"} 21",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /api/v1/nodes\"} 4",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /api/v1/services\"} 447",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /health\"} 24",
+        "beacon_http_requests_total{code=\"201\",method=\"POST\",route=\"POST /api/v1/services\"} 3",
+        "beacon_http_requests_total{code=\"204\",method=\"POST\",route=\"POST /api/v1/services/{id}/heartbeat\"} 32",
+        "beacon_registry_operations_total{operation=\"create\",result=\"ok\"} 3",
+        "beacon_registry_operations_total{operation=\"delete_stale\",result=\"ok\"} 59",
+        "beacon_registry_operations_total{operation=\"list\",result=\"ok\"} 447",
+        "beacon_registry_operations_total{operation=\"touch\",result=\"ok\"} 32"
+      ]
+    }
+  }
+}

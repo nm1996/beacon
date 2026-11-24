@@ -48,7 +48,19 @@ compose() {
 # runner runs one scenario and prints its summary. It never stops the
 # script, so later scenarios still run; the result is collected instead.
 runner() {
-	RUNNER_UID="$(id -u)" RUNNER_GID="$(id -g)" compose run --rm --no-deps --no-TTY runner "$@"
+	RUNNER_UID="$(id -u)" RUNNER_GID="$(id -g)" compose run --rm --no-deps --no-TTY runner \
+		-run "$run_id" -label "$label" "$@"
+}
+
+# run_id names this invocation in the reports, and label the scenario
+# being run, so the summaries group the runner's reports by both.
+run_id="$(date -u +%H%M%SZ)"
+label=""
+
+# summarize rewrites the README.md summaries in reports/, for this run and
+# every earlier one.
+summarize() {
+	RUNNER_UID="$(id -u)" RUNNER_GID="$(id -g)" compose run --rm --no-deps --no-TTY runner -summarize
 }
 
 # now prints the current time as Unix seconds with a fraction, for -since.
@@ -111,6 +123,7 @@ up() {
 expect_normal() {
 	if ! runner -scenario normal; then
 		echo "run.sh: scenario normal failed; the other scenarios need it" >&2
+		summarize
 		exit 1
 	fi
 }
@@ -279,7 +292,8 @@ ownership() {
 # for every container into the reports directory.
 load() {
 	local instances="$1" status=0 sampler stats
-	stats="$here/reports/$(date -u +%Y-%m-%dT%H%M%SZ)-load-$instances-stats.jsonl"
+	stats="$here/reports/$(date -u +%Y-%m-%d)/$(date -u +%H%M%SZ)-load-$instances-stats.jsonl"
+	mkdir -p "$(dirname "$stats")"
 	LOAD_INSTANCES="$instances" compose --profile load up --detach --wait catalog
 	expect_normal
 	(
@@ -325,6 +339,7 @@ main() {
 	local failed=()
 	for scenario in "${scenarios[@]}"; do
 		echo "== $scenario"
+		label="$scenario"
 		case "$scenario" in
 		normal | instance-killed | instance-stopped | instance-back | instance-back-same-id | \
 			node-stopped | node-killed | node-stopped-retry-post | node-killed-retry-post | \
@@ -337,6 +352,9 @@ main() {
 			;;
 		esac
 	done
+
+	label=""
+	summarize
 
 	if [[ ${#failed[@]} -gt 0 ]]; then
 		echo "== failed: ${failed[*]}" >&2

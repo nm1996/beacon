@@ -34,8 +34,14 @@ type options struct {
 	expected map[string]int
 	reports  string
 	timeout  time.Duration
-	rounds   int
-	token    string
+
+	// run and label group reports in the summaries; summarize writes the
+	// summaries instead of running a scenario.
+	run       string
+	label     string
+	summarize bool
+	rounds    int
+	token     string
 
 	// For the scenarios about one instance: which one, when it was
 	// killed, stopped or started, and how long the change may take.
@@ -133,8 +139,21 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		endpoints[target.name] = target.url
 	}
 
+	if parsed.summarize {
+		if err := writeSummaries(parsed.reports); err != nil {
+			fmt.Fprintln(stderr, "summarize:", err)
+			return 2
+		}
+
+		fmt.Fprintln(stdout, "summaries written to", parsed.reports)
+
+		return 0
+	}
+
 	report := newReport(parsed.scenario, endpoints)
 	report.Expected = parsed.expected
+	report.Run = parsed.run
+	report.Label = parsed.label
 
 	cluster, err := newCluster(parsed.nodes, parsed.token, report)
 	if err != nil {
@@ -184,7 +203,10 @@ func parseOptions(args []string) (options, error) {
 	flags.StringVar(&parsed.scenario, "scenario", "normal", "scenario to run: "+strings.Join(scenarioNames(), ", "))
 	flags.StringVar(&nodes, "nodes", "beacon-a=http://beacon-a:8080,beacon-b=http://beacon-b:8080", "Beacon nodes to observe, as name=URL pairs separated by commas")
 	flags.StringVar(&expected, "expect", "orders=2,payments=1,inventory=1", "instances each service should have, as name=count pairs separated by commas")
-	flags.StringVar(&parsed.reports, "reports", "/reports", "directory to write the JSON report to")
+	flags.StringVar(&parsed.reports, "reports", "/reports", "directory to write the JSON report to, in a folder per day")
+	flags.StringVar(&parsed.run, "run", "", "names the run.sh invocation this report belongs to, for the summaries")
+	flags.StringVar(&parsed.label, "label", "", "names the run.sh scenario this report belongs to, for the summaries")
+	flags.BoolVar(&parsed.summarize, "summarize", false, "instead of running a scenario, write README.md summaries of every report in -reports")
 	flags.DurationVar(&parsed.timeout, "timeout", time.Minute, "how long to wait for the cluster to reach the expected state")
 	flags.IntVar(&parsed.rounds, "rounds", 20, "how many times to repeat each lookup and call, for latency")
 	flags.StringVar(&tokenFile, "token-file", os.Getenv("RUNNER_TOKEN_FILE"), "file holding the runner's bearer token for Beacon; defaults to $RUNNER_TOKEN_FILE, and empty sends none")

@@ -1,0 +1,1619 @@
+{
+  "scenario": "load",
+  "run": "214319Z",
+  "label": "load-large",
+  "started": "2026-11-24T21:49:56.066096484Z",
+  "finished": "2026-11-24T21:51:56.110582941Z",
+  "passed": true,
+  "endpoints": {
+    "beacon-a": "http://beacon-a:8080",
+    "beacon-b": "http://beacon-b:8080"
+  },
+  "expected": {
+    "catalog": 100,
+    "inventory": 1,
+    "orders": 2,
+    "payments": 1
+  },
+  "seen": {
+    "beacon-a": {
+      "catalog": [
+        {
+          "id": "05b8ab5f-044e-5986-adb9-597b4c4ec09d",
+          "address": "catalog",
+          "port": 9091
+        },
+        {
+          "id": "05fbfddc-6ea2-5d83-85fc-9c56f2b2d4c7",
+          "address": "catalog",
+          "port": 9001
+        },
+        {
+          "id": "0dacae27-b030-54ff-9680-077c31b80deb",
+          "address": "catalog",
+          "port": 9095
+        },
+        {
+          "id": "0ee2a611-4788-5135-b06f-eecd321a2fb7",
+          "address": "catalog",
+          "port": 9076
+        },
+        {
+          "id": "0f147be2-847c-5fd2-af44-0ed671a80e23",
+          "address": "catalog",
+          "port": 9088
+        },
+        {
+          "id": "1057e5d1-f15c-512d-8f7e-caa3e5d51012",
+          "address": "catalog",
+          "port": 9026
+        },
+        {
+          "id": "15b5820b-76e7-50bc-b923-43186118772e",
+          "address": "catalog",
+          "port": 9099
+        },
+        {
+          "id": "16ccb257-f88e-5ef6-8c48-385ca5ad9253",
+          "address": "catalog",
+          "port": 9034
+        },
+        {
+          "id": "17e4871d-9a28-5633-ae3a-7695b1065ace",
+          "address": "catalog",
+          "port": 9032
+        },
+        {
+          "id": "1a27b57e-5ca9-52bd-9b6f-5d70022925cc",
+          "address": "catalog",
+          "port": 9097
+        },
+        {
+          "id": "1e98ee4f-017a-5b81-adc0-d9351c516693",
+          "address": "catalog",
+          "port": 9062
+        },
+        {
+          "id": "1f3adea2-965f-5e9d-ac46-e2f510f61dec",
+          "address": "catalog",
+          "port": 9060
+        },
+        {
+          "id": "20421934-36f4-5898-bcf8-68dc90d74425",
+          "address": "catalog",
+          "port": 9068
+        },
+        {
+          "id": "22e0df22-0c82-535e-82ac-0ff95f13b279",
+          "address": "catalog",
+          "port": 9058
+        },
+        {
+          "id": "23c20e90-7f43-5427-b442-a6f6f6071cb3",
+          "address": "catalog",
+          "port": 9002
+        },
+        {
+          "id": "29cd5a9e-d48c-5125-b824-5fe4be601b49",
+          "address": "catalog",
+          "port": 9063
+        },
+        {
+          "id": "2a9cad45-a30a-5e61-a54d-434eb15e9830",
+          "address": "catalog",
+          "port": 9066
+        },
+        {
+          "id": "31b5aba1-135b-5215-acd1-4862a9f7fa0b",
+          "address": "catalog",
+          "port": 9028
+        },
+        {
+          "id": "3237ab08-d5b5-5818-a157-a8fb329fc57e",
+          "address": "catalog",
+          "port": 9087
+        },
+        {
+          "id": "3db58aff-2d6a-55a3-afd8-c4a44ef1ed9d",
+          "address": "catalog",
+          "port": 9082
+        },
+        {
+          "id": "4125c16b-6d80-5e49-8811-87f25f5e468a",
+          "address": "catalog",
+          "port": 9080
+        },
+        {
+          "id": "43bbcfa5-3f3b-5d12-bb3a-ba3a3d34ea59",
+          "address": "catalog",
+          "port": 9030
+        },
+        {
+          "id": "46835055-d967-554e-9543-1d1c3bd97bda",
+          "address": "catalog",
+          "port": 9070
+        },
+        {
+          "id": "47656aee-feb4-5943-a5d5-22e1db64102a",
+          "address": "catalog",
+          "port": 9021
+        },
+        {
+          "id": "4831e00a-7aa7-5460-91c7-a07137c41551",
+          "address": "catalog",
+          "port": 9049
+        },
+        {
+          "id": "4abe14f5-9fe5-561f-a6bd-ed9685eb7d5d",
+          "address": "catalog",
+          "port": 9065
+        },
+        {
+          "id": "4c39b70f-0392-563b-b435-0530e4db04fe",
+          "address": "catalog",
+          "port": 9077
+        },
+        {
+          "id": "50988d65-3376-5f2e-b6d3-13ee5d829edb",
+          "address": "catalog",
+          "port": 9033
+        },
+        {
+          "id": "54344920-dbdf-55f3-8216-1af311ca3ecb",
+          "address": "catalog",
+          "port": 9098
+        },
+        {
+          "id": "55b0e245-bc48-5339-939f-1bcd03913146",
+          "address": "catalog",
+          "port": 9056
+        },
+        {
+          "id": "5c367a3e-febf-5f9a-ad52-35ea030f6ee8",
+          "address": "catalog",
+          "port": 9050
+        },
+        {
+          "id": "60665b35-5a0b-58cd-86a7-57db5eaf9e7d",
+          "address": "catalog",
+          "port": 9074
+        },
+        {
+          "id": "639dcfeb-c08f-5db5-af4d-4e98ed8326e0",
+          "address": "catalog",
+          "port": 9008
+        },
+        {
+          "id": "67d55b0f-a0ab-509c-90c7-8d4900a14c21",
+          "address": "catalog",
+          "port": 9053
+        },
+        {
+          "id": "6941024c-fbb2-5387-9246-34e2cb69c2c4",
+          "address": "catalog",
+          "port": 9052
+        },
+        {
+          "id": "6b7cad27-cc10-565c-b9eb-805a59eef8a7",
+          "address": "catalog",
+          "port": 9078
+        },
+        {
+          "id": "6d0e01c8-f1e2-55f4-8eb5-741864482a19",
+          "address": "catalog",
+          "port": 9003
+        },
+        {
+          "id": "7119cd5c-c0a0-5a95-97e4-f5f05c62bfda",
+          "address": "catalog",
+          "port": 9045
+        },
+        {
+          "id": "79964e24-b461-5275-9b1e-11fb37d3d379",
+          "address": "catalog",
+          "port": 9083
+        },
+        {
+          "id": "7a3da521-13af-5065-9a29-f255d326e5ca",
+          "address": "catalog",
+          "port": 9096
+        },
+        {
+          "id": "8198812e-3772-5789-b633-45a1a1082ecc",
+          "address": "catalog",
+          "port": 9042
+        },
+        {
+          "id": "835cc2e7-04c8-54d1-b0f9-ced090bc088e",
+          "address": "catalog",
+          "port": 9011
+        },
+        {
+          "id": "83dd0bd3-ba8b-553c-bdd6-4b17174b04b4",
+          "address": "catalog",
+          "port": 9051
+        },
+        {
+          "id": "85563da8-53bb-59cc-ad06-5b0ac281264a",
+          "address": "catalog",
+          "port": 9006
+        },
+        {
+          "id": "86d62c2f-e4a1-53b9-8fd4-094dbb2f3c05",
+          "address": "catalog",
+          "port": 9057
+        },
+        {
+          "id": "8b45f0a6-7ca0-5724-8683-b73cb9953513",
+          "address": "catalog",
+          "port": 9059
+        },
+        {
+          "id": "8c31741a-d873-54d3-b075-373f8a68b212",
+          "address": "catalog",
+          "port": 9016
+        },
+        {
+          "id": "8ee89a28-0cd9-578d-80bb-2df1034a01b6",
+          "address": "catalog",
+          "port": 9054
+        },
+        {
+          "id": "8f2158ab-489e-5865-b7d4-d1b103950526",
+          "address": "catalog",
+          "port": 9019
+        },
+        {
+          "id": "91315a12-38fb-5154-ab7d-c902e219df20",
+          "address": "catalog",
+          "port": 9007
+        },
+        {
+          "id": "94d787fd-2264-563f-95af-eeb726e40753",
+          "address": "catalog",
+          "port": 9041
+        },
+        {
+          "id": "950c4f2e-f452-5237-b75d-697f1cd082aa",
+          "address": "catalog",
+          "port": 9009
+        },
+        {
+          "id": "9867c6dd-fdea-571c-8106-178321d26e07",
+          "address": "catalog",
+          "port": 9061
+        },
+        {
+          "id": "9c31b75c-7a2b-5d3b-9857-f0fecdff7543",
+          "address": "catalog",
+          "port": 9069
+        },
+        {
+          "id": "a2068983-7d3e-5dcd-b944-8e7356e522aa",
+          "address": "catalog",
+          "port": 9037
+        },
+        {
+          "id": "a39289e6-0a7a-580a-ba41-0d0244a0d0fd",
+          "address": "catalog",
+          "port": 9079
+        },
+        {
+          "id": "ab34fbdc-06f2-58e8-9c3f-f7cf028e45f9",
+          "address": "catalog",
+          "port": 9073
+        },
+        {
+          "id": "abaee8f0-fbf7-571e-99c6-3e637ebb0776",
+          "address": "catalog",
+          "port": 9089
+        },
+        {
+          "id": "afa81264-e47a-5341-876b-d89eb93f73ac",
+          "address": "catalog",
+          "port": 9038
+        },
+        {
+          "id": "b2e2165d-8aa8-59d9-b843-c835d53a0228",
+          "address": "catalog",
+          "port": 9043
+        },
+        {
+          "id": "b46d2fa7-543d-528d-8b90-2f6e324507db",
+          "address": "catalog",
+          "port": 9093
+        },
+        {
+          "id": "b5070e89-7222-5e6f-88eb-08acf86791bb",
+          "address": "catalog",
+          "port": 9012
+        },
+        {
+          "id": "b5977264-199a-500b-a7fd-54249d17b319",
+          "address": "catalog",
+          "port": 9004
+        },
+        {
+          "id": "b911333f-42db-526d-962e-9029fd157d55",
+          "address": "catalog",
+          "port": 9005
+        },
+        {
+          "id": "bc102cf7-236d-592a-b430-ae40355cfd26",
+          "address": "catalog",
+          "port": 9055
+        },
+        {
+          "id": "c0075035-f9b0-53b3-a2d5-9baf8b7554c5",
+          "address": "catalog",
+          "port": 9018
+        },
+        {
+          "id": "c223e13a-b630-51bd-af3e-c7de8897eb35",
+          "address": "catalog",
+          "port": 9010
+        },
+        {
+          "id": "c4164fb5-e093-57ac-bbc9-0aa2dfdd7b8a",
+          "address": "catalog",
+          "port": 9064
+        },
+        {
+          "id": "c6ea701b-6015-5343-9225-cb4d2d52773a",
+          "address": "catalog",
+          "port": 9072
+        },
+        {
+          "id": "c7c04fe7-9525-53bb-ad7b-1dd1c1c37a86",
+          "address": "catalog",
+          "port": 9085
+        },
+        {
+          "id": "cf0c9e1d-9c6d-5e4f-bd1d-83730b65d6f1",
+          "address": "catalog",
+          "port": 9022
+        },
+        {
+          "id": "cf6e9fb0-4569-561e-b8f2-977c1f5164d2",
+          "address": "catalog",
+          "port": 9092
+        },
+        {
+          "id": "d15fff9f-2794-523c-8405-b93f902fd41c",
+          "address": "catalog",
+          "port": 9020
+        },
+        {
+          "id": "d178a6d6-5b40-565a-aa4b-0af2f27a87dc",
+          "address": "catalog",
+          "port": 9025
+        },
+        {
+          "id": "d27564ff-3eb9-5c25-8cb1-6359bbdac51d",
+          "address": "catalog",
+          "port": 9036
+        },
+        {
+          "id": "d7415eee-e415-5b6c-94a1-047aa4d8be87",
+          "address": "catalog",
+          "port": 9015
+        },
+        {
+          "id": "d7d4c17b-8d54-5924-a286-eba39a2e7e8e",
+          "address": "catalog",
+          "port": 9013
+        },
+        {
+          "id": "d8336694-fd5f-54fc-8616-da6771738895",
+          "address": "catalog",
+          "port": 9044
+        },
+        {
+          "id": "d92a90ac-0447-522d-9d55-a96c5491aa2a",
+          "address": "catalog",
+          "port": 9086
+        },
+        {
+          "id": "dd1ad991-0180-5aa2-b526-ec9a90a7a98b",
+          "address": "catalog",
+          "port": 9081
+        },
+        {
+          "id": "dd72c07b-238f-5b2e-befd-71424e0da3e2",
+          "address": "catalog",
+          "port": 9031
+        },
+        {
+          "id": "e2a29da3-55b8-5ce2-b500-983de56bcde9",
+          "address": "catalog",
+          "port": 9046
+        },
+        {
+          "id": "e38e38ea-3494-52bb-8724-abf55df554d7",
+          "address": "catalog",
+          "port": 9029
+        },
+        {
+          "id": "e4f0ab4e-bc00-5cc1-ba30-5552dff5bd79",
+          "address": "catalog",
+          "port": 9040
+        },
+        {
+          "id": "e81c44c4-3690-5e70-8cff-9d0a9d8103a1",
+          "address": "catalog",
+          "port": 9014
+        },
+        {
+          "id": "e9ba857a-326a-5835-9bac-9e2465cdb20d",
+          "address": "catalog",
+          "port": 9024
+        },
+        {
+          "id": "e9e496d0-fbce-5a72-89c4-36e5d327ced5",
+          "address": "catalog",
+          "port": 9000
+        },
+        {
+          "id": "ea0b20e2-fdb4-5f2f-b0ce-387127b3e90c",
+          "address": "catalog",
+          "port": 9035
+        },
+        {
+          "id": "ec33d55d-630b-5d9a-a7d2-7a9b0198c928",
+          "address": "catalog",
+          "port": 9094
+        },
+        {
+          "id": "ec8c671f-7796-57f3-b6aa-211228636aab",
+          "address": "catalog",
+          "port": 9075
+        },
+        {
+          "id": "ecfb507c-12b6-5bb8-849c-59d2ca0029ee",
+          "address": "catalog",
+          "port": 9017
+        },
+        {
+          "id": "ed8e95f0-5fbb-5ec1-b1e9-b4da94eebdea",
+          "address": "catalog",
+          "port": 9039
+        },
+        {
+          "id": "ee09d5e2-5ff0-5271-8e18-79d3f862af73",
+          "address": "catalog",
+          "port": 9067
+        },
+        {
+          "id": "f0164167-669d-5ff0-a070-a0824f6f709c",
+          "address": "catalog",
+          "port": 9084
+        },
+        {
+          "id": "f0d63b51-7aef-5e39-8bee-7ec261d7e311",
+          "address": "catalog",
+          "port": 9023
+        },
+        {
+          "id": "f2710ff1-1ccd-5336-b4ef-46504d787814",
+          "address": "catalog",
+          "port": 9090
+        },
+        {
+          "id": "f4f5e82f-9a8e-54b2-864a-124fb7bcffb6",
+          "address": "catalog",
+          "port": 9048
+        },
+        {
+          "id": "f8fa9d8f-e51d-5a08-9c30-85ae4145b46d",
+          "address": "catalog",
+          "port": 9047
+        },
+        {
+          "id": "f9c8f544-ccae-59d8-9e98-05acfb8953e3",
+          "address": "catalog",
+          "port": 9027
+        },
+        {
+          "id": "ff0f70f1-2a8b-5c4b-b09e-b8cd9e7cb0e7",
+          "address": "catalog",
+          "port": 9071
+        }
+      ],
+      "inventory": [
+        {
+          "id": "7f51e25d-5cfd-5c7e-9c6c-2af99b10d3d9",
+          "address": "inventory-1",
+          "port": 9000
+        }
+      ],
+      "orders": [
+        {
+          "id": "1e6e1472-f44d-5625-a5d9-f5616fcd8af3",
+          "address": "orders-1",
+          "port": 9000
+        },
+        {
+          "id": "f1d0c8c4-3adc-5225-b3db-1b86267eb4f2",
+          "address": "orders-2",
+          "port": 9000
+        }
+      ],
+      "payments": [
+        {
+          "id": "ab2cea0b-5b7a-5a17-a931-b52b7817567e",
+          "address": "payments-1",
+          "port": 9000
+        }
+      ]
+    },
+    "beacon-b": {
+      "catalog": [
+        {
+          "id": "05b8ab5f-044e-5986-adb9-597b4c4ec09d",
+          "address": "catalog",
+          "port": 9091
+        },
+        {
+          "id": "05fbfddc-6ea2-5d83-85fc-9c56f2b2d4c7",
+          "address": "catalog",
+          "port": 9001
+        },
+        {
+          "id": "0dacae27-b030-54ff-9680-077c31b80deb",
+          "address": "catalog",
+          "port": 9095
+        },
+        {
+          "id": "0ee2a611-4788-5135-b06f-eecd321a2fb7",
+          "address": "catalog",
+          "port": 9076
+        },
+        {
+          "id": "0f147be2-847c-5fd2-af44-0ed671a80e23",
+          "address": "catalog",
+          "port": 9088
+        },
+        {
+          "id": "1057e5d1-f15c-512d-8f7e-caa3e5d51012",
+          "address": "catalog",
+          "port": 9026
+        },
+        {
+          "id": "15b5820b-76e7-50bc-b923-43186118772e",
+          "address": "catalog",
+          "port": 9099
+        },
+        {
+          "id": "16ccb257-f88e-5ef6-8c48-385ca5ad9253",
+          "address": "catalog",
+          "port": 9034
+        },
+        {
+          "id": "17e4871d-9a28-5633-ae3a-7695b1065ace",
+          "address": "catalog",
+          "port": 9032
+        },
+        {
+          "id": "1a27b57e-5ca9-52bd-9b6f-5d70022925cc",
+          "address": "catalog",
+          "port": 9097
+        },
+        {
+          "id": "1e98ee4f-017a-5b81-adc0-d9351c516693",
+          "address": "catalog",
+          "port": 9062
+        },
+        {
+          "id": "1f3adea2-965f-5e9d-ac46-e2f510f61dec",
+          "address": "catalog",
+          "port": 9060
+        },
+        {
+          "id": "20421934-36f4-5898-bcf8-68dc90d74425",
+          "address": "catalog",
+          "port": 9068
+        },
+        {
+          "id": "22e0df22-0c82-535e-82ac-0ff95f13b279",
+          "address": "catalog",
+          "port": 9058
+        },
+        {
+          "id": "23c20e90-7f43-5427-b442-a6f6f6071cb3",
+          "address": "catalog",
+          "port": 9002
+        },
+        {
+          "id": "29cd5a9e-d48c-5125-b824-5fe4be601b49",
+          "address": "catalog",
+          "port": 9063
+        },
+        {
+          "id": "2a9cad45-a30a-5e61-a54d-434eb15e9830",
+          "address": "catalog",
+          "port": 9066
+        },
+        {
+          "id": "31b5aba1-135b-5215-acd1-4862a9f7fa0b",
+          "address": "catalog",
+          "port": 9028
+        },
+        {
+          "id": "3237ab08-d5b5-5818-a157-a8fb329fc57e",
+          "address": "catalog",
+          "port": 9087
+        },
+        {
+          "id": "3db58aff-2d6a-55a3-afd8-c4a44ef1ed9d",
+          "address": "catalog",
+          "port": 9082
+        },
+        {
+          "id": "4125c16b-6d80-5e49-8811-87f25f5e468a",
+          "address": "catalog",
+          "port": 9080
+        },
+        {
+          "id": "43bbcfa5-3f3b-5d12-bb3a-ba3a3d34ea59",
+          "address": "catalog",
+          "port": 9030
+        },
+        {
+          "id": "46835055-d967-554e-9543-1d1c3bd97bda",
+          "address": "catalog",
+          "port": 9070
+        },
+        {
+          "id": "47656aee-feb4-5943-a5d5-22e1db64102a",
+          "address": "catalog",
+          "port": 9021
+        },
+        {
+          "id": "4831e00a-7aa7-5460-91c7-a07137c41551",
+          "address": "catalog",
+          "port": 9049
+        },
+        {
+          "id": "4abe14f5-9fe5-561f-a6bd-ed9685eb7d5d",
+          "address": "catalog",
+          "port": 9065
+        },
+        {
+          "id": "4c39b70f-0392-563b-b435-0530e4db04fe",
+          "address": "catalog",
+          "port": 9077
+        },
+        {
+          "id": "50988d65-3376-5f2e-b6d3-13ee5d829edb",
+          "address": "catalog",
+          "port": 9033
+        },
+        {
+          "id": "54344920-dbdf-55f3-8216-1af311ca3ecb",
+          "address": "catalog",
+          "port": 9098
+        },
+        {
+          "id": "55b0e245-bc48-5339-939f-1bcd03913146",
+          "address": "catalog",
+          "port": 9056
+        },
+        {
+          "id": "5c367a3e-febf-5f9a-ad52-35ea030f6ee8",
+          "address": "catalog",
+          "port": 9050
+        },
+        {
+          "id": "60665b35-5a0b-58cd-86a7-57db5eaf9e7d",
+          "address": "catalog",
+          "port": 9074
+        },
+        {
+          "id": "639dcfeb-c08f-5db5-af4d-4e98ed8326e0",
+          "address": "catalog",
+          "port": 9008
+        },
+        {
+          "id": "67d55b0f-a0ab-509c-90c7-8d4900a14c21",
+          "address": "catalog",
+          "port": 9053
+        },
+        {
+          "id": "6941024c-fbb2-5387-9246-34e2cb69c2c4",
+          "address": "catalog",
+          "port": 9052
+        },
+        {
+          "id": "6b7cad27-cc10-565c-b9eb-805a59eef8a7",
+          "address": "catalog",
+          "port": 9078
+        },
+        {
+          "id": "6d0e01c8-f1e2-55f4-8eb5-741864482a19",
+          "address": "catalog",
+          "port": 9003
+        },
+        {
+          "id": "7119cd5c-c0a0-5a95-97e4-f5f05c62bfda",
+          "address": "catalog",
+          "port": 9045
+        },
+        {
+          "id": "79964e24-b461-5275-9b1e-11fb37d3d379",
+          "address": "catalog",
+          "port": 9083
+        },
+        {
+          "id": "7a3da521-13af-5065-9a29-f255d326e5ca",
+          "address": "catalog",
+          "port": 9096
+        },
+        {
+          "id": "8198812e-3772-5789-b633-45a1a1082ecc",
+          "address": "catalog",
+          "port": 9042
+        },
+        {
+          "id": "835cc2e7-04c8-54d1-b0f9-ced090bc088e",
+          "address": "catalog",
+          "port": 9011
+        },
+        {
+          "id": "83dd0bd3-ba8b-553c-bdd6-4b17174b04b4",
+          "address": "catalog",
+          "port": 9051
+        },
+        {
+          "id": "85563da8-53bb-59cc-ad06-5b0ac281264a",
+          "address": "catalog",
+          "port": 9006
+        },
+        {
+          "id": "86d62c2f-e4a1-53b9-8fd4-094dbb2f3c05",
+          "address": "catalog",
+          "port": 9057
+        },
+        {
+          "id": "8b45f0a6-7ca0-5724-8683-b73cb9953513",
+          "address": "catalog",
+          "port": 9059
+        },
+        {
+          "id": "8c31741a-d873-54d3-b075-373f8a68b212",
+          "address": "catalog",
+          "port": 9016
+        },
+        {
+          "id": "8ee89a28-0cd9-578d-80bb-2df1034a01b6",
+          "address": "catalog",
+          "port": 9054
+        },
+        {
+          "id": "8f2158ab-489e-5865-b7d4-d1b103950526",
+          "address": "catalog",
+          "port": 9019
+        },
+        {
+          "id": "91315a12-38fb-5154-ab7d-c902e219df20",
+          "address": "catalog",
+          "port": 9007
+        },
+        {
+          "id": "94d787fd-2264-563f-95af-eeb726e40753",
+          "address": "catalog",
+          "port": 9041
+        },
+        {
+          "id": "950c4f2e-f452-5237-b75d-697f1cd082aa",
+          "address": "catalog",
+          "port": 9009
+        },
+        {
+          "id": "9867c6dd-fdea-571c-8106-178321d26e07",
+          "address": "catalog",
+          "port": 9061
+        },
+        {
+          "id": "9c31b75c-7a2b-5d3b-9857-f0fecdff7543",
+          "address": "catalog",
+          "port": 9069
+        },
+        {
+          "id": "a2068983-7d3e-5dcd-b944-8e7356e522aa",
+          "address": "catalog",
+          "port": 9037
+        },
+        {
+          "id": "a39289e6-0a7a-580a-ba41-0d0244a0d0fd",
+          "address": "catalog",
+          "port": 9079
+        },
+        {
+          "id": "ab34fbdc-06f2-58e8-9c3f-f7cf028e45f9",
+          "address": "catalog",
+          "port": 9073
+        },
+        {
+          "id": "abaee8f0-fbf7-571e-99c6-3e637ebb0776",
+          "address": "catalog",
+          "port": 9089
+        },
+        {
+          "id": "afa81264-e47a-5341-876b-d89eb93f73ac",
+          "address": "catalog",
+          "port": 9038
+        },
+        {
+          "id": "b2e2165d-8aa8-59d9-b843-c835d53a0228",
+          "address": "catalog",
+          "port": 9043
+        },
+        {
+          "id": "b46d2fa7-543d-528d-8b90-2f6e324507db",
+          "address": "catalog",
+          "port": 9093
+        },
+        {
+          "id": "b5070e89-7222-5e6f-88eb-08acf86791bb",
+          "address": "catalog",
+          "port": 9012
+        },
+        {
+          "id": "b5977264-199a-500b-a7fd-54249d17b319",
+          "address": "catalog",
+          "port": 9004
+        },
+        {
+          "id": "b911333f-42db-526d-962e-9029fd157d55",
+          "address": "catalog",
+          "port": 9005
+        },
+        {
+          "id": "bc102cf7-236d-592a-b430-ae40355cfd26",
+          "address": "catalog",
+          "port": 9055
+        },
+        {
+          "id": "c0075035-f9b0-53b3-a2d5-9baf8b7554c5",
+          "address": "catalog",
+          "port": 9018
+        },
+        {
+          "id": "c223e13a-b630-51bd-af3e-c7de8897eb35",
+          "address": "catalog",
+          "port": 9010
+        },
+        {
+          "id": "c4164fb5-e093-57ac-bbc9-0aa2dfdd7b8a",
+          "address": "catalog",
+          "port": 9064
+        },
+        {
+          "id": "c6ea701b-6015-5343-9225-cb4d2d52773a",
+          "address": "catalog",
+          "port": 9072
+        },
+        {
+          "id": "c7c04fe7-9525-53bb-ad7b-1dd1c1c37a86",
+          "address": "catalog",
+          "port": 9085
+        },
+        {
+          "id": "cf0c9e1d-9c6d-5e4f-bd1d-83730b65d6f1",
+          "address": "catalog",
+          "port": 9022
+        },
+        {
+          "id": "cf6e9fb0-4569-561e-b8f2-977c1f5164d2",
+          "address": "catalog",
+          "port": 9092
+        },
+        {
+          "id": "d15fff9f-2794-523c-8405-b93f902fd41c",
+          "address": "catalog",
+          "port": 9020
+        },
+        {
+          "id": "d178a6d6-5b40-565a-aa4b-0af2f27a87dc",
+          "address": "catalog",
+          "port": 9025
+        },
+        {
+          "id": "d27564ff-3eb9-5c25-8cb1-6359bbdac51d",
+          "address": "catalog",
+          "port": 9036
+        },
+        {
+          "id": "d7415eee-e415-5b6c-94a1-047aa4d8be87",
+          "address": "catalog",
+          "port": 9015
+        },
+        {
+          "id": "d7d4c17b-8d54-5924-a286-eba39a2e7e8e",
+          "address": "catalog",
+          "port": 9013
+        },
+        {
+          "id": "d8336694-fd5f-54fc-8616-da6771738895",
+          "address": "catalog",
+          "port": 9044
+        },
+        {
+          "id": "d92a90ac-0447-522d-9d55-a96c5491aa2a",
+          "address": "catalog",
+          "port": 9086
+        },
+        {
+          "id": "dd1ad991-0180-5aa2-b526-ec9a90a7a98b",
+          "address": "catalog",
+          "port": 9081
+        },
+        {
+          "id": "dd72c07b-238f-5b2e-befd-71424e0da3e2",
+          "address": "catalog",
+          "port": 9031
+        },
+        {
+          "id": "e2a29da3-55b8-5ce2-b500-983de56bcde9",
+          "address": "catalog",
+          "port": 9046
+        },
+        {
+          "id": "e38e38ea-3494-52bb-8724-abf55df554d7",
+          "address": "catalog",
+          "port": 9029
+        },
+        {
+          "id": "e4f0ab4e-bc00-5cc1-ba30-5552dff5bd79",
+          "address": "catalog",
+          "port": 9040
+        },
+        {
+          "id": "e81c44c4-3690-5e70-8cff-9d0a9d8103a1",
+          "address": "catalog",
+          "port": 9014
+        },
+        {
+          "id": "e9ba857a-326a-5835-9bac-9e2465cdb20d",
+          "address": "catalog",
+          "port": 9024
+        },
+        {
+          "id": "e9e496d0-fbce-5a72-89c4-36e5d327ced5",
+          "address": "catalog",
+          "port": 9000
+        },
+        {
+          "id": "ea0b20e2-fdb4-5f2f-b0ce-387127b3e90c",
+          "address": "catalog",
+          "port": 9035
+        },
+        {
+          "id": "ec33d55d-630b-5d9a-a7d2-7a9b0198c928",
+          "address": "catalog",
+          "port": 9094
+        },
+        {
+          "id": "ec8c671f-7796-57f3-b6aa-211228636aab",
+          "address": "catalog",
+          "port": 9075
+        },
+        {
+          "id": "ecfb507c-12b6-5bb8-849c-59d2ca0029ee",
+          "address": "catalog",
+          "port": 9017
+        },
+        {
+          "id": "ed8e95f0-5fbb-5ec1-b1e9-b4da94eebdea",
+          "address": "catalog",
+          "port": 9039
+        },
+        {
+          "id": "ee09d5e2-5ff0-5271-8e18-79d3f862af73",
+          "address": "catalog",
+          "port": 9067
+        },
+        {
+          "id": "f0164167-669d-5ff0-a070-a0824f6f709c",
+          "address": "catalog",
+          "port": 9084
+        },
+        {
+          "id": "f0d63b51-7aef-5e39-8bee-7ec261d7e311",
+          "address": "catalog",
+          "port": 9023
+        },
+        {
+          "id": "f2710ff1-1ccd-5336-b4ef-46504d787814",
+          "address": "catalog",
+          "port": 9090
+        },
+        {
+          "id": "f4f5e82f-9a8e-54b2-864a-124fb7bcffb6",
+          "address": "catalog",
+          "port": 9048
+        },
+        {
+          "id": "f8fa9d8f-e51d-5a08-9c30-85ae4145b46d",
+          "address": "catalog",
+          "port": 9047
+        },
+        {
+          "id": "f9c8f544-ccae-59d8-9e98-05acfb8953e3",
+          "address": "catalog",
+          "port": 9027
+        },
+        {
+          "id": "ff0f70f1-2a8b-5c4b-b09e-b8cd9e7cb0e7",
+          "address": "catalog",
+          "port": 9071
+        }
+      ],
+      "inventory": [
+        {
+          "id": "7f51e25d-5cfd-5c7e-9c6c-2af99b10d3d9",
+          "address": "inventory-1",
+          "port": 9000
+        }
+      ],
+      "orders": [
+        {
+          "id": "1e6e1472-f44d-5625-a5d9-f5616fcd8af3",
+          "address": "orders-1",
+          "port": 9000
+        },
+        {
+          "id": "f1d0c8c4-3adc-5225-b3db-1b86267eb4f2",
+          "address": "orders-2",
+          "port": 9000
+        }
+      ],
+      "payments": [
+        {
+          "id": "ab2cea0b-5b7a-5a17-a931-b52b7817567e",
+          "address": "payments-1",
+          "port": 9000
+        }
+      ]
+    }
+  },
+  "calls_by_address": {
+    "catalog:9000": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9001": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9002": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9003": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9004": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9005": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9006": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9007": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9008": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9009": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9010": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9011": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9012": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9013": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9014": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9015": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9016": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9017": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9018": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9019": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9020": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9021": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9022": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9023": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9024": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9025": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9026": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9027": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9028": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9029": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9030": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9031": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9032": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9033": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9034": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9035": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9036": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9037": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9038": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9039": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9040": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9041": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9042": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9043": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9044": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9045": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9046": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9047": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9048": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9049": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9050": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9051": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9052": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9053": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9054": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9055": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9056": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9057": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9058": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9059": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9060": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9061": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9062": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9063": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9064": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9065": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9066": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9067": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9068": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9069": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9070": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9071": {
+      "calls": 239,
+      "failures": 0
+    },
+    "catalog:9072": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9073": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9074": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9075": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9076": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9077": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9078": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9079": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9080": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9081": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9082": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9083": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9084": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9085": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9086": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9087": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9088": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9089": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9090": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9091": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9092": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9093": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9094": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9095": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9096": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9097": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9098": {
+      "calls": 240,
+      "failures": 0
+    },
+    "catalog:9099": {
+      "calls": 240,
+      "failures": 0
+    }
+  },
+  "steps": [
+    {
+      "name": "every node is healthy",
+      "passed": true,
+      "at": "2026-11-24T21:49:56.076213455Z",
+      "duration_ms": 0.899
+    },
+    {
+      "name": "every node lists every node",
+      "passed": true,
+      "at": "2026-11-24T21:49:56.07711324Z",
+      "duration_ms": 2.248
+    },
+    {
+      "name": "every node returns the expected instances",
+      "passed": true,
+      "at": "2026-11-24T21:49:56.079362763Z",
+      "duration_ms": 8.763
+    },
+    {
+      "name": "every instance stays registered for 2m0s",
+      "passed": true,
+      "at": "2026-11-24T21:51:56.101335138Z",
+      "duration_ms": 0.009
+    },
+    {
+      "name": "every lookup succeeds",
+      "passed": true,
+      "at": "2026-11-24T21:51:56.101335138Z",
+      "duration_ms": 0.009
+    },
+    {
+      "name": "every call to catalog succeeds",
+      "passed": true,
+      "at": "2026-11-24T21:51:56.101335138Z",
+      "duration_ms": 0.072
+    }
+  ],
+  "requests": {
+    "discover": {
+      "total": 6968,
+      "errors": 0,
+      "p50_ms": 1.64,
+      "p95_ms": 2.743,
+      "p99_ms": 3.226,
+      "max_ms": 10.222
+    },
+    "metrics": {
+      "total": 4,
+      "errors": 0,
+      "p50_ms": 4.437,
+      "p95_ms": 4.951,
+      "p99_ms": 4.951,
+      "max_ms": 4.951
+    },
+    "nodes": {
+      "total": 2,
+      "errors": 0,
+      "p50_ms": 1.048,
+      "p95_ms": 1.064,
+      "p99_ms": 1.064,
+      "max_ms": 1.064
+    },
+    "resolved": {
+      "total": 23999,
+      "errors": 0,
+      "p50_ms": 1.432,
+      "p95_ms": 1.626,
+      "p99_ms": 2.074,
+      "max_ms": 21.254
+    }
+  },
+  "timings_ms": {
+    "duration": 120011.63,
+    "settle": 8.728
+  },
+  "metrics": {
+    "beacon-a": {
+      "before": [
+        "beacon_cluster_nodes 2",
+        "beacon_expired_instances_total 0",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /api/v1/nodes\"} 1",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /api/v1/services\"} 63",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /health\"} 6",
+        "beacon_http_requests_total{code=\"201\",method=\"POST\",route=\"POST /api/v1/services\"} 52",
+        "beacon_http_requests_total{code=\"204\",method=\"POST\",route=\"POST /api/v1/services/{id}/heartbeat\"} 2",
+        "beacon_registry_operations_total{operation=\"create\",result=\"ok\"} 52",
+        "beacon_registry_operations_total{operation=\"delete_stale\",result=\"ok\"} 9",
+        "beacon_registry_operations_total{operation=\"list\",result=\"ok\"} 63",
+        "beacon_registry_operations_total{operation=\"touch\",result=\"ok\"} 2"
+      ],
+      "after": [
+        "beacon_cluster_nodes 2",
+        "beacon_expired_instances_total 0",
+        "beacon_heartbeat_flushes_total{result=\"ok\"} 137",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /api/v1/nodes\"} 2",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /api/v1/services\"} 3548",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /health\"} 47",
+        "beacon_http_requests_total{code=\"201\",method=\"POST\",route=\"POST /api/v1/services\"} 52",
+        "beacon_http_requests_total{code=\"204\",method=\"POST\",route=\"POST /api/v1/services/{id}/heartbeat\"} 2090",
+        "beacon_http_requests_total{code=\"304\",method=\"GET\",route=\"GET /api/v1/services\"} 119",
+        "beacon_registry_operations_total{operation=\"create\",result=\"ok\"} 52",
+        "beacon_registry_operations_total{operation=\"delete_stale\",result=\"ok\"} 129",
+        "beacon_registry_operations_total{operation=\"list\",result=\"ok\"} 3667",
+        "beacon_registry_operations_total{operation=\"touch\",result=\"ok\"} 2090"
+      ]
+    },
+    "beacon-b": {
+      "before": [
+        "beacon_cluster_nodes 2",
+        "beacon_expired_instances_total 0",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /api/v1/nodes\"} 1",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /api/v1/services\"} 63",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /health\"} 3",
+        "beacon_http_requests_total{code=\"201\",method=\"POST\",route=\"POST /api/v1/services\"} 52",
+        "beacon_http_requests_total{code=\"204\",method=\"POST\",route=\"POST /api/v1/services/{id}/heartbeat\"} 2",
+        "beacon_registry_operations_total{operation=\"create\",result=\"ok\"} 52",
+        "beacon_registry_operations_total{operation=\"delete_stale\",result=\"ok\"} 9",
+        "beacon_registry_operations_total{operation=\"list\",result=\"ok\"} 63",
+        "beacon_registry_operations_total{operation=\"touch\",result=\"ok\"} 2"
+      ],
+      "after": [
+        "beacon_cluster_nodes 2",
+        "beacon_expired_instances_total 0",
+        "beacon_heartbeat_flushes_total{result=\"ok\"} 129",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /api/v1/nodes\"} 2",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /api/v1/services\"} 3547",
+        "beacon_http_requests_total{code=\"200\",method=\"GET\",route=\"GET /health\"} 46",
+        "beacon_http_requests_total{code=\"201\",method=\"POST\",route=\"POST /api/v1/services\"} 52",
+        "beacon_http_requests_total{code=\"204\",method=\"POST\",route=\"POST /api/v1/services/{id}/heartbeat\"} 2088",
+        "beacon_registry_operations_total{operation=\"create\",result=\"ok\"} 52",
+        "beacon_registry_operations_total{operation=\"delete_stale\",result=\"ok\"} 129",
+        "beacon_registry_operations_total{operation=\"list\",result=\"ok\"} 3547",
+        "beacon_registry_operations_total{operation=\"touch\",result=\"ok\"} 2088"
+      ]
+    }
+  }
+}
