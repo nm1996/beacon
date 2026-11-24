@@ -9,6 +9,13 @@ Add an entry under **Unreleased** in the same pull request as the change.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-24
+
+Upgrading from 0.2.0 needs no changes: the configuration and the HTTP API
+stay compatible, and PostgreSQL, several nodes, the gRPC API, trusted proxies
+and the lookup cache are all off until configured. The Go client's
+`Register` and `Lease` behave differently, as described under Changed.
+
 ### Added
 
 - `server.trusted_proxies` (`BEACON_SERVER_TRUSTED_PROXIES`): addresses or
@@ -303,6 +310,7 @@ HTTP API.
   operations, registered and expired instances and the running build,
   controlled by `metrics.enabled` (`BEACON_METRICS_ENABLED`).
 
-[Unreleased]: https://github.com/nm1996/beacon/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/nm1996/beacon/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/nm1996/beacon/releases/tag/v0.3.0
 [0.2.0]: https://github.com/nm1996/beacon/releases/tag/v0.2.0
 [0.1.0]: https://github.com/nm1996/beacon/releases/tag/v0.1.0
