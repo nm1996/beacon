@@ -135,6 +135,21 @@ services:
     <<: *app
     command: ["-service", "inventory", "-address", "inventory-1"]
 
+  # Runs one scenario and exits; it never starts with "up":
+  #
+  #   docker compose -f simulation/compose.yaml run --rm runner -scenario normal
+  runner:
+    <<: *app
+    profiles: ["runner"]
+    entrypoint: ["/usr/local/bin/runner"]
+    command: ["-scenario", "normal"]
+    depends_on: {}
+    # Reports are written as the user running Compose, so they can be read
+    # and deleted without root. run.sh sets these.
+    user: "${RUNNER_UID:-65532}:${RUNNER_GID:-65532}"
+    volumes:
+      - ./reports:/reports
+
 networks:
   sim:
     ipam:

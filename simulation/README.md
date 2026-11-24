@@ -26,6 +26,14 @@ docker compose -f simulation/compose.yaml logs orders-1
 docker compose -f simulation/compose.yaml stop orders-1   # logs "unregistered"
 ```
 
+Then run a scenario. The runner prints each check and writes a JSON report
+to `simulation/reports/`, and exits non-zero if a check failed:
+
+```sh
+RUNNER_UID=$(id -u) RUNNER_GID=$(id -g) \
+  docker compose -f simulation/compose.yaml run --rm runner -scenario normal
+```
+
 `--wait` returns once every health check passes. The ports are published on
 loopback only. `down --volumes` also deletes the database, so the next run
 starts clean.
