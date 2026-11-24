@@ -104,8 +104,23 @@ func start(test *testing.T, settings config.Config, address string) *beacon {
 		scheme = "https"
 	}
 
+	if err := components.Membership.Join(ctx); err != nil {
+		cancel()
+		test.Fatalf("join the cluster: %v", err)
+	}
+
 	var workers sync.WaitGroup
 
+	// As in cmd/beacon, the last heartbeat flush runs after the server has
+	// stopped, so it writes every heartbeat the server accepted.
+	flushCtx, stopFlushing := context.WithCancel(context.Background())
+	var flusher sync.WaitGroup
+
+	if batched := components.Heartbeats; batched != nil {
+		flusher.Go(func() { batched.Run(flushCtx) })
+	}
+
+	workers.Go(func() { components.Membership.Run(ctx) })
 	workers.Go(func() { _ = components.Discovery.RunCleanup(ctx) })
 	workers.Go(func() {
 		if servesTLS {
@@ -127,6 +142,10 @@ func start(test *testing.T, settings config.Config, address string) *beacon {
 
 			_ = server.Shutdown(shutdownCtx)
 			workers.Wait()
+
+			stopFlushing()
+			flusher.Wait()
+			components.Close()
 		})
 	}
 	test.Cleanup(stop)
