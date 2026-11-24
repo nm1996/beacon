@@ -51,6 +51,11 @@ type options struct {
 	// never returns. wantID is the ID it must come back with, if fixed.
 	oldID  string
 	wantID string
+
+	// For node-down: the node that was stopped or killed at since, and how
+	// long to watch the others afterwards.
+	down  string
+	watch time.Duration
 }
 
 // scenario runs its steps against cluster, recording each in the report.
@@ -61,6 +66,8 @@ var scenarios = map[string]scenario{
 	"normal": runNormal,
 	"gone":   runGone,
 	"back":   runBack,
+
+	"node-down": runNodeDown,
 }
 
 // aboutOneInstance lists the scenarios that need -service and -address.
@@ -144,10 +151,12 @@ func parseOptions(args []string) (options, error) {
 	flags.StringVar(&parsed.token, "token", os.Getenv("RUNNER_TOKEN"), "bearer token for Beacon; defaults to $RUNNER_TOKEN")
 	flags.StringVar(&parsed.service, "service", "", "gone, back: the service of the instance to watch")
 	flags.StringVar(&parsed.address, "address", "", "gone, back: the address of the instance to watch, such as orders-2, or host:port")
-	flags.StringVar(&since, "since", "", "gone, back: when the instance is or was killed, stopped or started, as Unix seconds or RFC 3339; empty is now. A time to come is waited for")
+	flags.StringVar(&since, "since", "", "gone, back, node-down: when the instance or node is or was killed, stopped or started, as Unix seconds or RFC 3339; empty is now. A time to come is waited for")
 	flags.DurationVar(&parsed.within, "within", 9*time.Second, "gone, back: how long after -since the change may take")
 	flags.StringVar(&parsed.oldID, "old-id", "", "back: the ID the instance had before; it must not return")
 	flags.StringVar(&parsed.wantID, "want-id", "", "back: the ID the instance must come back with")
+	flags.StringVar(&parsed.down, "down", "", "node-down: the node that was stopped or killed at -since; -within bounds how long the others may list it")
+	flags.DurationVar(&parsed.watch, "watch", 30*time.Second, "node-down: how long after -since every instance must stay registered")
 
 	if err := flags.Parse(args); err != nil {
 		return options{}, err
@@ -176,6 +185,10 @@ func parseOptions(args []string) (options, error) {
 	}
 
 	parsed.sinceAhead = parsed.since.After(time.Now())
+
+	if parsed.scenario == "node-down" && (parsed.down == "" || parsed.watch <= 0) {
+		return options{}, errors.New("-scenario node-down needs -down and a positive -watch")
+	}
 
 	if slices.Contains(aboutOneInstance, parsed.scenario) {
 		if parsed.service == "" || parsed.address == "" {

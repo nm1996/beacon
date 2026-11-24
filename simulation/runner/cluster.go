@@ -69,6 +69,14 @@ func newCluster(endpoints []endpoint, token string, report *Report) (*cluster, e
 	return &cluster{nodes: nodes, http: httpClient, token: token, report: report}, nil
 }
 
+// only returns a cluster of nodes, sharing everything else with cluster.
+func (cluster *cluster) only(nodes []node) *cluster {
+	narrowed := *cluster
+	narrowed.nodes = nodes
+
+	return &narrowed
+}
+
 // discover lists service through target, recording the request.
 func (cluster *cluster) discover(ctx context.Context, target node, service string) ([]client.Instance, error) {
 	started := time.Now()
