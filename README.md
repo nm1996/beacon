@@ -206,6 +206,10 @@ Beacon is deliberately small. Before you depend on it, know that:
 - [x] Trusted proxies, so rate limits can use the client address a known proxy forwards
 - [x] A stable owner ID for instance ownership and quotas, separate from the name shown in logs
 - [x] Idempotent registration with `Idempotency-Key`
+- [x] Conditional lookups with `ETag` and `If-None-Match`
+- [x] Heartbeats refused, not accepted, while a node cannot write them to PostgreSQL, with a metric for the writes
+- [x] [Guarantees and failure behavior](docs/guides/guarantees.md) written down, and the README split into [guides](#documentation)
+- [x] Integration tests with two nodes over a real PostgreSQL database
 
 **Next**
 
@@ -239,10 +243,10 @@ A required `Promotion source` check refuses pull requests to `stage` or `prod` f
 
 To release:
 
-1. On a branch from `main`, move the **Unreleased** entries in `CHANGELOG.md` under a new heading such as `## [0.2.0] - 2026-11-20`, and merge it.
-2. Run `mise run promote-stage`. It opens the pull request from `main` to `stage`, named after the candidate it will produce, and stops if the version has already been released, which means step 1 was missed. Once it is merged, the [stage workflow](.github/workflows/stage.yml) tags the next candidate, such as `v0.2.0-rc.1`, and publishes it as a pre-release.
-3. Try the candidate. To fix something, merge the fix into `main` and promote again; each merge into `stage` tags the next candidate, `v0.2.0-rc.2` and so on.
-4. Run `mise run promote-prod`. It opens the pull request from `stage` to `prod`, after checking that `stage` is exactly the newest candidate. Once it is merged, the [production release workflow](.github/workflows/prod.yml) checks the same again, tags `v0.2.0`, and publishes the release.
+1. On a branch from `main`, move the **Unreleased** entries in `CHANGELOG.md` under a new heading `## [X.Y.Z] - YYYY-MM-DD`, for the version being released, and merge it.
+2. Run `mise run promote-stage`. It opens the pull request from `main` to `stage`, named after the candidate it will produce, and stops if the version has already been released, which means step 1 was missed. Once it is merged, the [stage workflow](.github/workflows/stage.yml) tags the next candidate, `vX.Y.Z-rc.1` for the first, and publishes it as a pre-release.
+3. Try the candidate. To fix something, merge the fix into `main` and promote again; each merge into `stage` tags the next candidate, `vX.Y.Z-rc.2` and so on.
+4. Run `mise run promote-prod`. It opens the pull request from `stage` to `prod`, after checking that `stage` is exactly the newest candidate. Once it is merged, the [production release workflow](.github/workflows/prod.yml) checks the same again, tags `vX.Y.Z`, and publishes the release.
 
 Both commands print the open pull request instead if there already is one. They run the GitHub CLI, which mise installs for them, as you, so pull requests they open run CI like any other; log in once with `gh auth login`.
 
