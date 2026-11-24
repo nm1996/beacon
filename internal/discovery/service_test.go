@@ -344,8 +344,8 @@ func TestRegisterRefusesBeyondMaxInstancesPerOwner(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	orders := discovery.Caller{Name: "orders"}
-	payments := discovery.Caller{Name: "payments"}
+	orders := discovery.Caller{ID: "orders"}
+	payments := discovery.Caller{ID: "payments"}
 
 	var first discovery.Instance
 

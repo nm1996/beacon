@@ -17,6 +17,13 @@ Add an entry under **Unreleased** in the same pull request as the change.
   address that is not a listed proxy, so entries a client adds are never
   believed. Empty by default, which keeps ignoring the header. See
   [design record 0001](docs/design/0001-trusted-proxies.md).
+- An optional `id` for entries in the tokens file. It owns the instances the
+  entry registers and is what `registry.max_instances_per_owner` and the
+  registration rate limit count, so an entry can be renamed, or its token
+  rotated under a new entry, without its instances changing owner. Entries
+  that share an `id` share ownership. Without it the ID is the `name`, as
+  before. Refused-request logs add `caller_id`. See
+  [design record 0002](docs/design/0002-owner-id.md).
 
 ## [0.2.0] - 2026-11-13
 
