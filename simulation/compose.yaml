@@ -143,6 +143,13 @@ services:
     <<: *app
     command: ["-service", "inventory", "-address", "inventory-1", "-token-file", "${BEACON_SIM_AUTH:+/auth/inventory.token}"]
 
+  # The load profiles' instances: LOAD_INSTANCES of them in one process, on
+  # ports 9000 and up. run.sh starts it; plain "up" does not.
+  catalog:
+    <<: *app
+    profiles: ["load"]
+    command: ["-service", "catalog", "-address", "catalog", "-instances", "${LOAD_INSTANCES:-10}", "-token-file", "${BEACON_SIM_AUTH:+/auth/catalog.token}"]
+
   # Runs one scenario and exits; it never starts with "up":
   #
   #   docker compose -f simulation/compose.yaml run --rm runner -scenario normal

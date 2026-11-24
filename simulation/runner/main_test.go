@@ -249,6 +249,8 @@ func TestParseOptionsRejectsBadInput(t *testing.T) {
 		{"-scenario", "back", "-service", "nope", "-address", "x"},
 		{"-scenario", "node-down"},
 		{"-scenario", "ownership", "-service", "orders"},
+		{"-scenario", "load", "-service", "nope"},
+		{"-scenario", "load", "-service", "orders", "-call-rate", "0"},
 		{"-token-file", "/does/not/exist"},
 	} {
 		if _, err := parseOptions(args); err == nil {
@@ -580,5 +582,71 @@ func TestOwnershipHoldsAgainstAnotherService(t *testing.T) {
 		if code != attack.wantCode {
 			t.Errorf("attacking as %s: exit %d, want %d:\n%s", attack.attacker, code, attack.wantCode, output)
 		}
+	}
+}
+
+func TestLoadPassesWhileEveryInstanceStays(t *testing.T) {
+	beaconURL := startBeacon(t)
+	instance := startInstance(t, beaconURL, "catalog", "")
+	startInstance(t, beaconURL, "catalog", "")
+
+	code, output, report := runScenario(t, beaconURL,
+		"-scenario", "load", "-expect", "catalog=2", "-service", "catalog", "-duration", "1500ms", "-lookup-rate", "10", "-call-rate", "20")
+
+	if code != 0 {
+		t.Fatalf("exit %d, want 0:\n%s", code, output)
+	}
+
+	if count := report.Calls[hostPort(instance)]; count.Calls == 0 || count.Failures != 0 {
+		t.Errorf("calls to %s: %+v", hostPort(instance), count)
+	}
+}
+
+func TestLoadFailsWhenAnInstanceLeaves(t *testing.T) {
+	beaconURL := startBeacon(t)
+	startInstance(t, beaconURL, "catalog", "")
+	leaving := startInstance(t, beaconURL, "catalog", "")
+	unregisterAfter(t, beaconURL, leaving, 300*time.Millisecond)
+
+	code, output, _ := runScenario(t, beaconURL,
+		"-scenario", "load", "-expect", "catalog=2", "-service", "catalog", "-duration", "1500ms")
+
+	if code != 1 || !strings.Contains(output, "FAIL every instance stays registered for 1.5s") {
+		t.Fatalf("exit %d, want 1 with an instance gone:\n%s", code, output)
+	}
+}
+
+func TestLookupPairCoversEveryNodeAndService(t *testing.T) {
+	for _, shape := range [][2]int{{2, 4}, {2, 3}, {3, 3}, {1, 4}} {
+		nodes, services := shape[0], shape[1]
+		seen := map[[2]int]bool{}
+
+		for turn := range nodes * services {
+			nodeIndex, serviceIndex := lookupPair(turn, nodes, services)
+			seen[[2]int{nodeIndex, serviceIndex}] = true
+		}
+
+		if len(seen) != nodes*services {
+			t.Errorf("%d nodes, %d services: %d of %d pairs covered", nodes, services, len(seen), nodes*services)
+		}
+	}
+}
+
+func TestLoadFailsWhenInterrupted(t *testing.T) {
+	beaconURL := startBeacon(t)
+	startInstance(t, beaconURL, "catalog", "")
+
+	ctx, cancel := context.WithCancel(t.Context())
+	time.AfterFunc(time.Second, cancel)
+
+	var stdout, stderr bytes.Buffer
+
+	code := run(ctx, []string{
+		"-nodes", "beacon-a=" + beaconURL, "-reports", t.TempDir(), "-timeout", "2s",
+		"-scenario", "load", "-expect", "catalog=1", "-service", "catalog", "-duration", "1m",
+	}, &stdout, &stderr)
+
+	if code != 1 || !strings.Contains(stdout.String(), "FAIL scenario completed: context canceled") {
+		t.Fatalf("exit %d, want 1 for an interrupted run:\n%s%s", code, stdout.String(), stderr.String())
 	}
 }

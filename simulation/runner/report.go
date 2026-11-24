@@ -31,6 +31,9 @@ type Report struct {
 	// Seen is what each node returned for each service at the last look.
 	Seen map[string]map[string][]Seen `json:"seen,omitempty"`
 
+	// Calls counts the calls made through a Resolver, by instance address.
+	Calls map[string]CallCount `json:"calls_by_address,omitempty"`
+
 	Steps    []Step                     `json:"steps"`
 	Requests map[string]RequestSummary  `json:"requests"`
 	Timings  map[string]float64         `json:"timings_ms,omitempty"`
@@ -61,6 +64,12 @@ type Step struct {
 	Detail   string    `json:"detail,omitempty"`
 	At       time.Time `json:"at"`
 	Duration float64   `json:"duration_ms"`
+}
+
+// CallCount is how many calls went to one address, and how many failed.
+type CallCount struct {
+	Calls    int `json:"calls"`
+	Failures int `json:"failures"`
 }
 
 // RequestSummary counts one kind of request and its latency.
@@ -248,7 +257,7 @@ func (report *Report) print(out io.Writer) {
 
 	for _, kind := range kinds {
 		summary := report.Requests[kind]
-		fmt.Fprintf(out, "  %-26s %5d requests, %d errors, p50 %.1fms p95 %.1fms p99 %.1fms\n",
+		fmt.Fprintf(out, "  %-18s %6d requests, %d errors, p50 %.1fms p95 %.1fms p99 %.1fms\n",
 			kind, summary.Total, summary.Errors, summary.P50, summary.P95, summary.P99)
 	}
 

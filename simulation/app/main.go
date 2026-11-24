@@ -43,6 +43,7 @@ type settings struct {
 	beaconURL string
 	address   string
 	port      int
+	instances int
 	id        string
 	tokenFile string
 }
@@ -72,6 +73,7 @@ func parseSettings(args []string) (settings, error) {
 	flags.StringVar(&parsed.beaconURL, "beacon", "http://lb", "base URL of Beacon")
 	flags.StringVar(&parsed.address, "address", "", "address other services reach this instance at, such as orders-1 (required)")
 	flags.IntVar(&parsed.port, "port", 9000, "port to listen on and register")
+	flags.IntVar(&parsed.instances, "instances", 1, "how many instances to run, on consecutive ports from -port, for the load profiles")
 	flags.StringVar(&parsed.id, "id", "", "instance ID to register; empty lets Beacon choose")
 	flags.StringVar(&parsed.tokenFile, "token-file", "", "file holding the bearer token for Beacon; empty sends none")
 
@@ -83,8 +85,12 @@ func parseSettings(args []string) (settings, error) {
 		return settings{}, errors.New("-service and -address are required")
 	}
 
-	if parsed.port < 1 || parsed.port > 65535 {
-		return settings{}, fmt.Errorf("-port %d is out of range", parsed.port)
+	if parsed.instances < 1 {
+		return settings{}, fmt.Errorf("-instances %d must be at least 1", parsed.instances)
+	}
+
+	if parsed.port < 1 || parsed.port+parsed.instances-1 > 65535 {
+		return settings{}, fmt.Errorf("-port %d with -instances %d is out of range", parsed.port, parsed.instances)
 	}
 
 	return parsed, nil
@@ -99,17 +105,63 @@ func run(ctx context.Context, args []string, logger *slog.Logger) error {
 		return err
 	}
 
-	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", ":"+strconv.Itoa(config.port))
-	if err != nil {
-		return err
+	listeners := make([]net.Listener, 0, config.instances)
+
+	for index := range config.instances {
+		listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", ":"+strconv.Itoa(config.port+index))
+		if err != nil {
+			for _, opened := range listeners {
+				_ = opened.Close()
+			}
+
+			return err
+		}
+
+		listeners = append(listeners, listener)
 	}
 
-	return serve(ctx, config, listener, logger)
+	return serveAll(ctx, config, listeners, logger)
+}
+
+// serveAll runs one instance on each listener, the first on config.port
+// and the others on the ports after it, until ctx ends or one of them
+// fails, which stops the others too. With a fixed ID and several
+// instances, each gets the ID with its index appended.
+func serveAll(ctx context.Context, config settings, listeners []net.Listener, logger *slog.Logger) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	results := make(chan error, len(listeners))
+
+	for index, listener := range listeners {
+		one := config
+		one.port = config.port + index
+
+		if config.id != "" && len(listeners) > 1 {
+			one.id = config.id + "-" + strconv.Itoa(index)
+		}
+
+		go func() {
+			err := serve(ctx, one, listener, logger)
+			if err != nil {
+				cancel()
+			}
+
+			results <- err
+		}()
+	}
+
+	var errs []error
+	for range listeners {
+		errs = append(errs, <-results)
+	}
+
+	return errors.Join(errs...)
 }
 
 // serve is run once the listener is open, which tests choose themselves.
 func serve(ctx context.Context, config settings, listener net.Listener, logger *slog.Logger) error {
-	logger = logger.With(slog.String("service", config.service), slog.String("address", config.address))
+	logger = logger.With(slog.String("service", config.service), slog.String("address", config.address), slog.Int("port", config.port))
 
 	options := []client.Option{client.WithLogger(logger)}
 

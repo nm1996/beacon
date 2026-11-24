@@ -200,6 +200,8 @@ func TestParseSettings(t *testing.T) {
 		{"-address", "orders-1"},
 		{"-service", "orders"},
 		{"-service", "orders", "-address", "orders-1", "-port", "0"},
+		{"-service", "orders", "-address", "orders-1", "-instances", "0"},
+		{"-service", "orders", "-address", "orders-1", "-port", "65535", "-instances", "2"},
 		{"-unknown"},
 	} {
 		if _, err := parseSettings(args); err == nil {
@@ -229,5 +231,74 @@ func TestReadToken(t *testing.T) {
 		if _, err := readToken(path); err == nil {
 			t.Errorf("readToken(%s) succeeded", path)
 		}
+	}
+}
+
+func TestAppRunsSeveralInstances(t *testing.T) {
+	beaconURL := startBeacon(t)
+
+	// Consecutive free ports are not guaranteed, so the test opens its own
+	// listeners and tells serveAll which port the first is on.
+	listeners := make([]net.Listener, 0, 3)
+
+	for range 3 {
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		listeners = append(listeners, listener)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	result := make(chan error, 1)
+
+	go func() {
+		result <- serveAll(ctx, settings{service: "catalog", beaconURL: beaconURL, address: "127.0.0.1", port: 9100, id: "catalog"},
+			listeners, slog.New(slog.DiscardHandler))
+	}()
+
+	beacon, err := client.New(beaconURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var instances []client.Instance
+
+	deadline := time.Now().Add(5 * time.Second)
+	for len(instances) < 3 && time.Now().Before(deadline) {
+		if instances, err = beacon.Discover(t.Context(), "catalog"); err != nil {
+			t.Fatal(err)
+		}
+
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	got := map[string]int{}
+	for _, instance := range instances {
+		got[instance.ID] = instance.Port
+	}
+
+	want := map[string]int{"catalog-0": 9100, "catalog-1": 9101, "catalog-2": 9102}
+	if len(got) != len(want) {
+		t.Fatalf("registered %v, want %v", got, want)
+	}
+
+	for id, port := range want {
+		if got[id] != port {
+			t.Errorf("%s on port %d, want %d", id, got[id], port)
+		}
+	}
+
+	cancel()
+
+	if err := waitResult(t, result); err != nil {
+		t.Fatalf("serveAll returned %v", err)
+	}
+
+	if instances, err = beacon.Discover(t.Context(), "catalog"); err != nil || len(instances) != 0 {
+		t.Fatalf("after stopping: %v, %v", instances, err)
 	}
 }
