@@ -9,6 +9,17 @@ Add an entry under **Unreleased** in the same pull request as the change.
 
 ## [Unreleased]
 
+### Fixed
+
+- After a PostgreSQL outage longer than the TTL, instances could take up to
+  one heartbeat interval per node to come back. Cleanup removes them once
+  the database is back, but each node kept accepting their heartbeats from
+  memory until its own next write noticed, and a load balancer spreads the
+  heartbeats over every node. Each node now forgets the instances it knew
+  once its first write after an outage succeeds, so their next heartbeat
+  gets `404` and their Lease registers them again at once. Found by the
+  local simulation (`simulation/`).
+
 ## [0.3.0] - 2026-11-24
 
 Upgrading from 0.2.0 needs no changes: the configuration and the HTTP API

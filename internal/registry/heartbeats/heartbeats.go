@@ -15,6 +15,9 @@
 // intervals, heartbeats go to the registry again and get its answer, an
 // error if it cannot be reached, so a node cut off from the database does
 // not keep answering for instances that other nodes have meanwhile expired.
+// Once a flush succeeds again, the node forgets every instance, so each is
+// checked with the registry at its next heartbeat: while the node could
+// not write, other nodes may have removed it.
 //
 // Heartbeats buffered when a node dies are lost, as an instance whose node
 // died needs to register again anyway; an interval well below the TTL
@@ -256,6 +259,16 @@ func (registry *Registry) Flush(ctx context.Context) error {
 		registry.mu.Lock()
 		// A slower flush that started earlier must not move it back.
 		if started.After(registry.flushedAt) {
+			// After a time without writing, the instances this node knows
+			// may have been removed by other nodes, such as by cleanup once
+			// the database was back. Checking each again makes its next
+			// heartbeat get ErrInstanceNotFound at once, instead of being
+			// acknowledged here once per node behind a load balancer.
+			if started.Sub(registry.flushedAt) > 2*registry.interval {
+				clear(registry.known)
+				registry.forgets++
+			}
+
 			registry.flushedAt = started
 		}
 		registry.mu.Unlock()

@@ -358,13 +358,71 @@ func TestBufferingResumesAfterAFlushSucceeds(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		flushed := lastHeartbeat(t, backend, "a")
-		if err := batched.Touch(ctx, "a", during.Add(time.Second), alice); err != nil {
+		// The first heartbeat after the outage is checked with the
+		// registry again; the ones after it are buffered.
+		checked := during.Add(time.Second)
+		if err := batched.Touch(ctx, "a", checked, alice); err != nil {
 			t.Fatal(err)
 		}
 
-		if !lastHeartbeat(t, backend, "a").Equal(flushed) {
+		if !lastHeartbeat(t, backend, "a").Equal(checked) {
+			t.Fatal("expected the first heartbeat after the outage to reach the registry at once")
+		}
+
+		if err := batched.Touch(ctx, "a", checked.Add(time.Second), alice); err != nil {
+			t.Fatal(err)
+		}
+
+		if !lastHeartbeat(t, backend, "a").Equal(checked) {
 			t.Error("expected heartbeats to be buffered again once a flush succeeded")
+		}
+	})
+}
+
+func TestInstancesRemovedDuringAnOutageAreNotAcknowledged(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		batched, backend, writer := fixture(t)
+		ctx := t.Context()
+
+		for range 2 {
+			if err := batched.Touch(ctx, "a", time.Now(), alice); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		if err := batched.Flush(ctx); err != nil {
+			t.Fatal(err)
+		}
+
+		// The database goes away for longer than the TTL: nothing this node
+		// holds can be written, starting with a heartbeat it just buffered.
+		writer.fail = errors.New("database down")
+
+		if err := batched.Touch(ctx, "a", time.Now(), alice); err != nil {
+			t.Fatal(err)
+		}
+
+		time.Sleep(20 * time.Second)
+
+		if err := batched.Flush(ctx); err == nil {
+			t.Fatal("expected the flush to fail")
+		}
+
+		// It comes back. This node writes what it held, a heartbeat from
+		// before the outage, and only then another node's cleanup removes
+		// the instance, whose last stored heartbeat is too old.
+		writer.fail = nil
+
+		if err := batched.Flush(ctx); err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := backend.DeleteStale(ctx, time.Now().Add(-9*time.Second)); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := batched.Touch(ctx, "a", time.Now(), alice); !errors.Is(err, discovery.ErrInstanceNotFound) {
+			t.Fatalf("expected the first heartbeat after the outage to find the instance gone, got %v", err)
 		}
 	})
 }
