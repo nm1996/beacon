@@ -23,7 +23,7 @@ var (
 func TestRegisterRecordsTheCallerAsOwner(test *testing.T) {
 	service := newService(test)
 
-	instance, err := service.Register(test.Context(), registration("orders"), orders)
+	instance, _, err := service.Register(test.Context(), registration("orders"), orders)
 	if err != nil {
 		test.Fatalf("register: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestOnlyTheOwnerOrAManagerMayChangeAnInstance(test *testing.T) {
 		test.Run(testCase.name, func(test *testing.T) {
 			service := newService(test)
 
-			instance, err := service.Register(test.Context(), registration("orders"), testCase.owner)
+			instance, _, err := service.Register(test.Context(), registration("orders"), testCase.owner)
 			if err != nil {
 				test.Fatalf("register: %v", err)
 			}
@@ -91,7 +91,7 @@ func TestOwnerAppearsInTheLogsOnly(test *testing.T) {
 		test.Fatalf("new service: %v", err)
 	}
 
-	instance, err := service.Register(test.Context(), registration("orders"), orders)
+	instance, _, err := service.Register(test.Context(), registration("orders"), orders)
 	if err != nil {
 		test.Fatalf("register: %v", err)
 	}

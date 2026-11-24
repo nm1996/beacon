@@ -165,6 +165,8 @@ Every error response has the same shape:
 | `403` | `instance_not_owned` | [Authentication](#authentication) is on and another caller registered this instance; see [Instance ownership](#instance-ownership) |
 | `429` | `quota_exceeded` | Beacon already holds `registry.max_instances` instances, or the caller already holds `registry.max_instances_per_owner`; retry after some unregister or expire |
 | `429` | `rate_limited` | Too many registrations from this caller, or too many failed authentication attempts from this network; retry after the `Retry-After` header. See [Rate limits](#rate-limits) |
+| `409` | `instance_exists` | A registration names the `id` of an instance that another caller registered, or that has a different name, address or port |
+| `422` | `idempotency_key_reused` | A registration repeats an `Idempotency-Key` with a different name, address or port |
 | `404` | `service_not_found` | No instance is registered with the given ID |
 | `404` | `not_found` | No endpoint exists at the path |
 | `401` | `unauthorized` | [Authentication](#authentication) is on and the request has no bearer token, a malformed `Authorization` header or a token Beacon does not accept |
@@ -180,6 +182,7 @@ Every error response has the same shape:
 
 | Field | Rule |
 |---|---|
+| `id` | Optional. The instance ID to use instead of a generated one: 1–128 letters, digits, `.`, `_` or `-`, starting with a letter or digit, such as a pod name. Registering the same `id` again keeps it; see below |
 | `name` | Required. 1–63 (`registry.max_name_length`) lowercase letters, digits, `.`, `_` or `-`, starting and ending with a letter or digit, with no two of `.`, `_` and `-` in a row, such as `orders` or `payment-service.v2`. Uppercase, spaces and names like `orders..v2` are rejected, not changed |
 | `address` | Required. An IPv4 or IPv6 address, or a host name such as `orders.internal`, up to 253 characters (`registry.max_address_length`). No scheme, port or path |
 | `port` | Required, between `1` and `65535` |
@@ -187,7 +190,10 @@ Every error response has the same shape:
 | Status | Meaning |
 |---|---|
 | `201 Created` | Registered. The `Location` header points at the new instance |
-| `400 Bad Request` | The body is invalid or a field breaks a rule above |
+| `200 OK` | A repeat of an earlier registration, by `id` or `Idempotency-Key`: the same instance, refreshed as by a heartbeat, with the same body |
+| `400 Bad Request` | The body is invalid, a field breaks a rule above, or both `id` and `Idempotency-Key` are given |
+| `409 Conflict` | `instance_exists`: the `id` belongs to another caller's instance, or to one with a different name, address or port |
+| `422 Unprocessable Content` | `idempotency_key_reused`: the key was used for a registration with a different name, address or port |
 | `429 Too Many Requests` | `quota_exceeded`: Beacon is full, or this caller holds its maximum number of instances. `rate_limited`: this caller registered too often; see [Rate limits](#rate-limits) |
 
 ```json
@@ -195,6 +201,11 @@ Every error response has the same shape:
 ```
 
 `ttl_seconds` is how long the instance may go without a heartbeat before Beacon removes it. Sending a heartbeat every third of that leaves room for a missed one.
+
+Registering is not otherwise safe to repeat: if a response is lost, a retry creates a second instance. Two ways make it safe:
+
+- **`id`**: an instance that names its own ID, such as its pod or host name, gets the same instance back when it registers again with the same name, address and port, whether after a lost response or after Beacon restarted. Moving to another address means unregistering first; Beacon never hands an ID to another caller or another address.
+- **`Idempotency-Key` header**: any unique string up to 255 printable ASCII characters, sent again on every retry of one registration. Beacon derives the instance ID from the key and the caller, so a retry finds the instance the first attempt created. A key lives as long as its instance: once that is unregistered or expired, the same key creates a new one. The [Go client](#go-client) sends one with every registration.
 
 ### `GET /api/v1/services`
 
@@ -615,7 +626,7 @@ defer lease.Close(context.Background())
 instances, err := beacon.Discover(ctx, "payments")
 ```
 
-A `Lease` sends a heartbeat every third of the TTL Beacon reported, with a little jitter. If a heartbeat fails it retries after 1s, 2s, 4s and so on, never waiting longer than the normal interval, and keeps trying until `Close`. Each heartbeat or registration the lease sends gives up after a sixth of the TTL, so one stuck on a dead connection leaves time to retry on a new one before the instance expires, whatever timeout the `http.Client` has; with a TTL of 3s or less that cap is reached at once, so retries come at a steady third of the TTL. If Beacon no longer knows the instance, because it restarted or the instance expired, the lease registers again; the instance then has a new ID, which `lease.ID()` always returns. `Close` stops the background goroutine, waits for it and unregisters the instance. If its context ends first, or Beacon cannot be reached, `Close` returns the error and can simply be called again with a new context; the heartbeats stay stopped either way, and once the instance is unregistered further calls return `nil`. With `client.WithLogger`, retries and re-registrations are logged.
+A `Lease` sends a heartbeat every third of the TTL Beacon reported, with a little jitter. If a heartbeat fails it retries after 1s, 2s, 4s and so on, never waiting longer than the normal interval, and keeps trying until `Close`. Each heartbeat or registration the lease sends gives up after a sixth of the TTL, so one stuck on a dead connection leaves time to retry on a new one before the instance expires, whatever timeout the `http.Client` has; with a TTL of 3s or less that cap is reached at once, so retries come at a steady third of the TTL. If Beacon no longer knows the instance, because it restarted or the instance expired, the lease registers it again under the same ID, so callers caching instances by ID see no change. Set `Registration.ID`, for example to the pod or host name, to choose the ID; otherwise the ID Beacon issued first is kept. Only if that ID has meanwhile been taken by another instance, or its heartbeats get `403` because another caller owns it, does the lease register under a new one, logging a warning once, and `lease.ID()` then returns the new ID. `Close` stops the background goroutine, waits for it and unregisters the instance. If its context ends first, or Beacon cannot be reached, `Close` returns the error and can simply be called again with a new context; the heartbeats stay stopped either way, and once the instance is unregistered further calls return `nil`. With `client.WithLogger`, retries and re-registrations are logged.
 
 For full control, call the API directly:
 
@@ -625,7 +636,7 @@ err = beacon.Heartbeat(ctx, registered.ID)
 err = beacon.Unregister(ctx, registered.ID)
 ```
 
-Errors from Beacon are `*client.Error` values carrying the status and Beacon's error code, and they match `client.ErrNotFound` and `client.ErrInvalid` with `errors.Is`. `client.WithHTTPClient` sets a custom `http.Client`; by default every request times out after 10 seconds. `Register` is never retried, because repeating it would create a second instance. `Discover` fetches instances 500 at a time and follows the page links, so a large registry never has to fit in one response; it works against servers without paging too. The result is a live view rather than a snapshot, as described under [`GET /api/v1/services`](#get-apiv1services). If the paging breaks, for example a proxy drops the cursor from the next link or sends the client round in a loop, `Discover` returns an error rather than a partial list.
+Errors from Beacon are `*client.Error` values carrying the status and Beacon's error code, and they match `client.ErrNotFound` and `client.ErrInvalid` with `errors.Is`. `client.WithHTTPClient` sets a custom `http.Client`; by default every request times out after 10 seconds. `Register` sends an `Idempotency-Key` and retries, twice at most, when Beacon cannot be reached or a proxy answers `502`, `503` or `504`; the key lets Beacon find the instance a lost response created, so a retry never adds a second one. A registration whose `ID` belongs to another instance matches `client.ErrConflict`. `Discover` fetches instances 500 at a time and follows the page links, so a large registry never has to fit in one response; it works against servers without paging too. The result is a live view rather than a snapshot, as described under [`GET /api/v1/services`](#get-apiv1services). If the paging breaks, for example a proxy drops the cursor from the next link or sends the client round in a loop, `Discover` returns an error rather than a partial list.
 
 When Beacon has [authentication](#authentication) on, give the client its token. Read it from a file or secret store rather than writing it into the code:
 
@@ -698,7 +709,7 @@ scrape_configs:
 | `beacon_instances` | gauge | | Registered instances |
 | `beacon_services` | gauge | | Distinct service names with at least one registered instance |
 | `beacon_expired_instances_total` | counter | | Instances removed because they stopped sending heartbeats |
-| `beacon_registry_operations_total` | counter | `operation`, `result` | Calls to the storage backend; `result` is `ok`, `not_found`, `not_owned`, `full` (refused by `registry.max_instances`), `owner_full` (refused by `registry.max_instances_per_owner`) or `error` |
+| `beacon_registry_operations_total` | counter | `operation`, `result` | Calls to the storage backend; `result` is `ok`, `not_found`, `not_owned`, `full` (refused by `registry.max_instances`), `owner_full` (refused by `registry.max_instances_per_owner`), `exists` (a create for an ID already taken, as when a registration is repeated) or `error` |
 | `beacon_registry_operation_duration_seconds` | histogram | `operation` | Time spent in the storage backend |
 | `beacon_rate_limited_total` | counter | `limit` | Requests refused by a [rate limit](#rate-limits); `limit` is `registrations` or `auth_failures`. Only appears once a request has been refused |
 | `beacon_auth_failures_total` | counter | `reason` | Requests refused by [authentication](#authentication); `reason` is `missing`, `invalid` or `forbidden`. Only appears once a request has been refused |

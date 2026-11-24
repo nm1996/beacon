@@ -58,6 +58,9 @@ func (client *Client) Announce(ctx context.Context, registration Registration) (
 
 	loopCtx, stop := context.WithCancel(context.WithoutCancel(ctx))
 
+	// Register again under the same ID, so it survives Beacon restarts.
+	registration.ID = registered.ID
+
 	lease := &Lease{
 		client:       client,
 		registration: registration,
@@ -144,7 +147,8 @@ func (lease *Lease) run(ctx context.Context) {
 }
 
 // renew sends a heartbeat, or registers again if Beacon no longer knows the
-// instance. It reports whether the instance is known to Beacon afterwards.
+// instance, or if another caller owns its ID, under a new ID then. It
+// reports whether the instance is known to Beacon afterwards.
 // Each request gets at most attemptTimeout.
 func (lease *Lease) renew(ctx context.Context) bool {
 	logger := lease.client.logger
@@ -162,7 +166,14 @@ func (lease *Lease) renew(ctx context.Context) bool {
 		return false
 	}
 
-	if !errors.Is(err, ErrNotFound) {
+	switch {
+	case errors.Is(err, ErrNotOwned):
+		// Another caller holds the ID, so heartbeats under it will never
+		// pass: say so once and register under a new ID.
+		logger.WarnContext(ctx, "beacon says another caller owns the instance's ID; registering under a new one",
+			slog.String("name", lease.registration.Name), slog.String("id", id))
+		lease.registration.ID = ""
+	case !errors.Is(err, ErrNotFound):
 		logger.WarnContext(ctx, "beacon heartbeat failed", slog.String("id", id), slog.Any("error", err))
 		return false
 	}
@@ -171,6 +182,18 @@ func (lease *Lease) renew(ctx context.Context) bool {
 	registered, err := lease.client.Register(attemptCtx, lease.registration)
 	cancel()
 
+	// The ID is taken by something else, which should not happen to an
+	// ID Beacon issued: fall back to a new one rather than retry forever.
+	if errors.Is(err, ErrConflict) {
+		logger.WarnContext(ctx, "beacon refused the instance's ID; registering under a new one",
+			slog.String("name", lease.registration.Name), slog.String("id", id))
+		lease.registration.ID = ""
+
+		attemptCtx, cancel = lease.attempt(ctx)
+		registered, err = lease.client.Register(attemptCtx, lease.registration)
+		cancel()
+	}
+
 	if err != nil {
 		if ctx.Err() == nil {
 			logger.WarnContext(ctx, "beacon registration failed", slog.String("name", lease.registration.Name), slog.Any("error", err))
@@ -178,6 +201,8 @@ func (lease *Lease) renew(ctx context.Context) bool {
 
 		return false
 	}
+
+	lease.registration.ID = registered.ID
 
 	lease.mu.Lock()
 	lease.id = registered.ID

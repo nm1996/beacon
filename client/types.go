@@ -4,6 +4,10 @@ import "time"
 
 // Registration describes an instance to register.
 type Registration struct {
+	// ID is optional: the instance ID to use, such as the pod or host name,
+	// so registering again, after a lost response or a Beacon restart,
+	// returns the same instance. Without it, Beacon generates one.
+	ID string
 	// Name groups instances of the same service, such as "orders".
 	Name string
 	// Address is the host name or IP address where the instance is reachable.
@@ -40,6 +44,7 @@ type Health struct {
 
 // registerRequest is the body of POST /api/v1/services.
 type registerRequest struct {
+	ID      string `json:"id,omitempty"`
 	Name    string `json:"name"`
 	Address string `json:"address"`
 	Port    int    `json:"port"`

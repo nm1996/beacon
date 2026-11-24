@@ -97,7 +97,7 @@ func TestNewAppliesRequestBodyLimit(t *testing.T) {
 func TestNewConnectsServerToDiscovery(t *testing.T) {
 	components := mustNew(t, config.Default(), "v0.0.0-test")
 
-	_, err := components.Discovery.Register(t.Context(), discovery.Registration{
+	_, _, err := components.Discovery.Register(t.Context(), discovery.Registration{
 		Name:    "orders",
 		Address: "10.0.0.1",
 		Port:    8081,

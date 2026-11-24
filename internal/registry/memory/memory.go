@@ -52,7 +52,7 @@ func (registry *MemoryRegistry) Create(_ context.Context, instance discovery.Ins
 	defer registry.mu.Unlock()
 
 	if _, exists := registry.instances[instance.ID]; exists {
-		return fmt.Errorf("instance %s already exists", instance.ID)
+		return fmt.Errorf("%w: %s", discovery.ErrInstanceExists, instance.ID)
 	}
 
 	if len(registry.instances) >= limits.Total {

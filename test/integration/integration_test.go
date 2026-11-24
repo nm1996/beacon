@@ -292,9 +292,16 @@ func TestLeasesRegisterAgainAfterBeaconRestarts(test *testing.T) {
 		return err == nil && len(instances) == count
 	})
 
+	// They come back under the IDs they had, so nothing keyed by ID changes.
 	for _, lease := range leases {
-		if before[lease.ID()] {
-			test.Errorf("expected lease %s to have a new ID after registering again", lease.ID())
+		if !before[lease.ID()] {
+			test.Errorf("expected lease %s to keep its ID after registering again", lease.ID())
+		}
+	}
+
+	for _, instance := range discover(test, beaconClient, "payments") {
+		if !before[instance.ID] {
+			test.Errorf("expected only the leases' original IDs, got %s", instance.ID)
 		}
 	}
 
