@@ -30,6 +30,12 @@ mise run check # check formatting, vet, lint and run tests with the race detecto
 
 Run `mise tasks` to list them all. CI runs the same tasks on every pull request.
 
+The PostgreSQL tests, the backend's contract tests and the integration tests that run two nodes over one database, need a database to create schemas in. Without `BEACON_TEST_POSTGRES_URL` they are skipped; CI sets it to a PostgreSQL service container. Each test gets a schema of its own and drops it afterwards, so one database serves every package at once:
+
+```bash
+BEACON_TEST_POSTGRES_URL='postgres://beacon@localhost:5432/beacon_test?sslmode=disable' mise run test-race
+```
+
 ### Benchmarks
 
 `mise run bench` measures the in-memory backend at 100 to 100000 instances, the business rules, and the HTTP handlers. One run on a laptop (AMD Ryzen 3 5300U, 8 threads, Go 1.27), at the default `registry.max_instances` of 10000:
@@ -61,12 +67,12 @@ Every operation shares one lock: lookups can run side by side, but heartbeats an
 | 10000 | 4.6 µs | 3.1 µs | 3.2 µs | 3.2 µs |
 | 100000 | 60 µs | 28 µs | 24 µs | 22 µs |
 
-`BenchmarkHeartbeatDuringLookups` times single heartbeats while other goroutines look up one service as fast as they can, the case where heartbeats wait longest. Mean and 99th percentile:
+`BenchmarkHeartbeatDuringLookups` times single heartbeats while other goroutines look up one service as fast as they can, the case where heartbeats wait longest. The table shows the time per operation (`ns/op`) and the 99th percentile of the measured waits (`p99-ns`). They are not two statistics of one distribution: `ns/op` also counts reading the clock around each heartbeat and recording the sample, about one clock read more than the waits themselves, which is why it can exceed the p99 when nothing competes for the lock. The benchmark now also reports `mean-ns`, the mean of the same waits as the p99; the numbers below predate it.
 
 | Instances | No lookups | 1 looking up | 4 looking up |
 |---|---|---|---|
-| 10000 | 4.0 µs, p99 2.9 µs | 24 µs, p99 112 µs | 84 µs, p99 0.30 ms |
-| 100000 | 4.1 µs, p99 3.3 µs | 10 µs, p99 0.18 ms | 127 µs, p99 1.2 ms |
+| 10000 | 4.0 µs/op, p99 2.9 µs | 24 µs/op, p99 112 µs | 84 µs/op, p99 0.30 ms |
+| 100000 | 4.1 µs/op, p99 3.3 µs | 10 µs/op, p99 0.18 ms | 127 µs/op, p99 1.2 ms |
 
 - Before the index, and before lookups stopped reserving room for the whole registry, four goroutines looking up in a loop held 10000 instances to about 400 heartbeats a second, with a p99 of 7 ms: fewer than the 1000 a second those instances send at the default TTL, so live instances could have expired. They now leave room for over 10000.
 - More goroutines help little beyond two, since heartbeats need the lock to themselves.
