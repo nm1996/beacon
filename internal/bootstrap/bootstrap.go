@@ -6,14 +6,17 @@ package bootstrap
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/nm1996/beacon/internal/api"
 	"github.com/nm1996/beacon/internal/auth"
+	"github.com/nm1996/beacon/internal/cluster"
 	"github.com/nm1996/beacon/internal/config"
 	"github.com/nm1996/beacon/internal/credentials"
 	"github.com/nm1996/beacon/internal/discovery"
@@ -43,6 +46,10 @@ type Components struct {
 	// Heartbeats batches heartbeats for the storage backend, when it is
 	// PostgreSQL. The caller runs it until shutdown; it is nil otherwise.
 	Heartbeats *heartbeats.Registry
+	// Membership records this node among those sharing the storage backend
+	// and divides the rate limits by their number. The caller joins it
+	// before serving and runs it until shutdown.
+	Membership *cluster.Membership
 
 	// closers release what New opened, such as database connections.
 	closers []func()
@@ -67,7 +74,7 @@ func (components *Components) Close() {
 // server's own internal errors are reported to logger, and version is what
 // GET /health reports.
 func New(settings config.Config, logger *slog.Logger, version string) (*Components, error) {
-	registry, closeRegistry, err := newRegistry(settings.Storage)
+	registry, nodes, closeRegistry, err := newRegistry(settings.Storage)
 	if err != nil {
 		return nil, err
 	}
@@ -141,10 +148,28 @@ func New(settings config.Config, logger *slog.Logger, version string) (*Componen
 
 	proxies := api.TrustedProxies(ranges)
 
+	registrationLimit := ratelimit.New(limits.RegistrationsPerSecond, limits.RegistrationBurst, 0)
+	failureLimit := ratelimit.New(limits.AuthFailuresPerSecond, limits.AuthFailureBurst, 0)
+
+	membership := cluster.New(nodes, cluster.Node{
+		ID:        nodeID(settings.Server.NodeID),
+		Address:   settings.Server.Addr(),
+		Version:   version,
+		StartedAt: time.Now(),
+	}, logger, func(live int) {
+		// Each node sees about 1/live of every client's requests.
+		registrationLimit.SetShare(live)
+		failureLimit.SetShare(live)
+
+		if observer != nil {
+			observer.ClusterNodes(live)
+		}
+	})
+
 	var guard *api.Guard
 	if settings.Auth.Enabled {
 		guard = api.NewGuard(store, logger, failed, api.WithTrustedProxies(proxies), api.WithFailureLimit(
-			ratelimit.New(limits.AuthFailuresPerSecond, limits.AuthFailureBurst, 0),
+			failureLimit,
 			func() {
 				if rateLimited != nil {
 					rateLimited(api.LimitAuthFailures)
@@ -157,9 +182,10 @@ func New(settings config.Config, logger *slog.Logger, version string) (*Componen
 		MaxRequestBodyBytes: settings.Server.MaxRequestBodyBytes,
 		Version:             version,
 		Guard:               guard,
-		RegistrationLimit:   ratelimit.New(limits.RegistrationsPerSecond, limits.RegistrationBurst, 0),
+		RegistrationLimit:   registrationLimit,
 		RateLimited:         rateLimited,
 		TrustedProxies:      proxies,
+		Nodes:               nodeLister(membership),
 	})
 
 	if observer != nil {
@@ -187,6 +213,7 @@ func New(settings config.Config, logger *slog.Logger, version string) (*Componen
 		Credentials: store,
 		Server:      server,
 		Heartbeats:  batched,
+		Membership:  membership,
 		closers:     []func(){closeRegistry},
 	}, nil
 }
@@ -195,25 +222,55 @@ func New(settings config.Config, logger *slog.Logger, version string) (*Componen
 // startup.
 const postgresOpenTimeout = 30 * time.Second
 
-// newRegistry builds the registry backend named by settings.Backend, and a
-// function that releases it. Adding a backend means adding a case here and
-// its name in internal/config.
-func newRegistry(settings config.StorageConfig) (discovery.Registry, func(), error) {
+// newRegistry builds the registry backend named by settings.Backend, the
+// store where nodes sharing it record themselves, and a function that
+// releases both. Adding a backend means adding a case here and its name in
+// internal/config.
+func newRegistry(settings config.StorageConfig) (discovery.Registry, cluster.Store, func(), error) {
 	switch settings.Backend {
 	case config.StorageMemory:
-		return memory.New(), func() {}, nil
+		// Nothing is shared, so this node is alone.
+		return memory.New(), cluster.NewLocal(), func() {}, nil
 	case config.StoragePostgres:
 		ctx, cancel := context.WithTimeout(context.Background(), postgresOpenTimeout)
 		defer cancel()
 
 		registry, err := postgres.Open(ctx, settings.Postgres.URL)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 
-		return registry, registry.Close, nil
+		return registry, registry, registry.Close, nil
 	default:
-		return nil, nil, fmt.Errorf("unknown storage backend %q", settings.Backend)
+		return nil, nil, nil, fmt.Errorf("unknown storage backend %q", settings.Backend)
+	}
+}
+
+// nodeID returns configured, or a random ID when it is empty.
+func nodeID(configured string) string {
+	if configured != "" {
+		return configured
+	}
+
+	return "node-" + strings.ToLower(rand.Text()[:12])
+}
+
+// nodeLister lists membership's nodes for the API.
+func nodeLister(membership *cluster.Membership) func(ctx context.Context) ([]api.Node, error) {
+	return func(ctx context.Context) ([]api.Node, error) {
+		nodes, err := membership.Nodes(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		result := make([]api.Node, 0, len(nodes))
+		for _, node := range nodes {
+			node.StartedAt = node.StartedAt.UTC()
+			node.LastSeen = node.LastSeen.UTC()
+			result = append(result, api.Node(node))
+		}
+
+		return result, nil
 	}
 }
 

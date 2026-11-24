@@ -35,6 +35,7 @@ type Metrics struct {
 	authFailures      *prometheus.CounterVec
 	credentialReloads *prometheus.CounterVec
 	rateLimited       *prometheus.CounterVec
+	clusterNodes      prometheus.Gauge
 }
 
 // New returns Metrics with the Go runtime and process collectors and a
@@ -58,7 +59,7 @@ func New(version string) *Metrics {
 		registryOperations: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: namespace,
 			Name:      "registry_operations_total",
-			Help:      "Calls to the storage backend, by operation and result (ok, not_found, not_owned, full, owner_full or error).",
+			Help:      "Calls to the storage backend, by operation and result (ok, not_found, not_owned, full, owner_full, exists or error).",
 		}, []string{"operation", "result"}),
 		registryDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Namespace: namespace,
@@ -86,6 +87,11 @@ func New(version string) *Metrics {
 			Name:      "rate_limited_total",
 			Help:      "Requests refused by a rate limit, by limit (registrations or auth_failures).",
 		}, []string{"limit"}),
+		clusterNodes: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: namespace,
+			Name:      "cluster_nodes",
+			Help:      "Live Beacon nodes sharing this node's storage, this one included; the rate limits are divided by it.",
+		}),
 	}
 
 	buildInfo := prometheus.NewGauge(prometheus.GaugeOpts{
@@ -108,6 +114,7 @@ func New(version string) *Metrics {
 		metrics.authFailures,
 		metrics.credentialReloads,
 		metrics.rateLimited,
+		metrics.clusterNodes,
 	)
 
 	return metrics
@@ -116,6 +123,11 @@ func New(version string) *Metrics {
 // AuthFailed counts one request refused by authentication for reason.
 func (metrics *Metrics) AuthFailed(reason string) {
 	metrics.authFailures.WithLabelValues(reason).Inc()
+}
+
+// ClusterNodes reports how many nodes are live.
+func (metrics *Metrics) ClusterNodes(nodes int) {
+	metrics.clusterNodes.Set(float64(nodes))
 }
 
 // RateLimited counts one request refused by limit.

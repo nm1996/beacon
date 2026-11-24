@@ -29,6 +29,7 @@ Services register themselves, send heartbeats, and discover each other over a sm
 - [Authentication](#authentication)
 - [Rate limits](#rate-limits)
 - [PostgreSQL storage](#postgresql-storage)
+- [Running several nodes](#running-several-nodes)
 - [Reloading certificates and tokens](#reloading-certificates-and-tokens)
 - [Running in Docker](#running-in-docker)
 - [Go client](#go-client)
@@ -265,6 +266,14 @@ No request body.
 | `403 Forbidden` | With authentication on: another caller registered this instance (`instance_not_owned`), or the caller lacks `register` (`forbidden`) |
 | `404 Not Found` | No instance with that ID |
 
+### `GET /api/v1/nodes`
+
+Lists the live Beacon nodes sharing this node's storage, sorted by ID; with the memory backend, only this one. With [authentication](#authentication) on it needs the `manage` permission.
+
+```json
+[{ "id": "beacon-0", "address": "0.0.0.0:8080", "version": "v0.3.0", "started_at": "2026-11-23T09:00:00Z", "last_seen": "2026-11-23T10:00:05Z" }]
+```
+
 ### `GET /health`
 
 Always returns `200 OK` while the process is serving requests, with the version of the running build. Use it for container and load balancer health checks.
@@ -300,6 +309,7 @@ A file only needs the keys it changes, and no file is needed at all. [`configs/b
 | `server.max_request_body_bytes` | `BEACON_SERVER_MAX_REQUEST_BODY_BYTES` | `65536` | Largest accepted request body |
 | `server.reload_interval` | `BEACON_SERVER_RELOAD_INTERVAL` | `"0s"` | How often to check the TLS files and tokens file for changes; `0s` is off. See [Reloading](#reloading-certificates-and-tokens) |
 | `server.trusted_proxies` | `BEACON_SERVER_TRUSTED_PROXIES` (comma-separated) | `[]` | Addresses or CIDR ranges of proxies whose `X-Forwarded-For` gives the client address for [rate limits](#rate-limits) |
+| `server.node_id` | `BEACON_SERVER_NODE_ID` | `""` | Names this node among those sharing PostgreSQL, such as its pod name; empty picks a random ID at every start |
 | `tls.cert_file` | `BEACON_TLS_CERT_FILE` | `""` | PEM certificate chain to serve HTTPS with; see [TLS](#tls) |
 | `tls.key_file` | `BEACON_TLS_KEY_FILE` | `""` | PEM private key for `tls.cert_file` |
 | `tls.client_ca_file` | `BEACON_TLS_CLIENT_CA_FILE` | `""` | PEM bundle of CAs whose client certificates Beacon accepts; see [Client certificates (mTLS)](#client-certificates-mtls) |
@@ -518,7 +528,7 @@ Refused requests are logged at `warn` level, with the caller's name when it is k
 
 ## Rate limits
 
-Beacon limits two things per client, each with a token bucket: a steady rate, plus a burst that may be spent at once. The limits live in each Beacon process; there is nothing to set up. They are not shared between processes, so if several Beacon nodes ever sit behind one load balancer, each enforces its own and a client spread over three nodes gets up to three times the limit; enforce the limit at the load balancer then.
+Beacon limits two things per client, each with a token bucket: a steady rate, plus a burst that may be spent at once. The limits live in each Beacon process; there is nothing to set up. With [several nodes](#running-several-nodes), each node enforces its share: the rate and burst divided by the number of live nodes (the burst never below 1), so behind a round-robin load balancer, which gives each node about the same share of every client's requests, the cluster as a whole enforces about the configured limit. Behind a sticky load balancer a client meets one node and gets that node's share, which is stricter. For large deployments, enforce limits at the load balancer as well.
 
 | Limit | Counted per | Default | Beyond it |
 |---|---|---|---|
@@ -556,6 +566,23 @@ cache_ttl = "2s"
 - `registry.cache_ttl` keeps each process's lookup results for that long, so lookups reach the database at most once per name per interval. A registration or removal through a process clears its cache. Changes through other processes show within the interval, and so may `last_heartbeat`, which heartbeats do not refresh in the cache. That is why it may be at most a third of `registry.service_ttl`, and together with `storage.postgres.heartbeat_flush_interval` too: a lookup can see a heartbeat as old as the cache, plus its wait to be written, plus the time between heartbeats.
 - Timestamps come from each process's clock. Keep the clocks of every Beacon process synchronized, with NTP, to well within the TTL.
 - The connection string's parameters include pgx's pool settings, such as `pool_max_conns` (default: the greater of 4 and the number of CPUs).
+
+## Running several nodes
+
+With [PostgreSQL storage](#postgresql-storage), any number of Beacon processes can share one database behind a load balancer. Every node serves every request, so the load balancer needs no stickiness, and losing a node loses nothing.
+
+```text
+clients ──► load balancer ──► beacon-0 ─┐
+                          ──► beacon-1 ─┼──► PostgreSQL
+                          ──► beacon-2 ─┘
+```
+
+- Each node records itself in `beacon_nodes` every 5 seconds and removes itself on shutdown; a node not seen for 15 seconds no longer counts. `GET /api/v1/nodes` and `beacon_cluster_nodes` show who is live.
+- `server.node_id` names a node, for example after its pod; without it each start picks a random ID.
+- Every node runs cleanup. Removing expired instances is idempotent, so two nodes doing it at once remove each instance once, and no node has to be elected to do it.
+- Registrations stay within `registry.max_instances` and `registry.max_instances_per_owner` across all nodes; see [PostgreSQL storage](#postgresql-storage).
+- [Rate limits](#rate-limits) are divided by the number of live nodes.
+- With the memory backend, nodes behind one load balancer would be separate registries, each knowing only the instances that happened to reach it. Use one node, or PostgreSQL.
 
 ## Reloading certificates and tokens
 
@@ -760,6 +787,7 @@ scrape_configs:
 | `beacon_registry_operations_total` | counter | `operation`, `result` | Calls to the storage backend; `result` is `ok`, `not_found`, `not_owned`, `full` (refused by `registry.max_instances`), `owner_full` (refused by `registry.max_instances_per_owner`), `exists` (a create for an ID already taken, as when a registration is repeated) or `error` |
 | `beacon_registry_operation_duration_seconds` | histogram | `operation` | Time spent in the storage backend |
 | `beacon_rate_limited_total` | counter | `limit` | Requests refused by a [rate limit](#rate-limits); `limit` is `registrations` or `auth_failures`. Only appears once a request has been refused |
+| `beacon_cluster_nodes` | gauge | | Live Beacon nodes sharing this node's storage, this one included; see [Running several nodes](#running-several-nodes) |
 | `beacon_auth_failures_total` | counter | `reason` | Requests refused by [authentication](#authentication); `reason` is `missing`, `invalid` or `forbidden`. Only appears once a request has been refused |
 | `beacon_credential_reloads_total` | counter | `result` | Attempts to [reload](#reloading-certificates-and-tokens) the TLS files and tokens file while running; `result` is `ok` or `error`. Only appears after the first attempt |
 | `beacon_build_info` | gauge | `version`, `goversion` | Always `1`; describes the running build |
@@ -819,7 +847,7 @@ The [container image](#running-in-docker) already listens on `0.0.0.0`, because 
 Beacon is deliberately small. Before you depend on it, know that:
 
 - **By default, state lives in memory.** Restarting Beacon forgets every instance. Services find out on their next heartbeat (`404`) and register again, under the same ID with a `Lease`. Use [PostgreSQL storage](#postgresql-storage) to keep instances across restarts.
-- **It runs as a single node.** There is no clustering or replication.
+- **Several nodes need PostgreSQL.** With the memory backend every node is a registry of its own; see [Running several nodes](#running-several-nodes). PostgreSQL itself is then what must stay available.
 - **Authentication is off by default.** Until you turn on [authentication](#authentication), anyone who can reach the port can register, discover and remove instances. By default only the same machine can, since Beacon listens on `127.0.0.1`; see [Exposing Beacon to a network](#exposing-beacon-to-a-network). [TLS](#tls) encrypts the traffic but does not decide who may connect.
 - **Ownership is by name, not by service.** Every instance registered with the same token or certificate belongs to the same caller, so two services sharing one token can change each other's instances. Give each service its own token or certificate.
 - **Client certificates are not checked for revocation.** Use short-lived certificates.
@@ -907,6 +935,7 @@ Every operation shares one lock: lookups can run side by side, but heartbeats an
 │   ├── discovery/           # Business rules: validation, IDs, TTL, cleanup; the Registry interface
 │   ├── metrics/             # Prometheus metrics around the HTTP handler and any Registry backend
 │   ├── ratelimit/           # Token buckets per caller or client network, bounded in size
+│   ├── cluster/             # Which Beacon nodes share the storage backend, for dividing rate limits
 │   ├── registry/
 │   │   ├── memory/          # In-memory Registry backend
 │   │   ├── postgres/        # PostgreSQL Registry backend, with its embedded migrations

@@ -40,6 +40,8 @@ type Config struct {
 	// RateLimited, if not nil, is called with LimitRegistrations for every
 	// registration RegistrationLimit refuses.
 	RateLimited func(limit string)
+	// Nodes, if not nil, lists the live Beacon nodes for GET /api/v1/nodes.
+	Nodes func(ctx context.Context) ([]Node, error)
 	// TrustedProxies are the proxies whose X-Forwarded-For header gives the
 	// client address that registration limits are keyed by. Empty trusts
 	// none.
@@ -203,6 +205,22 @@ func (handler *Handler) caller(request *http.Request) discovery.Caller {
 	}
 
 	return discovery.Caller{ID: identity.ID, Name: identity.Name, AnyInstance: identity.Allows(auth.PermissionManage)}
+}
+
+// GetNodes lists the live Beacon nodes sharing this node's storage, sorted
+// by ID.
+func (handler *Handler) GetNodes(writer http.ResponseWriter, request *http.Request) {
+	nodes, err := handler.config.Nodes(request.Context())
+	if err != nil {
+		handler.writeDiscoveryError(writer, request, err)
+		return
+	}
+
+	if nodes == nil {
+		nodes = []Node{}
+	}
+
+	handler.writeJSON(writer, http.StatusOK, nodes)
 }
 
 // Health reports that the process is up and serving requests. It always

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -374,6 +375,83 @@ func TestNewWithPostgresKeepsInstancesAcrossServers(t *testing.T) {
 
 	if err := second.Discovery.Unregister(t.Context(), registration.ID, discovery.Caller{AnyInstance: true}); err != nil {
 		t.Errorf("clean up: %v", err)
+	}
+}
+
+func TestTwoNodesOverPostgresShareTheRateLimits(t *testing.T) {
+	url := postgrestest.URL(t)
+
+	settings := config.Default()
+	settings.Storage.Backend = config.StoragePostgres
+	settings.Storage.Postgres.URL = url
+	settings.RateLimit.RegistrationsPerSecond = 0.001
+	settings.RateLimit.RegistrationBurst = 4
+
+	nodes := make([]*Components, 0, 2)
+
+	for _, id := range []string{"node-a", "node-b"} {
+		settings.Server.NodeID = id
+
+		components, err := New(settings, slog.New(slog.DiscardHandler), "test")
+		if err != nil {
+			t.Fatalf("new %s: %v", id, err)
+		}
+		defer components.Close()
+
+		if err := components.Membership.Join(t.Context()); err != nil {
+			t.Fatalf("join %s: %v", id, err)
+		}
+
+		nodes = append(nodes, components)
+	}
+
+	listed, err := nodes[1].Membership.Nodes(t.Context())
+	if err != nil || len(listed) != 2 {
+		t.Fatalf("expected both nodes listed, got %+v, %v", listed, err)
+	}
+
+	// The second node joined last, so it already divides by two: half of
+	// the burst of 4 per client network.
+	handler := nodes[1].Server.Handler
+	codes := make([]int, 0, 3)
+
+	for port := range 3 {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/services",
+			strings.NewReader(`{"name":"orders","address":"10.0.0.1","port":`+strconv.Itoa(8081+port)+`}`))
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		codes = append(codes, recorder.Code)
+	}
+
+	if codes[0] != http.StatusCreated || codes[1] != http.StatusCreated || codes[2] != http.StatusTooManyRequests {
+		t.Errorf("expected two registrations and then 429 at half the burst, got %v", codes)
+	}
+}
+
+func TestASingleNodeKeepsTheWholeLimit(t *testing.T) {
+	settings := config.Default()
+	settings.RateLimit.RegistrationsPerSecond = 0.001
+	settings.RateLimit.RegistrationBurst = 4
+
+	components, err := New(settings, slog.New(slog.DiscardHandler), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer components.Close()
+
+	if err := components.Membership.Join(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	for port := range 4 {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/services",
+			strings.NewReader(`{"name":"orders","address":"10.0.0.1","port":`+strconv.Itoa(8081+port)+`}`))
+		recorder := httptest.NewRecorder()
+		components.Server.Handler.ServeHTTP(recorder, request)
+
+		if recorder.Code != http.StatusCreated {
+			t.Fatalf("registration %d: expected the whole burst on one node, got %d", port+1, recorder.Code)
+		}
 	}
 }
 
