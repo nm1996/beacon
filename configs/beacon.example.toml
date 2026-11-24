@@ -66,7 +66,7 @@ key_file = ""
 # Leave empty to accept bearer tokens only. Needs cert_file, key_file and
 # auth.enabled. Clients without a certificate can still connect and send a
 # token; [[certificates]] entries in auth.tokens_file decide what each
-# certificate may do. See "Client certificates (mTLS)" in the README.
+# certificate may do. See "Client certificates (mTLS)" in docs/guides/security.md.
 client_ca_file = ""
 
 [auth]
@@ -76,7 +76,7 @@ client_ca_file = ""
 enabled = false
 
 # File listing the accepted tokens by their SHA-256 hash, and what each token
-# may do. Required when enabled is true. See "Authentication" in the README
+# may do. Required when enabled is true. See "Authentication" in docs/guides/security.md
 # for its format and for "beacon --hash-token", which computes the hashes.
 tokens_file = ""
 

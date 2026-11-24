@@ -30,6 +30,9 @@ for platform in "${platforms[@]}"; do
 		./cmd/beacon
 
 	cp README.md LICENSE CHANGELOG.md configs/beacon.example.toml "dist/${name}/"
+	# The README links to the guides by these paths.
+	mkdir -p "dist/${name}/docs"
+	cp -R docs/guides "dist/${name}/docs/"
 
 	if [[ "$os" == "windows" ]]; then
 		(cd dist && zip -qr "${name}.zip" "${name}")

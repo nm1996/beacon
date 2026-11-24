@@ -22,6 +22,8 @@ coverage.*
 /docs/*
 # Design records are published, so they can be reviewed with the code.
 !/docs/design/
+# So are the user guides the README links to.
+!/docs/guides/
 # Only CI workflows and Dependabot are published from .github/.
 /.github/*
 !/.github/workflows/

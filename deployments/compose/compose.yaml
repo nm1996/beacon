@@ -17,14 +17,14 @@ services:
     ports:
       - "8080:8080"
     environment:
-      # Any setting can be overridden this way; see the README for the list.
+      # Any setting can be overridden this way; see docs/guides/configuration.md for the list.
       BEACON_LOGGING_FORMAT: text
     # To use your own configuration, mount it over the built-in one:
     # volumes:
     #   - ./beacon.toml:/etc/beacon/beacon.toml:ro
     #
     # To serve HTTPS, mount a certificate and key readable by UID 65532 and
-    # point Beacon at them (see "TLS" in the README):
+    # point Beacon at them (see "TLS" in docs/guides/security.md):
     # volumes:
     #   - ./certs:/etc/beacon/tls:ro
     # environment:
@@ -32,7 +32,7 @@ services:
     #   BEACON_TLS_KEY_FILE: /etc/beacon/tls/key.pem
     #
     # To require bearer tokens, mount a tokens file and turn auth on (see
-    # "Authentication" in the README):
+    # "Authentication" in docs/guides/security.md):
     # volumes:
     #   - ./tokens.toml:/etc/beacon/tokens.toml:ro
     # environment:
