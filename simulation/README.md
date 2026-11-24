@@ -18,6 +18,14 @@ curl -s localhost:18082/health          # beacon-b
 docker compose -f simulation/compose.yaml down --volumes
 ```
 
+Each application logs its registration, heartbeat failures and
+unregistration as JSON:
+
+```sh
+docker compose -f simulation/compose.yaml logs orders-1
+docker compose -f simulation/compose.yaml stop orders-1   # logs "unregistered"
+```
+
 `--wait` returns once every health check passes. The ports are published on
 loopback only. `down --volumes` also deletes the database, so the next run
 starts clean.

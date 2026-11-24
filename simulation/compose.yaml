@@ -1,5 +1,6 @@
 # The local simulation: two Beacon nodes over one PostgreSQL, behind a load
-# balancer. See README.md in this directory for what it tests and how.
+# balancer, and four application instances that register through it. See
+# README.md in this directory for what it tests and how.
 #
 #   docker compose -f simulation/compose.yaml up --build --wait
 #
@@ -19,6 +20,25 @@ x-beacon-node: &beacon-node
   image: beacon:simulation
   depends_on:
     postgres:
+      condition: service_healthy
+  networks:
+    sim: {}
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+
+# An application instance: one Compose service each, so every instance has a
+# stable DNS name to register as its address.
+x-app: &app
+  build:
+    context: ..
+    dockerfile: simulation/Dockerfile
+  image: beacon-simulation:local
+  entrypoint: ["/usr/local/bin/app"]
+  depends_on:
+    lb:
       condition: service_healthy
   networks:
     sim: {}
@@ -98,6 +118,22 @@ services:
       interval: 2s
       timeout: 2s
       retries: 15
+
+  orders-1:
+    <<: *app
+    command: ["-service", "orders", "-address", "orders-1"]
+
+  orders-2:
+    <<: *app
+    command: ["-service", "orders", "-address", "orders-2"]
+
+  payments-1:
+    <<: *app
+    command: ["-service", "payments", "-address", "payments-1"]
+
+  inventory-1:
+    <<: *app
+    command: ["-service", "inventory", "-address", "inventory-1"]
 
 networks:
   sim:
