@@ -128,6 +128,11 @@ func (handler *Handler) Heartbeat(writer http.ResponseWriter, request *http.Requ
 // Link header with rel="next" whose URL fetches the next page through an
 // opaque "cursor" parameter. Without "limit" it returns every instance, as
 // it always has.
+//
+// Every response carries a weak ETag over the instances' IDs, names,
+// addresses and ports. A request whose If-None-Match lists it gets 304
+// Not Modified without a body, so a client polling for changes pays for
+// a body only when the set of instances changed.
 func (handler *Handler) GetServices(writer http.ResponseWriter, request *http.Request) {
 	params := request.URL.Query()
 
@@ -152,6 +157,14 @@ func (handler *Handler) GetServices(writer http.ResponseWriter, request *http.Re
 	if query.Limit > 0 && len(instances) > query.Limit {
 		instances = instances[:query.Limit]
 		writer.Header().Set("Link", nextPageLink(query, instances[len(instances)-1].ID))
+	}
+
+	etag := listETag(instances, writer.Header().Get("Link"))
+	writer.Header().Set("ETag", etag)
+
+	if notModified(request, etag) {
+		writer.WriteHeader(http.StatusNotModified)
+		return
 	}
 
 	result := make([]Service, 0, len(instances))

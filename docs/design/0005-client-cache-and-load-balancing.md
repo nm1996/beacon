@@ -46,6 +46,10 @@ all := resolver.Instances()          // the cached view
 - New instances are seen within the refresh interval, and gone ones within the interval after their TTL. Callers should still handle connection errors to a picked instance, for example by picking again.
 - One goroutine per resolved name.
 
+### Outlier detection
+
+Decided in review: configurable and off by default. `WithOutlierDetection(OutlierDetection{ConsecutiveFailures, EjectionTime, MaxEjectedPercent})` makes `Pick` skip an instance that callers reported failing that many times in a row (`Report(instance, err)`). The skip lasts `EjectionTime` (30s by default), multiplied by the number of ejections, up to ten times. At most `MaxEjectedPercent` (50% by default) of the instances are ejected at once, and never the last one. This is Envoy's consecutive-failure detector. Ejections are an immutable snapshot swapped atomically, so `Pick` stays lock-free.
+
 ## Open questions
 
-- Should `Pick` skip instances that recently failed (outlier detection)? Default: not in this round. Callers can report failures to their own picker.
+- Success-rate based detection, as Envoy also offers, needs a request volume the client rarely has per instance. Default: consecutive failures only.

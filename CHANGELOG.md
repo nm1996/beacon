@@ -36,6 +36,19 @@ Add an entry under **Unreleased** in the same pull request as the change.
   gets `422 idempotency_key_reused`. See
   [design record 0004](docs/design/0004-idempotency.md).
 - `beacon_registry_operations_total` has the result `exists`.
+- `GET /api/v1/services` sends a weak `ETag` over the instances' IDs, names,
+  addresses and ports, and answers `304 Not Modified` without a body when
+  `If-None-Match` lists it.
+- `client.Resolver`, a client-side cache and load balancer for one service:
+  `NewResolver` fetches once, a background goroutine refreshes with
+  conditional requests, `Pick` chooses an instance without a request
+  (`client.RoundRobin`, the default, `client.Random`, or any
+  `client.Picker`), and while Beacon is unreachable it keeps serving the
+  last instances for up to `client.WithMaxStale`, then returns
+  `client.ErrStale`. With `client.WithOutlierDetection`, off by default,
+  instances that `Resolver.Report` shows failing several times in a row are
+  skipped for a while, never more than half of them nor the last one. See
+  [design record 0005](docs/design/0005-client-cache-and-load-balancing.md).
 - `client.Registration.ID` chooses the instance ID, and `client.ErrConflict`
   matches `instance_exists` and `idempotency_key_reused`.
 
