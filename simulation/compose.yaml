@@ -1,0 +1,109 @@
+# The local simulation: two Beacon nodes over one PostgreSQL, behind a load
+# balancer. See README.md in this directory for what it tests and how.
+#
+#   docker compose -f simulation/compose.yaml up --build --wait
+#
+# Everything here is for a laptop only: PostgreSQL trusts every connection
+# from the Compose network, and authentication is off.
+
+name: beacon-sim
+
+# The Beacon settings every node shares. The lifecycle is shortened from the
+# defaults so expiry shows within seconds; see "Settings for the simulation".
+x-beacon-node: &beacon-node
+  build:
+    context: ..
+    dockerfile: deployments/docker/Dockerfile
+    args:
+      VERSION: simulation
+  image: beacon:simulation
+  depends_on:
+    postgres:
+      condition: service_healthy
+  networks:
+    sim: {}
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+
+x-beacon-environment: &beacon-environment
+  BEACON_STORAGE_BACKEND: postgres
+  BEACON_STORAGE_POSTGRES_URL: postgres://beacon@postgres:5432/beacon?sslmode=disable
+  BEACON_STORAGE_POSTGRES_HEARTBEAT_FLUSH_INTERVAL: 1s
+  BEACON_REGISTRY_SERVICE_TTL: 9s
+  BEACON_REGISTRY_CLEANUP_INTERVAL: 1s
+  BEACON_REGISTRY_CACHE_TTL: 0s
+  # Applications reach Beacon through the load balancer, so its address is
+  # trusted to name the real client in X-Forwarded-For. Without it, every
+  # application would share one registration rate limit.
+  BEACON_SERVER_TRUSTED_PROXIES: 172.29.53.10
+
+services:
+  postgres:
+    image: postgres:18.1-alpine
+    environment:
+      POSTGRES_USER: beacon
+      POSTGRES_DB: beacon
+      # Local only: no password, and the port is not published.
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - pgdata:/var/lib/postgresql
+    networks:
+      sim: {}
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "beacon", "-d", "beacon"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  beacon-a:
+    <<: *beacon-node
+    environment:
+      <<: *beacon-environment
+      BEACON_SERVER_NODE_ID: beacon-a
+    ports:
+      - "127.0.0.1:18081:8080"
+
+  beacon-b:
+    <<: *beacon-node
+    environment:
+      <<: *beacon-environment
+      BEACON_SERVER_NODE_ID: beacon-b
+    ports:
+      - "127.0.0.1:18082:8080"
+
+  lb:
+    image: nginx:1.29.1-alpine
+    depends_on:
+      beacon-a:
+        condition: service_healthy
+      beacon-b:
+        condition: service_healthy
+    environment:
+      # Which failures nginx passes on to the other node. Scenario C runs
+      # once with the default and once adding non_idempotent, so POSTs are
+      # retried too.
+      LB_NEXT_UPSTREAM: ${LB_NEXT_UPSTREAM:-error timeout}
+    volumes:
+      - ./lb/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+    networks:
+      sim:
+        ipv4_address: 172.29.53.10
+    ports:
+      - "127.0.0.1:18080:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/health"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+networks:
+  sim:
+    ipam:
+      config:
+        - subnet: 172.29.53.0/24
+
+volumes:
+  pgdata: {}

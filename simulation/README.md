@@ -1,10 +1,26 @@
 # Local simulation: test plan
 
 > [!NOTE]
-> This is a plan. None of the simulation exists yet. It records what we want
-> to learn, how each test is set up, what Beacon's documented behavior says
-> should happen, and what would count as a bug. The implementation follows in
-> separate pull requests, one per phase below.
+> This is the test plan, and the simulation is being built from it one
+> phase at a time; see [Phases](#phases) for what exists. It records what we
+> want to learn, how each test is set up, what Beacon's documented behavior
+> says should happen, and what would count as a bug.
+
+## Running it
+
+Needs Docker with Compose v2. From the repository root:
+
+```sh
+docker compose -f simulation/compose.yaml up --build --wait
+curl -s localhost:18080/api/v1/nodes    # through the load balancer
+curl -s localhost:18081/health          # beacon-a
+curl -s localhost:18082/health          # beacon-b
+docker compose -f simulation/compose.yaml down --volumes
+```
+
+`--wait` returns once every health check passes. The ports are published on
+loopback only. `down --volumes` also deletes the database, so the next run
+starts clean.
 
 ## Why
 
@@ -78,7 +94,10 @@ runner ──► each instance's /work, picked through client.Resolver
 - **lb**: a pinned nginx image, round robin across both nodes. Applications
   reach Beacon only through it. When one node is down, connection errors must
   go to the other one; see the failover tests below for the retry setting
-  that needs.
+  that needs. It has a fixed address, `172.29.53.10`, which both nodes trust
+  as a proxy, so rate limits see each application's own address instead of
+  the load balancer's. It looks node names up again every 5s, since a
+  restarted container can come back with a new address.
 - **Application services**: one small Go binary run as `orders`, `payments`
   or `inventory`. It serves `GET /health` and `GET /work`, the latter
   returning its service name, instance ID and a timestamp. It registers

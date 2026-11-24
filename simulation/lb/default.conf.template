@@ -1,0 +1,32 @@
+# Round robin across both Beacon nodes. The nginx image fills in
+# ${LB_NEXT_UPSTREAM} from the environment at start.
+
+# Docker's DNS. Names are looked up again every 5s, so a node that restarts
+# with a new address is found again.
+resolver 127.0.0.11 valid=5s ipv6=off;
+
+upstream beacon {
+    zone beacon 64k;
+    server beacon-a:8080 resolve max_fails=1 fail_timeout=2s;
+    server beacon-b:8080 resolve max_fails=1 fail_timeout=2s;
+    keepalive 32;
+}
+
+server {
+    listen 80;
+
+    location / {
+        proxy_pass http://beacon;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+        # A heartbeat attempt gives up after a sixth of the TTL, 1.5s here,
+        # so a node that is gone must be skipped well within that.
+        proxy_connect_timeout 500ms;
+        proxy_read_timeout 5s;
+        proxy_next_upstream ${LB_NEXT_UPSTREAM};
+        proxy_next_upstream_tries 2;
+    }
+}
