@@ -98,6 +98,12 @@ and the lookup cache are all off until configured. The Go client's
 
 ### Changed
 
+- The README is now a short introduction. The API, configuration, security,
+  operations, client and development guides moved to `docs/guides/`, which
+  release archives include, and the new
+  [Guarantees and failure behavior](docs/guides/guarantees.md) guide states
+  what is consistent across nodes, what may lag, and what happens when
+  PostgreSQL, a node or shutdown fails.
 - `client.Register` sends an `Idempotency-Key` and retries, up to three
   attempts in all, when Beacon cannot be reached or a proxy answers `502`,
   `503` or `504`. It used to fail on the first lost response, so `Announce`
