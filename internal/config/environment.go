@@ -42,6 +42,7 @@ func environmentVariables(config *Config) []environmentVariable {
 		{name: "BEACON_REGISTRY_CACHE_TTL", apply: setDuration(&config.Registry.CacheTTL)},
 		{name: "BEACON_STORAGE_BACKEND", apply: setString(&config.Storage.Backend)},
 		{name: "BEACON_STORAGE_POSTGRES_URL", apply: setString(&config.Storage.Postgres.URL)},
+		{name: "BEACON_STORAGE_POSTGRES_HEARTBEAT_FLUSH_INTERVAL", apply: setDuration(&config.Storage.Postgres.HeartbeatFlushInterval)},
 		{name: "BEACON_RATE_LIMIT_REGISTRATIONS_PER_SECOND", apply: setFloat(&config.RateLimit.RegistrationsPerSecond)},
 		{name: "BEACON_RATE_LIMIT_REGISTRATION_BURST", apply: setInt(&config.RateLimit.RegistrationBurst)},
 		{name: "BEACON_RATE_LIMIT_AUTH_FAILURES_PER_SECOND", apply: setFloat(&config.RateLimit.AuthFailuresPerSecond)},

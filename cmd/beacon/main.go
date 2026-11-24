@@ -130,6 +130,14 @@ func run(settings config.Config, logger *slog.Logger) error {
 		workers.Wait()
 	}()
 
+	if batched := components.Heartbeats; batched != nil {
+		// Stopped with the other workers after the server, so its last
+		// flush writes every heartbeat the server accepted.
+		workers.Go(func() {
+			batched.Run(workerCtx)
+		})
+	}
+
 	workers.Go(func() {
 		if err := components.Discovery.RunCleanup(workerCtx); err != nil {
 			logger.Error("cleanup worker stopped", slog.Any("error", err))

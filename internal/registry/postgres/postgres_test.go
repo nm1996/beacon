@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/nm1996/beacon/internal/discovery"
 	"github.com/nm1996/beacon/internal/registry/postgres/postgrestest"
@@ -75,5 +76,43 @@ func TestOpenMigratesOnceWhenNodesStartTogether(t *testing.T) {
 func TestOpenFailsForAnUnreachableDatabase(t *testing.T) {
 	if _, err := Open(t.Context(), "postgres://beacon@127.0.0.1:1/beacon?connect_timeout=1"); err == nil {
 		t.Fatal("expected an error")
+	}
+}
+
+func TestTouchManyWritesHeartbeatsInOneStatement(t *testing.T) {
+	registry := openEmpty(t)
+	ctx := t.Context()
+	start := time.Now().UTC().Truncate(time.Microsecond)
+
+	for _, id := range []string{"a", "b"} {
+		instance := discovery.Instance{ID: id, Name: "orders", Address: "10.0.0.1", Port: 8081, RegisteredAt: start, LastHeartbeat: start}
+		if err := registry.Create(ctx, instance, discovery.Limits{Total: 10}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// b already holds a later heartbeat than the batch brings.
+	if err := registry.Touch(ctx, "b", start.Add(time.Hour), discovery.OwnerCheck{Any: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	missing, err := registry.TouchMany(ctx, map[string]time.Time{
+		"a":    start.Add(time.Minute),
+		"b":    start.Add(time.Minute),
+		"gone": start.Add(time.Minute),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(missing) != 1 || missing[0] != "gone" {
+		t.Errorf("expected only gone reported missing, got %v", missing)
+	}
+
+	for id, want := range map[string]time.Time{"a": start.Add(time.Minute), "b": start.Add(time.Hour)} {
+		instance, err := registry.Get(ctx, id)
+		if err != nil || !instance.LastHeartbeat.Equal(want) {
+			t.Errorf("%s: expected last heartbeat %s, got %s, %v", id, want, instance.LastHeartbeat, err)
+		}
 	}
 }

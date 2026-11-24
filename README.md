@@ -318,6 +318,7 @@ A file only needs the keys it changes, and no file is needed at all. [`configs/b
 | `rate_limit.auth_failure_burst` | `BEACON_RATE_LIMIT_AUTH_FAILURE_BURST` | `20` | Failed attempts a network may make at once before the rate applies |
 | `storage.backend` | `BEACON_STORAGE_BACKEND` | `"memory"` | Where instances are kept: `memory`, or `postgres` to keep them across restarts. See [PostgreSQL storage](#postgresql-storage) |
 | `storage.postgres.url` | `BEACON_STORAGE_POSTGRES_URL` | `""` | Connection string for `postgres`, such as `postgres://beacon:secret@db:5432/beacon?sslmode=verify-full`. Never logged |
+| `storage.postgres.heartbeat_flush_interval` | `BEACON_STORAGE_POSTGRES_HEARTBEAT_FLUSH_INTERVAL` | `"1s"` | How often each process writes the heartbeats it received, in batches, at most a third of `registry.service_ttl`; `0s` writes each at once. See [PostgreSQL storage](#postgresql-storage) |
 | `metrics.enabled` | `BEACON_METRICS_ENABLED` | `true` | Serve Prometheus metrics at `GET /metrics` |
 | `logging.level` | `BEACON_LOGGING_LEVEL` | `"info"` | `debug`, `info`, `warn` or `error` |
 | `logging.format` | `BEACON_LOGGING_FORMAT` | `"json"` | `json` or `text` |
@@ -551,7 +552,7 @@ cache_ttl = "2s"
 
 - Beacon creates its tables on startup, `beacon_instances` and `beacon_schema_migrations`, and applies later schema changes itself. Several processes starting together apply each change once. The database user needs to create tables in its schema.
 - The limits stay exact with several processes: a registration checks `registry.max_instances` and `registry.max_instances_per_owner` and inserts in one transaction, under a lock that serializes registrations across every process. Heartbeats and lookups do not take it.
-- Every heartbeat is a small `UPDATE`. 10000 instances at the default TTL send about 1000 a second.
+- Heartbeats are batched. Each process checks an instance's first heartbeat with the database, then keeps the following ones in memory and writes them all every `storage.postgres.heartbeat_flush_interval` (1 second by default), in one `UPDATE` per thousand instances. 10000 instances at the default TTL send about 1000 heartbeats a second, which become about one statement a second per process instead of 1000. A heartbeat is still answered at once: owners are checked from what the process learned, an instance another process removed is noticed at the next write and gets `404` after it, and every instance is checked with the database again at least once a minute. A process that crashes loses up to one interval of heartbeats, which its instances' next heartbeats make up for; `0s` writes each heartbeat at once.
 - `registry.cache_ttl` keeps each process's lookup results for that long, so lookups reach the database at most once per name per interval. A registration or removal through a process clears its cache. Changes through other processes show within the interval, and so may `last_heartbeat`, which heartbeats do not refresh in the cache. That is why it may be at most a third of `registry.service_ttl`.
 - Timestamps come from each process's clock. Keep the clocks of every Beacon process synchronized, with NTP, to well within the TTL.
 - The connection string's parameters include pgx's pool settings, such as `pool_max_conns` (default: the greater of 4 and the number of CPUs).
@@ -910,6 +911,7 @@ Every operation shares one lock: lookups can run side by side, but heartbeats an
 │   │   ├── memory/          # In-memory Registry backend
 │   │   ├── postgres/        # PostgreSQL Registry backend, with its embedded migrations
 │   │   ├── cache/           # Caches lookups in front of any backend
+│   │   ├── heartbeats/      # Batches heartbeats for backends that can write many at once
 │   │   └── registrytest/    # Contract tests every Registry backend must pass
 │   ├── tlstest/             # Test certificates: self-signed, and a small CA for mTLS
 │   ├── credentials/         # Loads and reloads the TLS files and tokens file, swapping them in all at once

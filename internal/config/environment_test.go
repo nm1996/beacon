@@ -29,6 +29,7 @@ func TestLoadAppliesEveryEnvironmentVariable(test *testing.T) {
 	test.Setenv("BEACON_REGISTRY_MAX_INSTANCES", "250")
 	test.Setenv("BEACON_REGISTRY_MAX_INSTANCES_PER_OWNER", "25")
 	test.Setenv("BEACON_STORAGE_BACKEND", "memory")
+	test.Setenv("BEACON_STORAGE_POSTGRES_HEARTBEAT_FLUSH_INTERVAL", "2s")
 	test.Setenv("BEACON_RATE_LIMIT_REGISTRATIONS_PER_SECOND", "2.5")
 	test.Setenv("BEACON_RATE_LIMIT_REGISTRATION_BURST", "7")
 	test.Setenv("BEACON_RATE_LIMIT_AUTH_FAILURES_PER_SECOND", "0.5")
@@ -72,7 +73,8 @@ func TestLoadAppliesEveryEnvironmentVariable(test *testing.T) {
 			MaxInstancesPerOwner: 25,
 		},
 		Storage: StorageConfig{
-			Backend: StorageMemory,
+			Backend:  StorageMemory,
+			Postgres: PostgresConfig{HeartbeatFlushInterval: 2 * time.Second},
 		},
 		RateLimit: RateLimitConfig{
 			RegistrationsPerSecond: 2.5,

@@ -328,3 +328,34 @@ func TestCacheTTLIsAtMostAThirdOfTheServiceTTL(t *testing.T) {
 		}
 	}
 }
+
+func TestHeartbeatFlushIntervalIsAtMostAThirdOfTheServiceTTL(t *testing.T) {
+	settings := Default()
+	settings.Storage = StorageConfig{Backend: StoragePostgres, Postgres: PostgresConfig{URL: "postgres://beacon@db/beacon"}}
+
+	for _, tt := range []struct {
+		interval time.Duration
+		ok       bool
+	}{
+		{interval: 0, ok: true},
+		{interval: 10 * time.Second, ok: true},
+		{interval: 11 * time.Second, ok: false},
+		{interval: -time.Second, ok: false},
+	} {
+		settings.Storage.Postgres.HeartbeatFlushInterval = tt.interval
+
+		if err := settings.Validate(); (err == nil) != tt.ok {
+			t.Errorf("flush interval %s with a 30s service TTL: expected ok=%v, got %v", tt.interval, tt.ok, err)
+		}
+	}
+}
+
+func TestHeartbeatFlushIntervalOnlyMattersForPostgres(t *testing.T) {
+	settings := Default()
+	settings.Registry.ServiceTTL = time.Second
+	settings.Registry.CleanupInterval = time.Second
+
+	if err := settings.Validate(); err != nil {
+		t.Errorf("expected a short TTL to be fine with the memory backend, got %v", err)
+	}
+}

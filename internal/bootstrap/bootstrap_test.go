@@ -376,3 +376,35 @@ func TestNewWithPostgresKeepsInstancesAcrossServers(t *testing.T) {
 		t.Errorf("clean up: %v", err)
 	}
 }
+
+func TestHeartbeatsAreBatchedOnlyWithPostgres(t *testing.T) {
+	if components := mustNew(t, config.Default(), "test"); components.Heartbeats != nil {
+		t.Error("expected no batching with the memory backend")
+	}
+
+	settings := config.Default()
+	settings.Storage.Backend = config.StoragePostgres
+	settings.Storage.Postgres.URL = postgrestest.URL(t)
+
+	batched, err := New(settings, slog.New(slog.DiscardHandler), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer batched.Close()
+
+	if batched.Heartbeats == nil {
+		t.Error("expected heartbeats batched with PostgreSQL by default")
+	}
+
+	settings.Storage.Postgres.HeartbeatFlushInterval = 0
+
+	direct, err := New(settings, slog.New(slog.DiscardHandler), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer direct.Close()
+
+	if direct.Heartbeats != nil {
+		t.Error("expected a zero interval to write each heartbeat at once")
+	}
+}

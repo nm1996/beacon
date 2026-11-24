@@ -20,6 +20,7 @@ import (
 	"github.com/nm1996/beacon/internal/metrics"
 	"github.com/nm1996/beacon/internal/ratelimit"
 	"github.com/nm1996/beacon/internal/registry/cache"
+	"github.com/nm1996/beacon/internal/registry/heartbeats"
 	"github.com/nm1996/beacon/internal/registry/memory"
 	"github.com/nm1996/beacon/internal/registry/postgres"
 )
@@ -38,6 +39,10 @@ type Components struct {
 	// is set when settings.TLS is enabled, and nil otherwise; every
 	// handshake takes its certificate from Credentials.
 	Server *http.Server
+
+	// Heartbeats batches heartbeats for the storage backend, when it is
+	// PostgreSQL. The caller runs it until shutdown; it is nil otherwise.
+	Heartbeats *heartbeats.Registry
 
 	// closers release what New opened, such as database connections.
 	closers []func()
@@ -74,6 +79,13 @@ func New(settings config.Config, logger *slog.Logger, version string) (*Componen
 			closeRegistry()
 		}
 	}()
+
+	// A backend that can write many heartbeats at once gets them batched.
+	var batched *heartbeats.Registry
+	if writer, ok := registry.(heartbeats.Writer); ok && settings.Storage.Postgres.HeartbeatFlushInterval > 0 {
+		batched = heartbeats.New(registry, writer, settings.Storage.Postgres.HeartbeatFlushInterval, logger)
+		registry = batched
+	}
 
 	var observer *metrics.Metrics
 	if settings.Metrics.Enabled {
@@ -170,7 +182,13 @@ func New(settings config.Config, logger *slog.Logger, version string) (*Componen
 
 	built = true
 
-	return &Components{Discovery: service, Credentials: store, Server: server, closers: []func(){closeRegistry}}, nil
+	return &Components{
+		Discovery:   service,
+		Credentials: store,
+		Server:      server,
+		Heartbeats:  batched,
+		closers:     []func(){closeRegistry},
+	}, nil
 }
 
 // postgresOpenTimeout bounds connecting to PostgreSQL and migrating it at

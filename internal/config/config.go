@@ -173,6 +173,11 @@ type PostgresConfig struct {
 	// parameters include pool settings such as pool_max_conns. It may hold
 	// a password, so Beacon never logs it.
 	URL string `toml:"url"`
+	// HeartbeatFlushInterval is how often each node writes the heartbeats
+	// it received, all in one statement per thousand instances, instead of
+	// one write per heartbeat. Zero writes each at once. It may be at most
+	// a third of registry.service_ttl.
+	HeartbeatFlushInterval time.Duration `toml:"heartbeat_flush_interval"`
 }
 
 // RateLimitConfig limits how often a client may do what is costly or a
@@ -230,7 +235,8 @@ func Default() Config {
 			MaxInstances:     10000,
 		},
 		Storage: StorageConfig{
-			Backend: StorageMemory,
+			Backend:  StorageMemory,
+			Postgres: PostgresConfig{HeartbeatFlushInterval: time.Second},
 		},
 		RateLimit: RateLimitConfig{
 			RegistrationsPerSecond: 20,
@@ -369,6 +375,10 @@ func (config Config) Validate() error {
 		"storage.backend must be one of %s, got %q", strings.Join(storageBackends, ", "), config.Storage.Backend)
 	check(config.Storage.Backend != StoragePostgres || config.Storage.Postgres.URL != "",
 		"storage.postgres.url is required when storage.backend is %q", StoragePostgres)
+	flush := config.Storage.Postgres.HeartbeatFlushInterval
+	check(config.Storage.Backend != StoragePostgres || (flush >= 0 && flush <= config.Registry.ServiceTTL/3),
+		"storage.postgres.heartbeat_flush_interval must be between 0s (write each heartbeat) and a third of registry.service_ttl (%s), got %s",
+		config.Registry.ServiceTTL/3, flush)
 
 	_, levelErr := config.Logging.SlogLevel()
 	check(levelErr == nil, "logging.level must be debug, info, warn or error, got %q", config.Logging.Level)

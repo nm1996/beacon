@@ -56,6 +56,11 @@ Add an entry under **Unreleased** in the same pull request as the change.
   stay exact across processes. Built on `github.com/jackc/pgx/v5`, a new
   direct dependency. See
   [design record 0006](docs/design/0006-postgres-and-cache.md).
+- With PostgreSQL, heartbeats are batched: each process checks an
+  instance's first heartbeat with the database, buffers the following ones,
+  and writes them every `storage.postgres.heartbeat_flush_interval`
+  (`BEACON_STORAGE_POSTGRES_HEARTBEAT_FLUSH_INTERVAL`, 1s by default) in one
+  statement per thousand instances.
 - `registry.cache_ttl` (`BEACON_REGISTRY_CACHE_TTL`) caches lookup results
   in each process for up to a third of the service TTL; off by default.
 - `client.Registration.ID` chooses the instance ID, and `client.ErrConflict`

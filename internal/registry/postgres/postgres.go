@@ -329,3 +329,45 @@ func (registry *Registry) DeleteStale(ctx context.Context, cutoff time.Time) (in
 
 	return int(tag.RowsAffected()), nil
 }
+
+// TouchMany sets the last heartbeat of every instance in heartbeats in one
+// statement, keeping a later one if it holds it, and returns the IDs of the
+// instances that no longer exist.
+func (registry *Registry) TouchMany(ctx context.Context, heartbeats map[string]time.Time) ([]string, error) {
+	ids := make([]string, 0, len(heartbeats))
+	times := make([]time.Time, 0, len(heartbeats))
+
+	for id, at := range heartbeats {
+		ids = append(ids, id)
+		times = append(times, at)
+	}
+
+	rows, err := registry.pool.Query(ctx, `UPDATE beacon_instances AS instance
+		SET last_heartbeat = GREATEST(instance.last_heartbeat, heartbeat.at)
+		FROM unnest($1::text[], $2::timestamptz[]) AS heartbeat(id, at)
+		WHERE instance.id = heartbeat.id
+		RETURNING instance.id`, ids, times)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: touch many: %w", err)
+	}
+
+	touched, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("postgres: touch many: %w", err)
+	}
+
+	found := make(map[string]bool, len(touched))
+	for _, id := range touched {
+		found[id] = true
+	}
+
+	var missing []string
+
+	for _, id := range ids {
+		if !found[id] {
+			missing = append(missing, id)
+		}
+	}
+
+	return missing, nil
+}

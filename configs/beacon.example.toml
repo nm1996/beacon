@@ -132,6 +132,10 @@ backend = "memory"
 # "postgres://beacon:secret@db:5432/beacon?sslmode=verify-full". It may
 # hold a password, so prefer BEACON_STORAGE_POSTGRES_URL.
 url = ""
+# How often each node writes the heartbeats it received, in one statement
+# per thousand instances, instead of one write per heartbeat. At most a
+# third of registry.service_ttl; "0s" writes each at once.
+heartbeat_flush_interval = "1s"
 
 [metrics]
 # Serve Prometheus metrics at GET /metrics on the API port.
