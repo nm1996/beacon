@@ -34,6 +34,12 @@ import (
 // chunkSize is the most heartbeats written in one statement.
 const chunkSize = 1000
 
+// The results a flush that had heartbeats to write reports.
+const (
+	FlushOK    = "ok"
+	FlushError = "error"
+)
+
 // recheckAfter is how long a checked instance is trusted before its next
 // heartbeat is checked with the registry again, so an instance removed and
 // registered anew under the same ID by another owner is noticed.
@@ -71,6 +77,7 @@ type Registry struct {
 	writer   Writer
 	interval time.Duration
 	logger   *slog.Logger
+	flushed  func(result string)
 
 	mu      sync.Mutex
 	known   map[string]known
@@ -83,13 +90,19 @@ type Registry struct {
 var _ discovery.Registry = (*Registry)(nil)
 
 // New returns registry with its heartbeats written through writer every
-// interval.
-func New(registry discovery.Registry, writer Writer, interval time.Duration, logger *slog.Logger) *Registry {
+// interval. flushed, if not nil, is called with FlushOK or FlushError after
+// every flush that had heartbeats to write.
+func New(registry discovery.Registry, writer Writer, interval time.Duration, logger *slog.Logger, flushed func(result string)) *Registry {
+	if flushed == nil {
+		flushed = func(string) {}
+	}
+
 	return &Registry{
 		Registry: registry,
 		writer:   writer,
 		interval: interval,
 		logger:   logger,
+		flushed:  flushed,
 		known:    make(map[string]known),
 		pending:  make(map[string]Heartbeat),
 		// Counted from the start, so the first heartbeats can be buffered.
@@ -220,6 +233,14 @@ func (registry *Registry) Flush(ctx context.Context) error {
 
 	if len(chunk) > 0 {
 		write()
+	}
+
+	if len(pending) > 0 {
+		if firstErr == nil {
+			registry.flushed(FlushOK)
+		} else {
+			registry.flushed(FlushError)
+		}
 	}
 
 	if firstErr == nil {

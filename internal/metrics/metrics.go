@@ -35,6 +35,7 @@ type Metrics struct {
 
 	authFailures      *prometheus.CounterVec
 	credentialReloads *prometheus.CounterVec
+	heartbeatFlushes  *prometheus.CounterVec
 	rateLimited       *prometheus.CounterVec
 	clusterNodes      prometheus.Gauge
 	grpcRequests      *prometheus.CounterVec
@@ -85,6 +86,11 @@ func New(version string) *Metrics {
 			Name:      "credential_reloads_total",
 			Help:      "Attempts to reload the TLS files and tokens file while running, by result (ok or error).",
 		}, []string{"result"}),
+		heartbeatFlushes: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "heartbeat_flushes_total",
+			Help:      "Writes of buffered heartbeats to PostgreSQL that had heartbeats to write, by result (ok or error).",
+		}, []string{"result"}),
 		rateLimited: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: namespace,
 			Name:      "rate_limited_total",
@@ -127,6 +133,7 @@ func New(version string) *Metrics {
 		metrics.expiredInstances,
 		metrics.authFailures,
 		metrics.credentialReloads,
+		metrics.heartbeatFlushes,
 		metrics.rateLimited,
 		metrics.clusterNodes,
 		metrics.grpcRequests,
@@ -161,6 +168,11 @@ func (metrics *Metrics) RateLimited(limit string) {
 // CredentialsReloaded counts one attempt to reload credentials, by result.
 func (metrics *Metrics) CredentialsReloaded(result string) {
 	metrics.credentialReloads.WithLabelValues(result).Inc()
+}
+
+// HeartbeatsFlushed counts one write of buffered heartbeats, by result.
+func (metrics *Metrics) HeartbeatsFlushed(result string) {
+	metrics.heartbeatFlushes.WithLabelValues(result).Inc()
 }
 
 // Handler serves every metric in the Prometheus text format.

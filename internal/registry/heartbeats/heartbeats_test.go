@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"math"
+	"slices"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -54,7 +55,7 @@ func fixture(t *testing.T) (*Registry, *memory.MemoryRegistry, *memoryWriter) {
 
 	backend := memory.New()
 	writer := &memoryWriter{registry: backend}
-	batched := New(backend, writer, time.Second, slog.New(slog.DiscardHandler))
+	batched := New(backend, writer, time.Second, slog.New(slog.DiscardHandler), nil)
 
 	create(t, backend, "a", "alice")
 
@@ -248,6 +249,41 @@ func TestHeartbeatsAreNotAcknowledgedWhileFlushesFail(t *testing.T) {
 			t.Fatalf("expected the heartbeat to reach the registry and find the instance gone, got %v", err)
 		}
 	})
+}
+
+func TestFlushesWithHeartbeatsAreReported(t *testing.T) {
+	backend := memory.New()
+	writer := &memoryWriter{registry: backend}
+
+	var results []string
+	batched := New(backend, writer, time.Second, slog.New(slog.DiscardHandler), func(result string) {
+		results = append(results, result)
+	})
+
+	create(t, backend, "a", "alice")
+	ctx := t.Context()
+
+	if err := batched.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	for range 2 {
+		if err := batched.Touch(ctx, "a", time.Now(), alice); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	writer.fail = errors.New("database down")
+	_ = batched.Flush(ctx)
+
+	writer.fail = nil
+	if err := batched.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	if !slices.Equal(results, []string{FlushError, FlushOK}) {
+		t.Errorf("expected an empty flush to go unreported, then error and ok, got %v", results)
+	}
 }
 
 func TestBufferingResumesAfterAFlushSucceeds(t *testing.T) {
