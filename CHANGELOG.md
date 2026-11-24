@@ -60,7 +60,10 @@ Add an entry under **Unreleased** in the same pull request as the change.
   instance's first heartbeat with the database, buffers the following ones,
   and writes them every `storage.postgres.heartbeat_flush_interval`
   (`BEACON_STORAGE_POSTGRES_HEARTBEAT_FLUSH_INTERVAL`, 1s by default) in one
-  statement per thousand instances.
+  statement per thousand instances. When no write has succeeded for two
+  intervals, a process stops buffering and sends each heartbeat to the
+  database, so it answers with an error instead of acknowledging heartbeats
+  it cannot store.
 - `registry.cache_ttl` (`BEACON_REGISTRY_CACHE_TTL`) caches lookup results
   in each process for up to a third of the service TTL; off by default.
 - Several nodes over one PostgreSQL database: each node records itself in
