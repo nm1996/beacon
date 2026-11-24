@@ -857,6 +857,7 @@ Every operation shares one lock: lookups can run side by side, but heartbeats an
 │   ├── docker/              # Dockerfile
 │   └── compose/             # Compose example
 ├── configs/                 # Example configuration
+├── docs/design/             # Design records: each architectural decision, its alternatives and trade-offs
 ├── test/integration/        # A real server on a real port, driven by the Go client
 ├── scripts/                 # Release build script
 ├── .github/workflows/       # CI and releases

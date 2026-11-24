@@ -16,7 +16,7 @@ Beacon aims to remain lightweight, understandable, and dependable. Contributions
 ## Development Workflow
 
 1. Check the existing issues and discussions for related work.
-2. For substantial changes, open an issue or discussion before implementation.
+2. For substantial changes, open an issue or discussion before implementation. Architectural decisions get a design record in [`docs/design/`](docs/design/README.md) first.
 3. Create a focused branch from `main` and open the pull request against `main`. `stage` and `prod` are only updated by promotion; see [Branches and releases](README.md#branches-and-releases).
 4. Implement the change and add or update tests.
 5. Format Go code with `gofmt`.
