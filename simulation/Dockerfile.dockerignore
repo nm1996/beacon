@@ -1,0 +1,7 @@
+# Send only what the simulation image build needs.
+*
+!go.mod
+!go.sum
+!client/
+!simulation/
+simulation/reports/
